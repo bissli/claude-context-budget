@@ -379,6 +379,97 @@ def test_a_band_is_announced_once_and_rearmed_by_a_compaction(monkeypatch,
     assert 'handoff' in run()
 
 
+def test_a_growth_slowdown_does_not_rearm_an_announced_band(monkeypatch,
+                                                            capsys,
+                                                            tmp_path):
+    """Verify a band fires once even when slowing growth lifts the
+    handoff point back above the context.
+
+    Mutation: storing the freshly computed band unconditionally, which
+    lets a slowdown erase the announced-band memory - the same band
+    then fires twice with no compaction between.
+    Oracle: a spy on stdout across five runs - warn at 240K on steep
+    growth, silence when the measured rate halves, silence again at
+    280K, silence through a real compaction drop, and a warn once the
+    context climbs back.
+    """
+    monkeypatch.setattr(cb, 'STATE_DIR', str(tmp_path / 'state'))
+    path = tmp_path / 's.jsonl'
+    contexts = [225_000, 228_000, 231_000, 234_000, 237_000, 240_000]
+
+    def run():
+        records = [{
+            'type': 'assistant',
+            'message': {
+                'id': f'm{index}', 'role': 'assistant',
+                'model': 'claude-opus-5',
+                'usage': {'cache_read_input_tokens': value,
+                          'cache_creation_input_tokens': 0,
+                          'input_tokens': 0},
+                },
+            } for index, value in enumerate(contexts)]
+        path.write_text('\n'.join(json.dumps(r) for r in records))
+        payload = {'session_id': 'D', 'transcript_path': str(path)}
+        monkeypatch.setattr(sys, 'stdin', _Stdin(json.dumps(payload)))
+        cb.main()
+        return capsys.readouterr().out.strip()
+
+    assert 'handoff' in run()
+    contexts += [240_500, 241_000, 241_500, 242_000, 242_500]
+    assert run() == ''
+    contexts += [250_000, 257_500, 265_000, 272_500, 280_000]
+    assert run() == ''
+    contexts += [120_000, 125_000, 130_000]
+    assert run() == ''
+    contexts += [300_000]
+    assert 'handoff' in run()
+
+
+def test_a_barely_growing_session_never_reads_as_zero_growth():
+    """Verify the growth rate never prints as 0K a turn.
+
+    Mutation: restoring the bare integer floor for the rate, which
+    prints "growing 0K a turn" for a session measured under 114 tokens
+    a call - a statement the reader can only parse as broken.
+    Oracle: hand-computed - 100 tokens a call is 880 a turn, under the
+    1K floor, so the message must carry "<1K a turn".
+    """
+    _, message = cb.compose(300_000, 'opus', 100)
+    assert '<1K a turn' in message
+    assert ' 0K a turn' not in message
+
+
+def test_the_state_file_records_the_target_the_session_was_held_to(
+        monkeypatch, tmp_path):
+    """Verify the stored target uses the session's measured growth.
+
+    Mutation: dropping per_call from the store_state call, which records
+    the fallback-growth target while compose warned against the measured
+    one - the two figures in the state file would describe different
+    sessions.
+    Oracle: hand-computed - a transcript climbing 10,000 tokens a call
+    puts opus's cycle floor at 123,000 + 44 * 10,000 = 563,000, past the
+    350,000 cost target, and that is the figure the file must hold.
+    """
+    monkeypatch.setattr(cb, 'STATE_DIR', str(tmp_path / 'state'))
+    path = tmp_path / 's.jsonl'
+    records = [{
+        'type': 'assistant',
+        'message': {
+            'id': f'm{index}', 'role': 'assistant',
+            'model': 'claude-opus-5',
+            'usage': {'cache_read_input_tokens': 100_000 + 10_000 * index,
+                      'cache_creation_input_tokens': 0, 'input_tokens': 0},
+            },
+        } for index in range(6)]
+    path.write_text('\n'.join(json.dumps(r) for r in records))
+    payload = {'session_id': 'S2', 'transcript_path': str(path)}
+    monkeypatch.setattr(sys, 'stdin', _Stdin(json.dumps(payload)))
+    cb.main()
+    with open(tmp_path / 'state' / 'S2.json') as handle:
+        assert json.load(handle)['target'] == 563_000
+
+
 class _Stdin:
     """Minimal stdin stand-in returning a fixed payload to json.load.
     """

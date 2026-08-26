@@ -237,7 +237,9 @@ All the arithmetic underneath is per-call.
 
 Each band fires once, on entry. A Stop hook runs every turn, so repeating
 a band already reached would be noise. Compacting drops the context below
-the announced band and rearms it.
+the announced band and rearms it. Only a real drop in context rearms a
+band; slowing growth that lifts a threshold back above the context does
+not.
 
 Subagents are skipped. A subagent's context is short-lived, it cannot
 compact, and warning about it gives you nothing to act on.

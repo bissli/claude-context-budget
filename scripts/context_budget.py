@@ -104,8 +104,8 @@ def read_transcript(path: str) -> tuple[int, str, int]:
     -----
     - Claude Code writes one API response as several progressive stream
       snapshots sharing a message id, with output growing across them.
-      The cache counts are fixed when the request is sent, so taking the
-      last snapshot is safe for context even though it understates
+      The cache counts are fixed when the request is sent, so keeping
+      the first snapshot is safe for context even though it understates
       output.
     """
     series: list[int] = []
@@ -171,7 +171,7 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
     cost = budget.cost_per_turn(context, tier)
     now = f'{context // 1000}K'
     goal = f'{target // 1000}K'
-    rate = f'{int(per_turn) // 1000}K'
+    rate = f'{int(per_turn) // 1000}K' if per_turn >= 1000 else '<1K'
 
     if context >= over:
         return 2, (f'Context {now}, about ${cost:.2f} a turn - '
@@ -197,8 +197,8 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
     return -1, ''
 
 
-def load_band(state_path: str) -> int:
-    """Read the highest band index already announced for a session.
+def load_state(state_path: str) -> tuple[int, int]:
+    """Read the band already announced and the context it was seen at.
 
     Parameters
     ----------
@@ -207,18 +207,38 @@ def load_band(state_path: str) -> int:
 
     Returns
     -------
-    int
-        The stored band index, or -1 when nothing is recorded.
+    tuple[int, int]
+        The stored band index and billed context, or ``(-1, 0)`` when
+        nothing is recorded.
     """
     try:
         with open(state_path) as handle:
-            return int(json.load(handle).get('band', -1))
+            data = json.load(handle)
+        return int(data.get('band', -1)), int(data.get('context', 0))
     except (OSError, ValueError, AttributeError, TypeError):
-        return -1
+        return -1, 0
 
 
-def store_state(state_path: str, band: int, per_call: int, target: int) -> None:
-    """Record the announced band, growth rate, and target for a session.
+def store_state(state_path: str, band: int, per_call: int, target: int,
+                context: int) -> None:
+    """Record the band, growth rate, target, and context for a session.
+
+    Parameters
+    ----------
+    state_path : str
+        Path to the per-session state file.
+    band : int
+        Highest band to remember as announced, -1 for none.
+    per_call : int
+        Estimated tokens added per assistant call.
+    target : int
+        Compaction target derived from that growth rate.
+    context : int
+        Billed context this record was written at.
+
+    Returns
+    -------
+    None
     """
     try:
         os.makedirs(os.path.dirname(state_path), exist_ok=True)
@@ -227,6 +247,7 @@ def store_state(state_path: str, band: int, per_call: int, target: int) -> None:
                 'band': band,
                 'growth_per_call': per_call,
                 'target': target,
+                'context': context,
                 }, handle)
     except OSError:
         pass
@@ -255,8 +276,13 @@ def main() -> int:
     band, message = compose(context, tier, per_call)
 
     state_path = os.path.join(STATE_DIR, f'{session}.json')
-    announced = load_band(state_path)
-    store_state(state_path, band, per_call, budget.target_tokens(tier))
+    announced, last_context = load_state(state_path)
+    # The stored band falls only when the context itself fell - a
+    # compaction - never because slowing growth lifted a threshold past
+    # the current context, which would re-fire a band already announced.
+    kept = band if context < last_context else max(band, announced)
+    store_state(state_path, kept, per_call,
+                budget.target_tokens(tier, per_call), context)
     if band <= announced or band < 0:
         return 0
 

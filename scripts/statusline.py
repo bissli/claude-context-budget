@@ -8,7 +8,7 @@ number cost tracks, since every call re-reads the whole conversation.
 
 The line reads::
 
-    262K/350K [#######...] handoff in 2  $1.15/t  opus  myproject
+    262K/350K [=======---] handoff in 2  $1.15/t  opus myproject
 
 and turns amber when it is time to write a handoff, red once the budget
 is behind you, so the moment to hand off is visible several turns out.
