@@ -88,7 +88,7 @@ warned much earlier in absolute tokens.
 
 At the end of a turn, once:
 
-> Context 291K of a 350K budget, growing 19K a turn. About 3 turns of
+> Context 291K of a 350K budget, growing 19K a turn. About 4 turns of
 > room left - a good point to run /handoff write.
 
 Then nothing until the next band:
@@ -98,8 +98,9 @@ Then nothing until the next band:
 > file, against 123K for /compact. Compact instead only to carry the tail
 > of this conversation, which buys about 12 more turns.
 
-> Context 517K, 1.5x the 350K budget and about $2.27 a turn. Every
-> further turn pays to re-read history you are not using.
+> Context 517K, about $2.27 a turn - 1.5x the $1.54 target. Every
+> further turn pays to re-read history you are not using. Run /handoff
+> write.
 
 The last two also raise a desktop notification.
 
@@ -183,10 +184,10 @@ One knob, `COST_PER_TURN_TARGET` in `scripts/budget.py`, set in dollars
 per user turn. Each model's token target is derived from it and that
 model's price:
 
-| Model | Target          | Over budget     | $/turn at target |
-| ----- | --------------- | --------------- | ----------------: |
-| Opus  | 350,000         | 500,000         | $1.54            |
-| Fable | 176,000-236,000 | 251,000-337,000 | $1.55-$2.07      |
+| Model | Target                  | Over budget           | $/turn at target |
+| ----- | ----------------------- | --------------------- | ----------------: |
+| Opus  | 350,000                 | 500,000               | $1.54            |
+| Fable | 175,000+, growth-scaled | 250,000 or the target | $1.54 and up     |
 
 A model billing at twice the rate hits the same cost per turn at half the
 context, so giving every model one token target quietly lets the
@@ -198,9 +199,18 @@ instead - cost parity would put it at 175,000, but a compaction lands
 near 123,000, so a target there leaves under three turns of room, and at
 a fast growth rate it would sit below where the session restarts, firing
 every turn forever. Its target is therefore the larger of what cost wants
-and what a five-turn cycle needs. The consequence is worth saying
-plainly: a fable session you keep compacting costs $1.82 to $2.07 a turn,
-not $1.54. On fable the lever is the growth rate, not the target.
+and what a five-turn cycle needs at the session's own growth rate:
+206,600 at the typical 1,900 tokens a call, 400,200 for a session
+reading 6,300 a call. The consequence is worth saying plainly: a fable
+session you keep compacting costs what its growth demands - $1.82 a turn
+at typical growth, $3.52 for that heavy reader - not $1.54. On fable the
+lever is the growth rate, not the target.
+
+Over budget stays a dollar figure. It fires at $2.20 a turn - 500,000
+tokens on opus, 250,000 on fable - or at the target itself once the
+cycle floor has passed that point. It is never scaled up with an
+inflated target. Scaling would let a heavy fable session march to $5 a
+turn before the loudest warning fired.
 
 Sonnet and Haiku are deliberately absent. A long session on either costs
 little enough that interrupting it to talk about money would spend more

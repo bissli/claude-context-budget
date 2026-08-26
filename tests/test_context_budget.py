@@ -71,18 +71,71 @@ def test_a_cheap_model_is_left_alone(monkeypatch, capsys, tmp_path):
     assert run('claude-sonnet-5', 'b') == ''
 
 
-def test_the_two_bands_stay_apart_for_every_budgeted_model():
-    """Verify the over-budget band always sits above the target.
+def test_the_over_band_holds_the_dollar_limit_and_the_order():
+    """Verify over-budget means the dollar limit and never undercuts the
+    target.
 
-    Mutation: deriving the two thresholds from figures that can cross, so
-    the middle warning becomes unreachable and the user jumps straight
-    from silence to the loudest message.
-    Oracle: differential across every tier the plugin budgets.
+    Mutation: restoring over = target * (limit / target ratio), which on
+    a fast-growing fable session moves "overpriced" from $2.20 to $5 a
+    turn because the cycle floor inflates the target it scales; or
+    dropping the max() clamp, which puts the loudest band below the
+    budget one.
+    Oracle: the declared dollar limit run back through the cost formula
+    where cost decides, and the target itself where the cycle floor has
+    passed the limit.
     """
     for tier in budget.PRICE_PER_MTOK:
-        for per_call in (1_200, 1_900, 2_500):
+        over = budget.over_budget_tokens(tier, 1_900)
+        assert abs(budget.cost_per_turn(over, tier)
+                   - budget.COST_PER_TURN_LIMIT) < 0.02
+        for per_call in (1_200, 1_900, 2_500, 6_300, 10_000):
             assert (budget.over_budget_tokens(tier, per_call)
-                    > budget.target_tokens(tier, per_call))
+                    >= budget.target_tokens(tier, per_call))
+    assert (budget.over_budget_tokens('fable', 6_300)
+            == budget.target_tokens('fable', 6_300))
+
+
+def test_a_floor_inflated_target_is_announced_at_its_real_cost():
+    """Verify the loudest band fires at a floor-dominated target, in
+    dollars.
+
+    Mutation: scaling the over band with the inflated target (the
+    shipped defect), which lets a fable session reading 6K tokens a call
+    march to $5 a turn before the overpriced warning fires.
+    Oracle: hand-computed - at 6,300 tokens a call fable's cycle floor
+    is 123,000 + 44 * 6,300 = 400,200, past the $2.20 point at 250,000,
+    so at 400,200 the band is 2 and the message prices the turn at
+    $3.52, 2.3x the $1.54 target.
+    """
+    per_call = 6_300
+    target = budget.target_tokens('fable', per_call)
+    assert target == 400_200
+    band, message = cb.compose(target, 'fable', per_call)
+    assert band == 2
+    assert '$3.52' in message
+    assert '2.3x' in message
+
+
+def test_the_countdown_rounds_up_so_it_never_sticks():
+    """Verify turns-left counts by ceiling, not floor-with-a-floor.
+
+    Mutation: restoring max(1, int(...)), which shows "in 1" from 1.9
+    turns of room all the way to the threshold - two turns reading the
+    same - and overstates sub-turn room as a full turn.
+    Oracle: hand-computed at 1,900 tokens a call on opus - 23,408 tokens
+    of room to the 274,760 handoff point is 1.4 turns, which must read
+    "handoff in 2", and 50,000 to the 350,000 target is 2.99 turns,
+    "About 3".
+    """
+    line = re.sub(r'\x1b\[[0-9;]*m', '', sl.render({
+        'session_id': 'none',
+        'model': {'id': 'claude-opus-5', 'display_name': 'Opus 5'},
+        'workspace': {'current_dir': '/x/proj'},
+        'context_window': {'total_input_tokens': 251_352},
+        }))
+    assert 'handoff in 2' in line
+    _, message = cb.compose(300_000, 'opus', 1_900)
+    assert 'About 3 turns' in message
 
 
 def test_growth_ignores_context_dropped_by_compaction():
@@ -186,18 +239,20 @@ def test_message_names_the_numbers_the_reader_has_to_act_on():
 
 
 def test_the_warning_names_the_skill_the_plugin_ships():
-    """Verify both warning bands name the bundled handoff skill.
+    """Verify every warning band names the bundled handoff skill.
 
-    Mutation: renaming skills/handoff/, or rewording band 0 or band 1
-    so the warning names a command that no longer exists.
+    Mutation: renaming skills/handoff/, or rewording a band so the
+    warning names a command that no longer exists - band 2 included,
+    since a floor-inflated target skips band 1 and band 2 is then the
+    only message carrying the exit.
     Oracle: the skill's own frontmatter name on disk, matched against
-    the text of both bands.
+    the text of all three bands.
     """
     skill = os.path.join(HERE, '..', 'skills', 'handoff', 'SKILL.md')
     with open(skill) as handle:
         front = handle.read().split('---\n', 2)[1]
     name = re.search(r'^name:\s*(\S+)', front, re.M).group(1)
-    for context in (300_000, 360_000):
+    for context in (300_000, 360_000, 600_000):
         _, message = cb.compose(context, 'opus', 1_900)
         assert f'/{name} write' in message
 

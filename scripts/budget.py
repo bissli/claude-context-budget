@@ -180,9 +180,35 @@ def target_tokens(tier: str, per_call: int = FALLBACK_GROWTH_PER_CALL) -> int:
 def over_budget_tokens(tier: str,
                        per_call: int = FALLBACK_GROWTH_PER_CALL) -> int:
     """Context size past which a turn is plainly overpriced.
+
+    Parameters
+    ----------
+    tier : str
+        Price tier from :func:`model_tier`.
+    per_call : int, default FALLBACK_GROWTH_PER_CALL
+        Estimated tokens added per assistant call.
+
+    Returns
+    -------
+    int
+        Billed context in tokens.
+
+    Notes
+    -----
+    - The boundary sits where a turn costs COST_PER_TURN_LIMIT, or at
+      the target when the cycle floor has passed that point.
+    - Never below target_tokens(tier, per_call), so the over band
+      cannot fire before the budget band.
     """
-    ratio = COST_PER_TURN_LIMIT / COST_PER_TURN_TARGET
-    return round(target_tokens(tier, per_call) * ratio)
+    # Notes:
+    # - The limit is a dollar figure, so the boundary comes from price
+    #   alone - scaling the target instead lets the cycle floor push
+    #   "overpriced" to $5 a turn on a fast-growing session.
+    # - A floor past the limit already prices a turn over it at the
+    #   target, so the boundary rises there to keep the thresholds
+    #   ordered.
+    return max(tokens_for_cost(COST_PER_TURN_LIMIT, tier),
+               target_tokens(tier, per_call))
 
 
 def reserve_tokens(target: int, per_call: int) -> int:

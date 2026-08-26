@@ -34,6 +34,7 @@ Notes
 """
 
 import json
+import math
 import os
 import sys
 from typing import Any
@@ -123,7 +124,7 @@ def render(payload: dict[str, Any]) -> str:
     if context >= handoff_at:
         color, note = YELLOW, 'handoff now'
     else:
-        left = max(1, int((handoff_at - context) / max(per_turn, 1)))
+        left = math.ceil((handoff_at - context) / max(per_turn, 1))
         color, note = GREEN, f'handoff in {left}'
     return f'{color}{size} [{bar}] {note}{RESET}  {tail}'
 

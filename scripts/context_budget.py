@@ -32,6 +32,7 @@ Notes
 """
 
 import json
+import math
 import os
 import sys
 from typing import Any
@@ -157,6 +158,11 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
     tuple[int, str]
         Band index and the message to show, or ``(-1, '')`` when the
         session still has room and nothing needs saying.
+
+    Notes
+    -----
+    - A floor-inflated target can equal the over boundary. Band 1 is
+      then never entered, so the band-2 message also names /handoff.
     """
     target = budget.target_tokens(tier, per_call)
     over = budget.over_budget_tokens(tier, per_call)
@@ -168,9 +174,11 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
     rate = f'{int(per_turn) // 1000}K'
 
     if context >= over:
-        return 2, (f'Context {now}, {cost / budget.COST_PER_TURN_TARGET:.1f}x '
-                   f'the {goal} budget and about ${cost:.2f} a turn. Every '
-                   f'further turn pays to re-read history you are not using.')
+        return 2, (f'Context {now}, about ${cost:.2f} a turn - '
+                   f'{cost / budget.COST_PER_TURN_TARGET:.1f}x the '
+                   f'${budget.COST_PER_TURN_TARGET:.2f} target. Every '
+                   f'further turn pays to re-read history you are not '
+                   f'using. Run /handoff write.')
     if context >= target:
         cycle = (target - budget.POST_COMPACTION_TOKENS) / max(per_turn, 1)
         return 1, (f'Context {now}, at the {goal} budget. Run /handoff write, '
@@ -181,7 +189,7 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
                    f'/compact. Compact instead only to carry the tail of this '
                    f'conversation, which buys about {cycle:.0f} more turns.')
     if context >= handoff_at:
-        left = max(1, int((target - context) / max(per_turn, 1)))
+        left = math.ceil((target - context) / max(per_turn, 1))
         turns = 'turn' if left == 1 else 'turns'
         return 0, (f'Context {now} of a {goal} budget, growing {rate} a turn. '
                    f'About {left} {turns} of room left - a good point to run '
