@@ -1,0 +1,10 @@
+{
+  "name": "context-budget",
+  "version": "0.1.0",
+  "description": "Warns in-session, while there is still room, that a Claude Code conversation is approaching the size where it should be handed off and compacted.",
+  "author": {
+    "name": "bissli"
+  },
+  "homepage": "https://github.com/bissli/claude-context-budget",
+  "keywords": ["context", "cost", "compaction", "statusline"]
+}

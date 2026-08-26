@@ -1,0 +1,13 @@
+{
+  "name": "context-budget",
+  "owner": {
+    "name": "bissli"
+  },
+  "plugins": [
+    {
+      "name": "context-budget",
+      "source": "./",
+      "description": "Warns in-session, while there is still room, that a Claude Code conversation is approaching the size where it should be handed off and compacted."
+    }
+  ]
+}
