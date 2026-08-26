@@ -93,8 +93,8 @@ def render(payload: dict[str, Any]) -> str:
     tier = budget.model_tier(str(model.get('id') or ''))
     if tier is None:
         return head
-    target = budget.target_tokens(tier)
     per_call = session_growth(str(payload.get('session_id') or ''))
+    target = budget.target_tokens(tier, per_call)
     per_turn = per_call * budget.CALLS_PER_TURN
     handoff_at = target - budget.reserve_tokens(target, per_call)
 

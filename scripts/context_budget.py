@@ -158,8 +158,8 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
         Band index and the message to show, or ``(-1, '')`` when the
         session still has room and nothing needs saying.
     """
-    target = budget.target_tokens(tier)
-    over = budget.over_budget_tokens(tier)
+    target = budget.target_tokens(tier, per_call)
+    over = budget.over_budget_tokens(tier, per_call)
     handoff_at = target - budget.reserve_tokens(target, per_call)
     per_turn = per_call * budget.CALLS_PER_TURN
     cost = budget.cost_per_turn(context, tier)
@@ -174,15 +174,12 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
                    f'it would at the budget. Worth compacting before you go '
                    f'on.')
     if context >= target:
-        if not budget.compaction_is_worthwhile(target, per_call):
-            return 1, (f'Context is {now}, past the {goal} budget for this '
-                       f'model. Compacting would land near '
-                       f'{budget.POST_COMPACTION_TOKENS // 1000}K and buy back '
-                       f'barely a turn, so a fresh session is the cheaper '
-                       f'reset here.')
-        return 1, (f'Context is {now}, just past the {goal} budget and growing '
-                   f'about {rate} a turn. A good place to finish the handoff '
-                   f'and compact.')
+        cycle = (target - budget.POST_COMPACTION_TOKENS) / max(per_turn, 1)
+        return 1, (f'Context is {now}, past the {goal} budget and growing '
+                   f'about {rate} a turn. Compacting lands near '
+                   f'{budget.POST_COMPACTION_TOKENS // 1000}K, so the next '
+                   f'cycle buys about {cycle:.0f} turns at roughly '
+                   f'${budget.cost_per_turn(target, tier):.2f} each.')
     if context >= handoff_at:
         left = max(1, int((target - context) / max(per_turn, 1)))
         turns = 'turn' if left == 1 else 'turns'

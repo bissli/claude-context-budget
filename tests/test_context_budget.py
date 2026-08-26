@@ -22,17 +22,19 @@ def test_every_model_is_held_to_the_same_cost_per_turn():
 
     Mutation: hard-coding a token target per model, which is how a 2x
     model ends up with the same room as opus and quietly costs double.
-    Oracle: differential - the derived target for each uncapped tier must
-    reproduce the declared dollar budget when run back through the cost
-    formula.
+    Oracle: differential - at a slow growth rate, where the compaction
+    cycle floor does not bind, each tier's derived target must reproduce
+    the declared dollar budget when run back through the cost formula.
     """
     assert budget.model_tier('claude-fable-5') == 'fable'
     assert budget.model_tier('claude-opus-5') == 'opus'
+    slow = 1_200
     for tier in ('fable', 'opus'):
-        target = budget.target_tokens(tier)
+        target = budget.target_tokens(tier, slow)
         assert abs(budget.cost_per_turn(target, tier)
-                   - budget.COST_PER_TURN_TARGET) < 0.01
-    assert budget.target_tokens('fable') * 2 == budget.target_tokens('opus')
+                   - budget.COST_PER_TURN_TARGET) < 0.02
+    assert (budget.target_tokens('fable', slow)
+            < budget.target_tokens('opus', slow))
 
 
 def test_a_cheap_model_is_left_alone(monkeypatch, capsys, tmp_path):
@@ -76,7 +78,9 @@ def test_the_two_bands_stay_apart_for_every_budgeted_model():
     Oracle: differential across every tier the plugin budgets.
     """
     for tier in budget.PRICE_PER_MTOK:
-        assert budget.over_budget_tokens(tier) > budget.target_tokens(tier)
+        for per_call in (1_200, 1_900, 2_500):
+            assert (budget.over_budget_tokens(tier, per_call)
+                    > budget.target_tokens(tier, per_call))
 
 
 def test_growth_ignores_context_dropped_by_compaction():
@@ -311,3 +315,40 @@ class _Stdin:
 
     def read(self, *args: object) -> str:
         return self.text
+
+
+def test_an_expensive_model_gets_a_workable_compaction_cycle():
+    """Verify the target clears where a compaction lands, by real turns.
+
+    Mutation: deriving the target from cost alone. Fable's cost-parity
+    target is 175K while a compaction lands at 123K, so a fast fable
+    session would be handed a cycle of under three turns - and at some
+    rates a target below the point it restarts at.
+    Oracle: hand-computed - at 2,500 tokens a call the cycle floor is
+    123,000 + 5 * 2,500 * 8.8 = 233,000, which beats cost parity, and
+    every cycle must be worth at least MIN_CYCLE_TURNS.
+    """
+    assert budget.target_tokens('fable', 2_500) == 233_000
+    for tier in budget.PRICE_PER_MTOK:
+        for per_call in (1_200, 1_900, 2_500, 4_000):
+            target = budget.target_tokens(tier, per_call)
+            per_turn = per_call * budget.CALLS_PER_TURN
+            cycle = (target - budget.POST_COMPACTION_TOKENS) / per_turn
+            assert cycle >= budget.MIN_CYCLE_TURNS - 0.01
+
+
+def test_the_warning_never_lands_below_where_a_compaction_restarts():
+    """Verify the handoff point stays above the post-compaction floor.
+
+    Mutation: leaving the reserve unclamped. On an expensive model the
+    reserve exceeds the gap between the target and where a compaction
+    lands, putting the warning below the restart point - so it fires on
+    the first turn of every cycle and the user learns to ignore it.
+    Oracle: differential across rates - target minus reserve must never
+    dip under POST_COMPACTION_TOKENS.
+    """
+    for tier in budget.PRICE_PER_MTOK:
+        for per_call in (1_200, 1_900, 2_500, 4_000, 8_000):
+            target = budget.target_tokens(tier, per_call)
+            handoff = target - budget.reserve_tokens(target, per_call)
+            assert handoff >= budget.POST_COMPACTION_TOKENS

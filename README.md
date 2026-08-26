@@ -28,10 +28,22 @@ One knob, `COST_PER_TURN_TARGET` in `scripts/budget.py`, set in dollars
 per user turn. Every model's token target is derived from it and that
 model's price:
 
-| Model | Target  | Over budget | Cost per turn at target |
-| ----- | ------: | ----------: | ----------------------: |
-| Opus  | 350,000 |     500,000 |                   $1.54 |
-| Fable | 175,000 |     250,000 |                   $1.54 |
+| Model | Target                | Over budget    | $/turn at target |
+| ----- | --------------------- | -------------- | ---------------: |
+| Opus  | 350,000               | 500,000        |            $1.54 |
+| Fable | 176,000-236,000       | 251,000-337,000 |    $1.55-$2.07 |
+
+Opus is held by cost: 350,000 whatever the session does, and growth only
+changes how many turns a cycle lasts (10 to 21).
+
+Fable is held by the compaction cycle instead. Cost parity would put its
+target at 175,000, but a compaction lands near 123,000, so a target set
+there leaves under three turns of room - and at a fast growth rate it
+would sit *below* the point the session restarts at, firing every turn
+forever. So the target is the larger of what cost wants and what a
+five-turn cycle needs. The consequence is worth stating plainly: a fable
+session you must keep compacting costs $1.82 to $2.07 a turn, not $1.54.
+On fable the lever is the growth rate, not the target.
 
 Sonnet and Haiku are deliberately absent. A long session on either costs
 little enough that interrupting it to talk about money would spend more

@@ -51,6 +51,10 @@ POST_COMPACTION_TOKENS = 123_000
 # Used until a session has enough history to measure its own rate.
 FALLBACK_GROWTH_PER_CALL = 1_900
 
+# Turns a compaction cycle has to be worth: three to hand off, and at
+# least two more to do something with the room that buys back.
+MIN_CYCLE_TURNS = 5
+
 
 def model_tier(model: str) -> str | None:
     """Map a model id onto its price tier.
@@ -119,16 +123,61 @@ def tokens_for_cost(budget: float, tier: str) -> int:
     return round(budget / per_token)
 
 
-def target_tokens(tier: str) -> int:
-    """Context size a session should be compacted at.
+def cycle_floor_tokens(per_call: int) -> int:
+    """Lowest target a repeatedly-compacted session can actually work to.
+
+    Parameters
+    ----------
+    per_call : int
+        Estimated tokens added per assistant call.
+
+    Returns
+    -------
+    int
+        Context size that leaves ``MIN_CYCLE_TURNS`` of room above where a
+        compaction lands.
     """
-    return tokens_for_cost(COST_PER_TURN_TARGET, tier)
+    return POST_COMPACTION_TOKENS + int(MIN_CYCLE_TURNS * per_call
+                                        * CALLS_PER_TURN)
 
 
-def over_budget_tokens(tier: str) -> int:
+def target_tokens(tier: str, per_call: int = FALLBACK_GROWTH_PER_CALL) -> int:
+    """Context size a session should be compacted at.
+
+    Parameters
+    ----------
+    tier : str
+        Price tier from :func:`model_tier`.
+    per_call : int, default FALLBACK_GROWTH_PER_CALL
+        Estimated tokens added per assistant call.
+
+    Returns
+    -------
+    int
+        Billed context in tokens.
+
+    Notes
+    -----
+    - The larger of what cost wants and what the compaction cycle allows.
+      Cost alone puts an expensive model's target near where a compaction
+      lands, and a target below that point is not a target at all: the
+      session re-enters it the moment it restarts, so the warning fires
+      every turn and means nothing.
+    - Raising the target above cost parity is a real admission. On an
+      expensive model a session you must keep compacting simply costs
+      more per turn than a cheap one, and the honest move is to say by
+      how much rather than to set a threshold nobody can hold.
+    """
+    return max(tokens_for_cost(COST_PER_TURN_TARGET, tier),
+               cycle_floor_tokens(per_call))
+
+
+def over_budget_tokens(tier: str,
+                       per_call: int = FALLBACK_GROWTH_PER_CALL) -> int:
     """Context size past which a turn is plainly overpriced.
     """
-    return tokens_for_cost(COST_PER_TURN_LIMIT, tier)
+    ratio = COST_PER_TURN_LIMIT / COST_PER_TURN_TARGET
+    return round(target_tokens(tier, per_call) * ratio)
 
 
 def reserve_tokens(target: int, per_call: int) -> int:
@@ -148,34 +197,8 @@ def reserve_tokens(target: int, per_call: int) -> int:
         ``MIN_RESERVE_TOKENS`` and ``MAX_RESERVE_FRACTION``.
     """
     raw = int(HANDOFF_TURNS * per_call * CALLS_PER_TURN * HANDOFF_MARGIN)
-    return min(int(target * MAX_RESERVE_FRACTION),
-               max(MIN_RESERVE_TOKENS, raw))
-
-
-def compaction_is_worthwhile(target: int, per_call: int) -> bool:
-    """Whether compacting buys back more than a couple of turns.
-
-    Parameters
-    ----------
-    target : int
-        The compaction target for this model, in tokens.
-    per_call : int
-        Estimated tokens added per assistant call.
-
-    Returns
-    -------
-    bool
-        False when a compaction would land close enough to the target
-        that the session is better restarted than compacted.
-
-    Notes
-    -----
-    - Compacting does not reset to the summary's size. The system prompt,
-      tool schemas, and instruction files all come back, so the first
-      billed call afterwards lands near ``POST_COMPACTION_TOKENS`` -
-      higher, on this measurement, than a brand new session starts at.
-    - On an expensive model the target can sit barely above that floor,
-      and then the honest advice is to start fresh, not to compact.
-    """
-    per_turn = per_call * CALLS_PER_TURN
-    return (target - POST_COMPACTION_TOKENS) >= 2 * per_turn
+    reserve = min(int(target * MAX_RESERVE_FRACTION),
+                  max(MIN_RESERVE_TOKENS, raw))
+    # A reserve deep enough to put the warning below where a compaction
+    # lands would fire on the first turn of every cycle, forever.
+    return min(reserve, max(0, target - POST_COMPACTION_TOKENS))
