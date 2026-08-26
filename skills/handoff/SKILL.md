@@ -54,8 +54,10 @@ Target, first match wins - an argument is never required:
 4. a new slug: 2-4 kebab-case words drawn from the Task line
    (`auth-token-refresh`), unique under `scratch/`
 
-An existing target means update mode - read the old file first if this
-session has not. Otherwise write fresh. Collect anchors, read-only:
+An existing target means update mode - read the old file first if
+this session has not; a target some other process wrote - no conforming
+`Written: | Cycle:` header line - means adoption (below). Otherwise
+write fresh. Collect anchors, read-only:
 branch, `git rev-parse --short HEAD`, `git status --porcelain` (up to
 five file names; past that, `N files dirty`), and background tasks
 still running, which go under Environment - as does any second repo
@@ -144,6 +146,26 @@ Rules:
   ranges. Everything else is `Reference only`.
 - Under 200 lines fits most sessions; 400 is the ceiling.
 
+### A plan that lives in a todo file
+
+Work often has a ledger of its own - `todo/foobar.md`, tracked in
+the repo. One home per fact, or the copies drift: the todo file
+owns what is open and done; the handoff owns how this thread works
+it - state, decisions, the Now step. Neither restates the other.
+
+- Plan points at the live item (`todo/foobar.md item 3`) and keeps
+  only thread-only steps of its own. Never copy the item's text
+  across.
+- write syncs the todo first - mark what this session closed,
+  append what it found, in the todo file's own format - then writes
+  the handoff against the result. A todo left dirty shows in the
+  header's dirty list.
+- On first pointing at an item, add one back-pointer line under it:
+  `entry: scratch/<slug>/HANDOFF.md`. Add nothing else to the todo
+  from here.
+- An untracked todo file cannot anchor to a sha: mark the pointer
+  `(untracked)`, and at read its current content is the truth.
+
 ### Update mode
 
 A living document, not a log: after every update it must still read as
@@ -156,11 +178,36 @@ is cycle 1), then merge by section:
 - Now, State, Key files, Environment: rewrite from the current
   session.
 - Plan: keep; mark done `[x]`; collapse a finished stretch to one
-  line; append new steps.
+  line; append new steps; a pointed todo file syncs first, per its
+  rule above.
 - Decisions, Constraints, Dead ends: append and tighten wording; never
   silently drop - a superseded item is replaced by its successor.
 - Log: append one line for this cycle; keep the last three cycles and
   collapse older ones to a single line.
+
+### Adoption
+
+A target some other process wrote - no conforming header - is
+massaged toward the schema, never started over: converge the form,
+destroy no content. The adoption pass meets the ceiling by rehoming
+alone. Cuts, the trimmer seat, and the opus rewrite wait for later
+cycles.
+
+- First copy the file once to `HANDOFF.orig.md`. Never overwrite or
+  delete that copy. `HANDOFF.prev.md` stays the rolling one-step
+  history beside it.
+- Convert structure, not content: write the header (cycle 1), map
+  each foreign section to the schema section carrying the same kind
+  of fact, keep every fact. What fits no section, or would hold the
+  file over the ceiling, moves whole to sibling `notes-<topic>.md`
+  files, one pointer line each under the schema section it belongs
+  to (`Reference only` when none fits) - rehomed, never cut.
+- The file's own conventions outrank the merge rules: a reading
+  order it declares, a backup or worktree it says never to delete,
+  a directive it quotes. Carry each under Constraints or a pointer,
+  and touch no sibling file except to add.
+- The reviewer pass runs without the trimmer, and the merge auditor
+  diffs orig. Update-mode merging binds from the next cycle.
 
 ### Reviewer pass
 
@@ -172,18 +219,22 @@ what survives, and stop - never loop the reviewers.
 - Always - skeptic: from the file alone, fill five slots - the task,
   the next action, why it is next, how to verify it, what to ask the
   user; an empty slot is a finding. Also check every path and line
-  anchor exists.
-- Update write, or check beside a `HANDOFF.prev.md` - merge auditor:
-  diff prev against current; flag dropped lines not marked done or
-  superseded, and surviving lines about finished work.
+  anchor exists, and that Now agrees with each pointed todo's live
+  item.
+- Update or adoption write, or check beside a `HANDOFF.prev.md` or
+  `HANDOFF.orig.md` - merge auditor: diff prev (adoption: orig)
+  against current; flag dropped lines not marked done, superseded,
+  or rehomed, and surviving lines about finished work.
 - Any write over 150 lines - trimmer: line ranges that restate the
   repo, paste code, or pad. Log tails and decisions the shipped code
   now proves may go; Constraints and Dead ends stay.
 
 Past cycle 5 or 400 lines, after those fixes land, one opus-tier
-agent rewrites the whole file for precision and returns it; apply it
-and land back under the ceiling. Past the budget, prefer
-`write --no-check` and run `check` from the fresh session instead.
+agent rewrites the whole file for precision and returns it. Apply it
+and land back under the ceiling - compress wording, rehome overflow
+to sibling files, never drop what only the session knows. Past the
+budget, prefer `write --no-check` and run `check` from the fresh
+session instead.
 
 ### Report
 
@@ -200,11 +251,16 @@ Resume: kill this session, start a fresh one, run
 
 1. Resolve `<folder>` per the shared rule; none given, follow the
    table.
-2. Read the file, then the `Read now` files - nothing else. Never
-   read `HANDOFF.prev.md`.
+2. Read the file, then the `Read now` files and every todo file the
+   Plan points at. A target with no conforming header names its own
+   reading order or read-first pointers - follow those instead.
+   Read nothing else, and never read `HANDOFF.prev.md`.
 3. Drift check: HEAD moved from the header sha - run
-   `git log --oneline <sha>..HEAD`; header says dirty - run
-   `git status --porcelain`. Note drift in one line and proceed.
+   `git log --oneline <sha>..HEAD`, adding `-- <path>` per pointed
+   todo file; header says dirty - run `git status --porcelain`. No
+   conforming header - skip. A pointed todo moved or disagrees with
+   the file: the todo wins on what is open or done, the handoff on
+   approach and decisions. Note drift in one line and proceed.
 4. Do not re-plan and do not reopen Decisions. Open questions
    present: put them to the user and stop. Otherwise state the task
    and the Now step in two sentences, then execute Now; the Plan
@@ -218,6 +274,9 @@ slug, Written date, Cycle, Task line.
 
 ## check
 
-Resolve like read, then run the seats that apply - skeptic always,
-merge auditor beside a `HANDOFF.prev.md`, trimmer over 150 lines, the
-opus rewrite past 400 - apply what survives, and report what changed.
+Resolve like read. A target with no conforming header instead runs
+the adoption pass (write, above), reviewer pass included, and stops.
+Otherwise run the seats that apply - skeptic always, merge auditor
+beside a `HANDOFF.prev.md` or `HANDOFF.orig.md`, trimmer over 150
+lines, the opus rewrite past 400 - apply what survives, and report
+what changed.

@@ -155,6 +155,14 @@ capture exactly what rehydration needs:
   place: state is rewritten, the plan is ticked off, decisions and dead
   ends accumulate, and a one-line log per cycle keeps the trajectory.
   The prior version stays beside it as `HANDOFF.prev.md`.
+- A handoff some other tool or session wrote is adopted, not
+  discarded: the first write keeps a permanent `HANDOFF.orig.md` copy,
+  converts the structure, and rehomes overflow to sibling notes files.
+  The form converges. The content survives.
+- When the work has a ledger of its own (`todo/foobar.md`), the
+  handoff points at the live item rather than copying it: `write`
+  syncs the todo first, and `read` reads it and trusts it on what is
+  open, the handoff on how. One home per fact, so nothing drifts.
 - Each write ends with a reviewer pass - a skeptic that must
   rehydrate from the file alone, a merge auditor on updates, a trimmer
   once the file passes 150 lines. A reviewer seat costs cents; a
