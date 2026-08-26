@@ -16,8 +16,8 @@ room, that the conversation has grown expensive enough to hand off.
 /plugin install context-budget@context-budget
 ```
 
-That is the whole install for the warning. It needs `python3` on `PATH`
-and nothing else.
+That installs the warning hook and the /handoff skill together. It
+needs `python3` on `PATH` and nothing else.
 
 ### Status line (optional, one manual step)
 
@@ -42,6 +42,31 @@ The status line reads the growth rate from a file the hook writes each
 turn, so the two never disagree. Without the hook it falls back to a
 default rate and still works.
 
+### Update
+
+```
+/plugin marketplace update context-budget
+```
+
+The plugin runs from the marketplace clone, so one update moves the
+hook, the skill, and the scripts the status line points at together.
+There is no migration: the state under `~/.claude/cache/context-budget/`
+is rewritten every turn by whichever version is running, and handoff
+files are plain markdown that no version needs to convert.
+
+### Uninstall
+
+```
+/plugin uninstall context-budget@context-budget
+/plugin marketplace remove context-budget
+```
+
+That removes the hook and the skill with the plugin. Two things
+outlive it: the `statusLine` block above (remove it from
+settings.json) and the cache directory
+(`rm -rf ~/.claude/cache/context-budget`). Handoffs under `scratch/`
+are yours, not the plugin's; uninstalling touches none of them.
+
 ## Why
 
 Claude Code resends the whole conversation on every API call. A cached
@@ -64,14 +89,14 @@ warned much earlier in absolute tokens.
 At the end of a turn, once:
 
 > Context 291K of a 350K budget, growing 19K a turn. About 3 turns of
-> room left - a good point to start the handoff.
+> room left - a good point to run /handoff write.
 
 Then nothing until the next band:
 
-> Context 362K, at the 350K budget. Write the handoff to a file and start
-> a fresh session: that restarts near 69K plus the file, against 123K for
-> /compact. Compact instead only to carry the tail of this conversation,
-> which buys about 12 more turns.
+> Context 362K, at the 350K budget. Run /handoff write, then read it back
+> in a fresh session with /handoff read: that restarts near 69K plus the
+> file, against 123K for /compact. Compact instead only to carry the tail
+> of this conversation, which buys about 12 more turns.
 
 > Context 517K, 1.5x the 350K budget and about $2.27 a turn. Every
 > further turn pays to re-read history you are not using.
@@ -105,6 +130,44 @@ of the same material. A file does neither.
 `/compact` still earns its place for one thing: the ~17,000-token
 preserved tail, the messages you were part-way through. Mid-task that is
 worth carrying. Between tasks it is weight you pay to keep.
+
+## The exit itself: /handoff
+
+The plugin ships the skill its warnings point at. One file per task
+thread, `scratch/<slug>/HANDOFF.md` at the repo root (the current
+directory outside a git repo). Between sessions the reset is total -
+the file and the repo are all that survive - so the skill is built to
+capture exactly what rehydration needs:
+
+```
+/handoff write                     writes or updates the handoff, checks it
+  (kill the session, start fresh)
+/handoff read auth-token-refresh   rehydrates and resumes the plan
+```
+
+- `write` needs no argument: it picks a folder name from the task, or
+  takes one if you choose - the file inside is always `HANDOFF.md`. It
+  records the plan, the state, key files with line anchors, settled
+  decisions, and dead ends - pointers into the repo, never pasted code.
+  Most handoffs land between 2K and 5K tokens, against ~22K for a
+  /compact summary.
+- Run `write` again a session later and it updates the same file in
+  place: state is rewritten, the plan is ticked off, decisions and dead
+  ends accumulate, and a one-line log per cycle keeps the trajectory.
+  The prior version stays beside it as `HANDOFF.prev.md`.
+- Each write ends with a reviewer pass - a skeptic that must
+  rehydrate from the file alone, a merge auditor on updates, a trimmer
+  once the file passes 150 lines. A reviewer seat costs cents; a
+  dropped decision costs the turns it takes to re-derive.
+- `read` verifies the file's git anchors, reads only the files the
+  handoff marks "read now", and executes the handoff's Now step - the
+  single next action, with the plan behind it. It stops only for open
+  questions the file left for you; decisions stay settled, and nothing
+  is re-planned or re-litigated.
+- `list` shows what exists; `check` re-reviews one in place and
+  applies what survives.
+
+Add `scratch/` to your gitignore if handoffs should stay untracked.
 
 ## The budget is in dollars, not tokens
 
