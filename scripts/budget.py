@@ -48,6 +48,11 @@ MAX_RESERVE_FRACTION = 0.5
 # Measured median across 299 compactions.
 POST_COMPACTION_TOKENS = 123_000
 
+# Billed context on the first call of a brand new session: the same
+# instruction and tool floor, with no summary and no preserved tail.
+# Measured median across 325 sessions.
+FRESH_SESSION_TOKENS = 69_000
+
 # Used until a session has enough history to measure its own rate.
 FALLBACK_GROWTH_PER_CALL = 1_900
 

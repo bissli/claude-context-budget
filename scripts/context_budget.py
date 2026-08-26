@@ -176,10 +176,13 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
     if context >= target:
         cycle = (target - budget.POST_COMPACTION_TOKENS) / max(per_turn, 1)
         return 1, (f'Context is {now}, past the {goal} budget and growing '
-                   f'about {rate} a turn. Compacting lands near '
-                   f'{budget.POST_COMPACTION_TOKENS // 1000}K, so the next '
-                   f'cycle buys about {cycle:.0f} turns at roughly '
-                   f'${budget.cost_per_turn(target, tier):.2f} each.')
+                   f'about {rate} a turn. Write the handoff to a file, then '
+                   f'start a fresh session: that restarts near '
+                   f'{budget.FRESH_SESSION_TOKENS // 1000}K plus the file, '
+                   f'against {budget.POST_COMPACTION_TOKENS // 1000}K for '
+                   f'/compact, and the file does not get re-summarized. '
+                   f'Compact instead only to keep the tail of this '
+                   f'conversation, which buys about {cycle:.0f} more turns.')
     if context >= handoff_at:
         left = max(1, int((target - context) / max(per_turn, 1)))
         turns = 'turn' if left == 1 else 'turns'
