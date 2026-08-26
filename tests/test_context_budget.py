@@ -185,6 +185,23 @@ def test_message_names_the_numbers_the_reader_has_to_act_on():
     assert '16K a turn' in message
 
 
+def test_the_warning_names_the_skill_the_plugin_ships():
+    """Verify both warning bands name the bundled handoff skill.
+
+    Mutation: renaming skills/handoff/, or rewording band 0 or band 1
+    so the warning names a command that no longer exists.
+    Oracle: the skill's own frontmatter name on disk, matched against
+    the text of both bands.
+    """
+    skill = os.path.join(HERE, '..', 'skills', 'handoff', 'SKILL.md')
+    with open(skill) as handle:
+        front = handle.read().split('---\n', 2)[1]
+    name = re.search(r'^name:\s*(\S+)', front, re.M).group(1)
+    for context in (300_000, 360_000):
+        _, message = cb.compose(context, 'opus', 1_900)
+        assert f'/{name} write' in message
+
+
 def test_repeated_stream_snapshots_do_not_inflate_the_series(tmp_path):
     """Verify one API response counts once, however often it is written.
 
@@ -199,8 +216,7 @@ def test_repeated_stream_snapshots_do_not_inflate_the_series(tmp_path):
     records = []
     for index, context in enumerate((100_000, 110_000, 120_000, 130_000,
                                      140_000, 150_000)):
-        for snapshot in range(3):
-            records.append({
+        records.extend({
                 'type': 'assistant',
                 'message': {
                     'id': f'msg_{index}',
@@ -213,7 +229,7 @@ def test_repeated_stream_snapshots_do_not_inflate_the_series(tmp_path):
                         'output_tokens': snapshot,
                         },
                     },
-                })
+                } for snapshot in range(3))
     path.write_text('\n'.join(json.dumps(r) for r in records))
     context, model, per_call = cb.read_transcript(str(path))
     assert context == 150_000

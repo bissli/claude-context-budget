@@ -7,7 +7,7 @@
     {
       "name": "context-budget",
       "source": "./",
-      "description": "Warns in-session, while there is still room, that a Claude Code conversation should be handed off"
+      "description": "Warns in-session, while there is still room, that a Claude Code conversation should be handed off, and ships the /handoff skill that writes and reads the handoff"
     }
   ]
 }
