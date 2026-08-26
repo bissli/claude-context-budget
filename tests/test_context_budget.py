@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +16,7 @@ cb = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(cb)
 
 import budget  # noqa: E402  (path must be set before this import resolves)
+import statusline as sl  # noqa: E402  (same)
 
 
 def test_every_model_is_held_to_the_same_cost_per_turn():
@@ -352,3 +354,45 @@ def test_the_warning_never_lands_below_where_a_compaction_restarts():
             target = budget.target_tokens(tier, per_call)
             handoff = target - budget.reserve_tokens(target, per_call)
             assert handoff >= budget.POST_COMPACTION_TOKENS
+
+
+def test_the_gauge_stays_readable_past_the_budget():
+    """Verify two different over-budget sizes do not render identically.
+
+    Mutation: keeping the bar past the budget. It clamps to full, so
+    1.1x and 3x print the same glyph - and past the budget is exactly
+    where the reader needs to tell them apart.
+    Oracle: differential - the same session at 452K and at 700K must
+    produce different text.
+    """
+    def line(context):
+        return sl.render({
+            'session_id': 'none',
+            'model': {'id': 'claude-opus-5', 'display_name': 'Opus 5'},
+            'workspace': {'current_dir': '/x/proj'},
+            'context_window': {'total_input_tokens': context},
+            })
+
+    assert line(452_000) != line(700_000)
+    assert '1.3x over' in line(452_000)
+    assert '2.0x over' in line(700_000)
+
+
+def test_the_decision_numbers_survive_a_narrow_pane():
+    """Verify size and action lead the line, and the line stays short.
+
+    Mutation: putting the directory or the model first, as most status
+    lines do. A pane is cut from the right, so the two fields that carry
+    the decision are the ones lost.
+    Oracle: hand-checked - the visible line with colour stripped must
+    start with the size and fit a narrow split.
+    """
+    visible = re.sub(r'\x1b\[[0-9;]*m', '', sl.render({
+        'session_id': 'none',
+        'model': {'id': 'claude-opus-5', 'display_name': 'Opus 5'},
+        'workspace': {'current_dir': '/x/myproject'},
+        'context_window': {'total_input_tokens': 248_000},
+        }))
+    assert visible.startswith('248K/350K')
+    assert 'handoff in' in visible.split('$')[0]
+    assert len(visible) <= 64

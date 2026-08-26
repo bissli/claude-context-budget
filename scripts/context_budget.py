@@ -168,27 +168,23 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
     rate = f'{int(per_turn) // 1000}K'
 
     if context >= over:
-        share = cost / budget.COST_PER_TURN_TARGET
-        return 2, (f'Context is {now}, well past the {goal} budget. Each turn '
-                   f'costs about ${cost:.2f}, roughly {share:.1f} times what '
-                   f'it would at the budget. Worth compacting before you go '
-                   f'on.')
+        return 2, (f'Context {now}, {cost / budget.COST_PER_TURN_TARGET:.1f}x '
+                   f'the {goal} budget and about ${cost:.2f} a turn. Every '
+                   f'further turn pays to re-read history you are not using.')
     if context >= target:
         cycle = (target - budget.POST_COMPACTION_TOKENS) / max(per_turn, 1)
-        return 1, (f'Context is {now}, past the {goal} budget and growing '
-                   f'about {rate} a turn. Write the handoff to a file, then '
-                   f'start a fresh session: that restarts near '
+        return 1, (f'Context {now}, at the {goal} budget. Write the handoff to '
+                   f'a file and start a fresh session: that restarts near '
                    f'{budget.FRESH_SESSION_TOKENS // 1000}K plus the file, '
                    f'against {budget.POST_COMPACTION_TOKENS // 1000}K for '
-                   f'/compact, and the file does not get re-summarized. '
-                   f'Compact instead only to keep the tail of this '
+                   f'/compact. Compact instead only to carry the tail of this '
                    f'conversation, which buys about {cycle:.0f} more turns.')
     if context >= handoff_at:
         left = max(1, int((target - context) / max(per_turn, 1)))
         turns = 'turn' if left == 1 else 'turns'
-        return 0, (f'Context is {now} of a {goal} budget, growing about {rate} '
-                   f'a turn. About {left} {turns} of room left, so this is a '
-                   f'good moment to start the handoff.')
+        return 0, (f'Context {now} of a {goal} budget, growing {rate} a turn. '
+                   f'About {left} {turns} of room left - a good point to start '
+                   f'the handoff.')
     return -1, ''
 
 
