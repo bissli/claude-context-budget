@@ -18,12 +18,13 @@ Notes
 - Claude Code has no plugin surface for a status line, so unlike the Stop
   hook this script cannot install itself. Point ``statusLine.command`` in
   settings.json at it; the project README gives the exact block.
-- The growth rate and the target both come from the state file the Stop
+- The growth rate and both thresholds come from the state file the Stop
   hook writes each turn, so the gauge and the warning never disagree.
   Re-deriving them here would mean re-reading the transcript on a line
-  that repaints continuously - and would re-derive the target from a
-  rate the hook has already latched, which is the one number that must
-  not move.
+  that repaints continuously - and would re-derive them from a rate the
+  hook has already latched, which is what must not move: a threshold
+  computed fresh on every repaint counts down to a handoff, announces
+  it, then reports room again.
 - Every threshold comes from :mod:`budget`, shared with the hook, so the
   gauge cannot drift from the warning it is meant to anticipate.
 - Ordered by what has to survive truncation. A status line sharing a
@@ -59,8 +60,8 @@ BAR_FILL = '='
 BAR_TRACK = '-'
 
 
-def session_state(session: str, tier: str) -> tuple[int, int]:
-    """Read this session's growth per call and the target it is held to.
+def session_state(session: str, tier: str) -> tuple[int, int, int]:
+    """Read the growth rate and the two thresholds a session is held to.
 
     Parameters
     ----------
@@ -71,31 +72,34 @@ def session_state(session: str, tier: str) -> tuple[int, int]:
 
     Returns
     -------
-    tuple[int, int]
-        Estimated tokens added per assistant call, and the compaction
-        target in tokens.
+    tuple[int, int, int]
+        Estimated tokens added per assistant call, the compaction target
+        in tokens, and the context size at which to say hand off.
 
     Notes
     -----
-    - Before the first Stop there is no state, so both fall back to what
-      the fallback growth rate justifies. The hook latches the target
-      down from that same figure, so the gauge can only ever tighten as
-      state appears - it never jumps outward.
-    - A target from an older state file is clamped to that figure too.
-      The latch was added after some files were written, and those hold
-      targets it would never grant now.
+    - Before the first Stop there is no state, so all three fall back to
+      what the fallback growth rate justifies. The hook latches both
+      thresholds down from those same figures, so the gauge can only
+      ever tighten as state appears - it never jumps outward.
+    - A threshold from an older state file is clamped to those figures
+      too. The latches were added after some files were written, and
+      those hold values they would never grant now.
     """
     safe = session.replace('/', '_')
-    per_call, target = budget.FALLBACK_GROWTH_PER_CALL, 0
+    per_call, target, handoff = budget.FALLBACK_GROWTH_PER_CALL, 0, 0
     try:
         with open(os.path.join(STATE_DIR, f'{safe}.json')) as handle:
             state = json.load(handle)
         per_call = max(1, int(state['growth_per_call']))
         target = int(state.get('target') or 0)
+        handoff = int(state.get('handoff') or 0)
     except (OSError, ValueError, KeyError, TypeError):
         pass
     seed = budget.target_tokens(tier)
-    return per_call, min(target, seed) if target > 0 else seed
+    target = min(target, seed) if target > 0 else seed
+    point = target - budget.reserve_tokens(target, per_call)
+    return per_call, target, min(handoff, point) if handoff > 0 else point
 
 
 def render(payload: dict[str, Any]) -> str:
@@ -124,10 +128,9 @@ def render(payload: dict[str, Any]) -> str:
     tier = budget.model_tier(str(model.get('id') or ''))
     if tier is None:
         return plain
-    per_call, target = session_state(str(payload.get('session_id') or ''),
-                                     tier)
+    per_call, target, handoff_at = session_state(
+        str(payload.get('session_id') or ''), tier)
     per_turn = per_call * budget.CALLS_PER_TURN
-    handoff_at = target - budget.reserve_tokens(target, per_call)
 
     cost = budget.cost_per_turn(context, tier)
     size = f'{context // 1000}K/{target // 1000}K'

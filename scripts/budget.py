@@ -31,17 +31,22 @@ CACHE_READ_MULTIPLIER = 0.1
 # Assistant calls per user turn, measured across 604 compaction cycles.
 CALLS_PER_TURN = 8.8
 
-# Write the handoff, read it back, run /compact.
-HANDOFF_TURNS = 3
+# Turns the handoff costs this session. A handoff write measures 17.5
+# assistant calls, which is two turns at the rate above. Reading it back
+# happens in a fresh session, so it is charged to that one, not to this.
+HANDOFF_TURNS = 2
 
 # Growth is a recent average, so one heavy turn during the handoff can
 # outrun it. This buys that slack.
 HANDOFF_MARGIN = 1.5
 
 # The warning is useless if it fires on a young session and useless if it
-# leaves no room, so the reserve is held between these two bounds.
+# leaves no room, so the reserve is held between these two bounds. The
+# ceiling is a quarter, which is what puts the earliest possible warning
+# at three quarters of the gauge: a fast session used to reserve half
+# the budget and be told to hand off beside a half-filled bar.
 MIN_RESERVE_TOKENS = 60_000
-MAX_RESERVE_FRACTION = 0.5
+MAX_RESERVE_FRACTION = 0.25
 
 # Billed context on the first call after a compaction: the system prompt,
 # tools, and instruction files all return, along with the summary.
@@ -56,9 +61,10 @@ FRESH_SESSION_TOKENS = 69_000
 # Used until a session has enough history to measure its own rate.
 FALLBACK_GROWTH_PER_CALL = 1_900
 
-# Turns a compaction cycle has to be worth: three to hand off, and at
-# least two more to do something with the room that buys back.
-MIN_CYCLE_TURNS = 5
+# Turns a compaction cycle has to be worth: HANDOFF_TURNS to get out of
+# the session, and three more to do something with the room that buys
+# back.
+MIN_CYCLE_TURNS = HANDOFF_TURNS + 3
 
 
 def model_tier(model: str) -> str | None:
@@ -229,10 +235,23 @@ def reserve_tokens(target: int, per_call: int) -> int:
     int
         Tokens reserved below the target, bounded by
         ``MIN_RESERVE_TOKENS`` and ``MAX_RESERVE_FRACTION``.
+
+    Notes
+    -----
+    - ``MAX_RESERVE_FRACTION`` is the guarantee that the warning cannot
+      arrive before ``1 - MAX_RESERVE_FRACTION`` of the budget is spent,
+      however fast the session grows. Without it the reserve saturates
+      on any session reading large files, and every one of them is told
+      to hand off at the same point regardless of its rate.
+    - On a small target that ceiling falls below the floor, and the
+      floor is what wins: a fraction of a small budget is not enough
+      room to write anything, and a bound meant to keep the warning
+      legible must not quietly delete the bound meant to keep it
+      useful.
     """
     raw = int(HANDOFF_TURNS * per_call * CALLS_PER_TURN * HANDOFF_MARGIN)
-    reserve = min(int(target * MAX_RESERVE_FRACTION),
-                  max(MIN_RESERVE_TOKENS, raw))
+    ceiling = max(int(target * MAX_RESERVE_FRACTION), MIN_RESERVE_TOKENS)
+    reserve = min(ceiling, max(MIN_RESERVE_TOKENS, raw))
     # A reserve deep enough to put the warning below where a compaction
     # lands would fire on the first turn of every cycle, forever.
     return min(reserve, max(0, target - POST_COMPACTION_TOKENS))

@@ -6,13 +6,13 @@ fully cached turn still bills the entire context at the cache-read rate.
 Cost tracks the area under the context curve, and the only lever a user
 has is where the session gets compacted.
 
-Compacting is not instant. It takes a turn to write a handoff, a turn to
-read it back, and a turn to run ``/compact``. So this hook does not warn
-at a fixed token count. It warns when the room left before the budget has
-shrunk to what those turns will consume, measured at the rate this
-session is actually growing. A session reading large files fills up
-several times faster than a conversation and is warned much earlier in
-absolute tokens.
+Leaving is not instant. It takes a turn to write the handoff, and the
+turn already in flight when the warning lands is gone too. So this hook
+does not warn at a fixed token count. It warns when the room left before
+the budget has shrunk to what those turns will consume, measured at the
+rate this session is actually growing. A session reading large files
+fills up several times faster than a conversation and is warned much
+earlier in absolute tokens.
 
 The budget itself is set in dollars per turn and converted to a token
 target per model in :mod:`budget`, so an expensive model is held to a
@@ -32,6 +32,11 @@ Notes
   turns. Transcripts interleave real user prompts with injected system
   reminders, tool results, and hook output, and no reliable rule
   separates them; the context series has no such ambiguity.
+- Only records that billed something are points on that series. A failed
+  call is written as an assistant record too, and reading its zeroed
+  usage as a context of zero is indistinguishable from a compaction.
+- Both thresholds are latched down-only, for the same reason: context
+  only grows, so one that moves outward walks the gauge backwards.
 - A subagent carries its own short-lived context and never compacts, so
   the hook exits silently when ``agent_id`` is present.
 """
@@ -112,6 +117,15 @@ def read_transcript(path: str) -> tuple[int, str, int]:
       The cache counts are fixed when the request is sent, so keeping
       the first snapshot is safe for context even though it understates
       output.
+    - A call that never reached the model is written as an assistant
+      record all the same, carrying a zeroed usage block and a
+      placeholder model id. It billed nothing, so it is not a point on
+      the context curve and is dropped whole - the model id included,
+      which would otherwise overwrite the real one and silence the hook.
+    - What separates such a record from a real one is where the counts
+      are, never the error flag it may or may not carry: a real call
+      puts them at the top level or under ``iterations``, a failed one
+      has neither.
     """
     series: list[int] = []
     model = ''
@@ -132,22 +146,38 @@ def read_transcript(path: str) -> tuple[int, str, int]:
             usage = message.get('usage')
             if not usage or message.get('role') != 'assistant':
                 continue
+            billed = ((usage.get('cache_read_input_tokens') or 0)
+                      + (usage.get('cache_creation_input_tokens') or 0)
+                      + (usage.get('input_tokens') or 0))
+            # Some records carry the counts one level down instead, and
+            # only a call that never reached the model has them in
+            # neither place.
+            inner = (usage.get('iterations') or [{}])[0]
+            if not billed:
+                billed = ((inner.get('cache_read_input_tokens') or 0)
+                          + (inner.get('cache_creation_input_tokens') or 0)
+                          + (inner.get('input_tokens') or 0))
+            # A record that billed nothing is a failed call, not a
+            # smaller context. Left in the series it reads as a
+            # compaction, and the run that restarts after it counts the
+            # whole conversation as growth since zero - which triples
+            # the measured rate for the rest of the session.
+            if billed <= 0:
+                continue
             identifier = message.get('id') or ''
             if identifier and identifier in seen:
                 continue
             if identifier:
                 seen.add(identifier)
-            series.append((usage.get('cache_read_input_tokens') or 0)
-                          + (usage.get('cache_creation_input_tokens') or 0)
-                          + (usage.get('input_tokens') or 0))
+            series.append(billed)
             model = message.get('model') or model
     if not series:
         return 0, model, budget.FALLBACK_GROWTH_PER_CALL
     return series[-1], model, growth_per_call(series)
 
 
-def compose(context: int, tier: str, per_call: int,
-            target: int) -> tuple[int, str]:
+def compose(context: int, tier: str, per_call: int, target: int,
+            handoff_at: int) -> tuple[int, str]:
     """Pick the band for a context size and write its message.
 
     Parameters
@@ -160,6 +190,8 @@ def compose(context: int, tier: str, per_call: int,
         Estimated tokens added per assistant call.
     target : int
         The compaction target in force for this session, in tokens.
+    handoff_at : int
+        The context size at which to warn, from :func:`latched_handoff`.
 
     Returns
     -------
@@ -169,9 +201,9 @@ def compose(context: int, tier: str, per_call: int,
 
     Notes
     -----
-    - The target is handed in rather than derived, so the bands move
-      with the session's latched target and not with the growth rate
-      measured this turn.
+    - Both thresholds are handed in rather than derived, so the bands
+      move with the session's latched figures and not with the growth
+      rate measured this turn.
     - A floor-inflated target can equal the over boundary. Band 1 is
       then never entered, so the band-2 message also names /handoff.
     - The growth rate still shapes the reserve and both countdowns.
@@ -179,7 +211,6 @@ def compose(context: int, tier: str, per_call: int,
       react; only the thresholds have to hold still.
     """
     over = budget.over_budget_tokens(tier, target)
-    handoff_at = target - budget.reserve_tokens(target, per_call)
     per_turn = per_call * budget.CALLS_PER_TURN
     cost = budget.cost_per_turn(context, tier)
     now = f'{context // 1000}K'
@@ -246,7 +277,42 @@ def latched_target(tier: str, per_call: int, in_force: int) -> int:
     return min(budget.target_tokens(tier, per_call), ceiling)
 
 
-def load_state(state_path: str) -> tuple[int, int, int]:
+def latched_handoff(target: int, per_call: int, in_force: int) -> int:
+    """Hold a session's handoff point where it is, or lower, never higher.
+
+    Parameters
+    ----------
+    target : int
+        The compaction target in force for this session, in tokens.
+    per_call : int
+        Estimated tokens added per assistant call.
+    in_force : int
+        Handoff point this session was held to last turn, 0 when it has
+        none.
+
+    Returns
+    -------
+    int
+        Billed context in tokens.
+
+    Notes
+    -----
+    - Latching the target alone is not enough. The reserve below it
+      follows the growth rate, and that rate swings by a factor of three
+      within a session, so the point the gauge counts down to walks
+      outward on its own - the status line announces the handoff, then
+      reports several turns of room again on the next repaint, and
+      contradicts the warning the hook has already given.
+    - Down-only, for the reason the target is: context only grows, so a
+      threshold that moves outward walks the gauge backwards.
+    - A session with no latch yet takes whatever the current rate
+      justifies. There is nothing to walk back from on the first turn.
+    """
+    point = target - budget.reserve_tokens(target, per_call)
+    return min(point, in_force) if in_force > 0 else point
+
+
+def load_state(state_path: str) -> tuple[int, int, int, int]:
     """Read the band announced, the context seen, and the target in force.
 
     Parameters
@@ -256,21 +322,27 @@ def load_state(state_path: str) -> tuple[int, int, int]:
 
     Returns
     -------
-    tuple[int, int, int]
-        The stored band index, billed context, and target, or
-        ``(-1, 0, 0)`` when nothing is recorded.
+    tuple[int, int, int, int]
+        The stored band index, billed context, target, and handoff
+        point, or ``(-1, 0, 0, 0)`` when nothing is recorded.
+
+    Notes
+    -----
+    - A file written before the handoff point was latched has no such
+      key, and reads as no latch in force. The band memory in the same
+      file is what stops that one free turn re-announcing a band.
     """
     try:
         with open(state_path) as handle:
             data = json.load(handle)
         return (int(data.get('band', -1)), int(data.get('context', 0)),
-                int(data.get('target', 0)))
+                int(data.get('target', 0)), int(data.get('handoff', 0)))
     except (OSError, ValueError, AttributeError, TypeError):
-        return -1, 0, 0
+        return -1, 0, 0, 0
 
 
 def store_state(state_path: str, band: int, per_call: int, target: int,
-                context: int) -> None:
+                handoff_at: int, context: int) -> None:
     """Record the band, growth rate, target, and context for a session.
 
     Parameters
@@ -283,6 +355,8 @@ def store_state(state_path: str, band: int, per_call: int, target: int,
         Estimated tokens added per assistant call.
     target : int
         Compaction target derived from that growth rate.
+    handoff_at : int
+        Context size at which this session is told to hand off.
     context : int
         Billed context this record was written at.
 
@@ -297,6 +371,7 @@ def store_state(state_path: str, band: int, per_call: int, target: int,
                 'band': band,
                 'growth_per_call': per_call,
                 'target': target,
+                'handoff': handoff_at,
                 'context': context,
                 }, handle)
     except OSError:
@@ -325,18 +400,28 @@ def main() -> int:
         return 0
 
     state_path = os.path.join(STATE_DIR, f'{session}.json')
-    announced, last_context, in_force = load_state(state_path)
-    # A compaction is the one event that resets a session: it rearms the
-    # bands and releases the target latch, so the cycle that follows is
-    # measured on its own terms.
-    compacted = context < last_context
+    announced, last_context, in_force, handoff_held = load_state(state_path)
+    # Notes:
+    # - A compaction is the one event that resets a session: it rearms
+    #   the bands and releases both latches, so the cycle that follows
+    #   is measured on its own terms. Everything here turns on telling
+    #   one from a dip, which is why the test is a size and not just a
+    #   fall.
+    # - Billed context does fall without a compaction - a cached block
+    #   expiring, a tool result dropped from the window. Across 301
+    #   real drops the smallest true compaction freed 72,591 tokens and
+    #   the largest dip 59,611, so half of where a compaction restarts
+    #   separates them with room on both sides.
+    compacted = last_context - context > budget.POST_COMPACTION_TOKENS // 2
     target = latched_target(tier, per_call, 0 if compacted else in_force)
-    band, message = compose(context, tier, per_call, target)
+    handoff_at = latched_handoff(target, per_call,
+                                 0 if compacted else handoff_held)
+    band, message = compose(context, tier, per_call, target, handoff_at)
     # The stored band falls only when the context itself fell, never
     # because slowing growth lifted a threshold past the current
     # context, which would re-fire a band already announced.
     kept = band if compacted else max(band, announced)
-    store_state(state_path, kept, per_call, target, context)
+    store_state(state_path, kept, per_call, target, handoff_at, context)
     if band <= announced or band < 0:
         return 0
 

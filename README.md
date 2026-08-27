@@ -4,7 +4,7 @@ A Claude Code plugin that tells you, in session and while there is still
 room, that the conversation has grown expensive enough to hand off.
 
 ```
-248K/350K [=======---] handoff in 4  $1.09/t  opus myproject
+248K/350K [=======---] handoff in 3  $1.09/t  opus myproject
 310K/350K [========--] handoff now   $1.36/t  opus myproject
 452K/350K  1.3x over                 $1.99/t  opus myproject
 ```
@@ -83,15 +83,15 @@ re-read is ten times cheaper than a fresh one, but it is not free, so the
 cost of a session tracks the area under its context curve. Past a certain
 size every turn pays to re-read a history it is no longer using.
 
-Leaving cleanly takes time. You have to write a handoff, read it back,
-and reset - and each of those turns adds context of its own. By the time
-a session feels too big, there is often no room left to get out.
+Leaving cleanly takes time. You have to write the handoff, and the turn
+already in flight when you decide to go is spent too. By the time a
+session feels too big, there is often no room left to get out.
 
 So this plugin does not warn at a fixed token count. It warns when the
-room left before your budget has shrunk to what a handoff will consume,
-measured at the rate your session is actually growing. A session reading
-large files fills up several times faster than a conversation, and is
-warned much earlier in absolute tokens.
+room left before your budget has shrunk to what those turns will
+consume, measured at the rate your session is actually growing. A
+session reading large files fills up several times faster than a
+conversation, and is warned much earlier in absolute tokens.
 
 ## What you see
 
@@ -247,6 +247,15 @@ Sonnet and Haiku are deliberately absent. A long session on either costs
 little enough that interrupting it to talk about money would spend more
 attention than it saves.
 
+Fable's budget is small enough that a fast session cannot both stay
+inside it and keep room to leave: a quarter of 206,600 is 51,650, which
+at 6,000 tokens a call is under a turn. The reserve floor lifts that to
+60,000 and the warning still arrives with a median 1.6 turns of room,
+against 5.2 on opus. That is the same admission the target already
+makes - on this tier a session you keep compacting costs more per turn
+than a cheap one - and the budget and over-budget bands are what say it
+out loud.
+
 ## How it decides
 
 Billed context is `cache_read + cache_creation + uncached_input` on the
@@ -266,12 +275,40 @@ before it waits for you again, tool calls included. It is derived, not
 counted: 8.8 assistant API calls, measured across 604 compaction cycles.
 All the arithmetic underneath is per-call.
 
-Each band fires once, on entry. A Stop hook runs every turn, so repeating
-a band already reached would be noise. Compacting drops the context below
-the announced band and rearms it. Only a real drop in context rearms a
-band; slowing growth that lifts a threshold back above the context does
-not. The target is latched in the same file and released by the same
-drop, so neither the warning nor the gauge can walk backwards.
+The warning point sits a reserve below the target: two turns of growth
+at the measured rate, with half again for slack. A handoff write
+measures 17.5 assistant calls, which is those two turns; reading it
+back costs the session that reads it, not this one, so it is not
+reserved for here. The reserve is floored at 60,000 tokens so a quiet
+session still gets room to write anything, and capped at a quarter of
+the budget so a fast one is never told to hand off beside a half-filled
+bar. Where a budget is small enough that the quarter falls under the
+floor, the floor wins - a fraction of a small budget is not room to
+write anything.
+
+Both the target and the warning point are latched per session, and only
+a compaction releases them. The reserve follows the growth rate, so an
+unlatched warning point walks outward on its own: the line counts down,
+announces the handoff, then reports turns of room again on the next
+repaint. Each band fires once, on entry - a Stop hook runs every turn,
+so repeating a band already reached would be noise.
+
+Telling a compaction from a dip is a size, not just a fall. Billed
+context drops without a compaction - a cached block expiring, a tool
+result leaving the window. Across 301 real drops the smallest true
+compaction freed 72,591 tokens and the largest dip 59,611, so the test
+is whether the drop freed half of what a compaction restarts at.
+
+A call that failed is not a point on the context curve. An overloaded
+request is written to the transcript as an assistant message all the
+same, carrying a zeroed usage block, and reading that as a context of
+zero is indistinguishable from a compaction: the growth run restarts
+there and counts the whole conversation as growth since. One 529 used
+to triple a session's measured rate for the rest of its life, which
+pinned the warning at exactly half the budget. What separates such a
+record from a real one is where the token counts are - a real call puts
+them at the top level or under `iterations`, a failed one has neither -
+never the error flag, which two thirds of them do not carry.
 
 Subagents are skipped. A subagent's context is short-lived, it cannot
 compact, and warning about it gives you nothing to act on.
