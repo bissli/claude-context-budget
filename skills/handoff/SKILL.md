@@ -43,12 +43,13 @@ target and leaves the verb inferred.
 | ----------------------- | -------------------------------------------- |
 | `/handoff`              | write, or read when the session is fresh     |
 | `/handoff <slug>`       | the same, against `scratch/<slug>/`          |
-| `/handoff list`         | slug, date, cycle, task line - newest first  |
+| `/handoff list [n]`     | this repo, newest first; n caps how many     |
 | `/handoff check [slug]` | reviewer pass on an existing handoff, fix it |
 
 `write` and `read` are still accepted as the first word and override
 the inference; `--no-check` may sit anywhere. A first argument that
 matches `write`, `read`, `list`, or `check` is that word, not a slug.
+`list` takes one more word, a count; every other verb takes a slug.
 
 Guess neither the verb nor the target. Where either is ambiguous,
 say so, list the candidates, and stop - touch nothing.
@@ -289,8 +290,23 @@ Resume: kill this session, start a fresh one, run
 
 ## list
 
-Newest first, from the first 20 lines of each `scratch/*/HANDOFF.md`:
-slug, Written date, Cycle, Task line.
+The handoffs in this repo, newest first. A bare `list` shows every one;
+`/handoff list 5` shows the five most recent, `list 1` the most recent
+alone. A count over the number that exist shows them all.
+
+`ls -t scratch/*/HANDOFF.md` orders them without reading anything, so a
+count saves the reading and not just the output: take that many off the
+top and open only those. Read each down to the end of its `## Plan`
+section - 40 lines reaches it in a normal handoff.
+
+Report per file: slug, Written date, Cycle, plan items done over total,
+Task line. Count a `- [ ]` or `- [x]` only under `## Plan`; a checkbox
+under State or Dead ends is not a plan item. A file with no Plan
+section reports `-`.
+
+Plan progress is what tells a live thread from a finished one: `7/7` is
+done, `0/5` never started, and the cycle count says neither - it counts
+how often the thread was worked, not how far it got.
 
 ## check
 
