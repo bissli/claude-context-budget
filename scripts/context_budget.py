@@ -178,12 +178,12 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
                    f'{cost / budget.COST_PER_TURN_TARGET:.1f}x the '
                    f'${budget.COST_PER_TURN_TARGET:.2f} target. Every '
                    f'further turn pays to re-read history you are not '
-                   f'using. Run /handoff write.')
+                   f'using. Run /handoff.')
     if context >= target:
         cycle = (target - budget.POST_COMPACTION_TOKENS) / max(per_turn, 1)
-        return 1, (f'Context {now}, at the {goal} budget. Run /handoff write, '
-                   f'then read it back in a fresh session with /handoff read: '
-                   f'that restarts near '
+        return 1, (f'Context {now}, at the {goal} budget. Run /handoff, '
+                   f'then run it again in a fresh session to read it '
+                   f'back: that restarts near '
                    f'{budget.FRESH_SESSION_TOKENS // 1000}K plus the file, '
                    f'against {budget.POST_COMPACTION_TOKENS // 1000}K for '
                    f'/compact. Compact instead only to carry the tail of this '
@@ -192,8 +192,8 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
         left = math.ceil((target - context) / max(per_turn, 1))
         turns = 'turn' if left == 1 else 'turns'
         return 0, (f'Context {now} of a {goal} budget, growing {rate} a turn. '
-                   f'About {left} {turns} of room left - a good point to run '
-                   f'/handoff write.')
+                   f'About {left} {turns} of room left - a good point to '
+                   f'run /handoff.')
     return -1, ''
 
 

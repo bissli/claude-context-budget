@@ -244,7 +244,9 @@ def test_the_warning_names_the_skill_the_plugin_ships():
     Mutation: renaming skills/handoff/, or rewording a band so the
     warning names a command that no longer exists - band 2 included,
     since a floor-inflated target skips band 1 and band 2 is then the
-    only message carrying the exit.
+    only message carrying the exit. The word boundary is what makes a
+    rename to a longer name (handoff2) fail rather than pass on the
+    prefix.
     Oracle: the skill's own frontmatter name on disk, matched against
     the text of all three bands.
     """
@@ -254,7 +256,7 @@ def test_the_warning_names_the_skill_the_plugin_ships():
     name = re.search(r'^name:\s*(\S+)', front, re.M).group(1)
     for context in (300_000, 360_000, 600_000):
         _, message = cb.compose(context, 'opus', 1_900)
-        assert f'/{name} write' in message
+        assert re.search(rf'/{name}\b', message)
 
 
 def test_repeated_stream_snapshots_do_not_inflate_the_series(tmp_path):

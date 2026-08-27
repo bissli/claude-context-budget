@@ -1,12 +1,13 @@
 ---
 name: handoff
 description: >-
-  Write, read, list, or check a session handoff under scratch/ - the
-  exit the context-budget warnings point at. Replaces /compact, and replaces
-  re-planning: the file carries the approved plan across sessions.
-  write [folder] writes or updates scratch/<folder>/HANDOFF.md, read
-  <folder> rehydrates a fresh session from it, list shows what
-  exists, check reviews one in place.
+  Write or read a session handoff under scratch/ - the exit the
+  context-budget warnings point at. The verb is inferred, never typed.
+  Bare /handoff writes or updates this session's
+  scratch/<slug>/HANDOFF.md. In a fresh session it reads one back
+  instead. list shows what exists, check reviews one in place.
+  Replaces /compact, and replaces re-planning: the file carries the
+  approved plan across sessions.
 ---
 
 # Handoff
@@ -15,26 +16,42 @@ One file per task thread, `scratch/<slug>/HANDOFF.md` at the repo root
 (`git rev-parse --show-toplevel`; the cwd outside a repo), carrying
 what a fresh session needs to resume and nothing the repo already
 records. Write near the budget, then kill the session - a total
-clear: only this file and the repo survive - and `/handoff read
-<slug>` in a fresh one. A later bare write updates the same file.
+clear: only this file and the repo survive - and `/handoff <slug>`
+in a fresh one. A later bare `/handoff` updates the same file.
 
-## Subcommands
+## Which verb, which target
 
-The first argument must be one of these; called bare or with anything
-else first, print this table and stop - never guess, touch nothing.
-An argument names a folder under `scratch/`; the document inside is
-always `HANDOFF.md`, never named by the caller. `write` takes the
-folder and `--no-check` in either order.
+The verb is inferred, never typed. One question settles it: does this
+session hold anything worth telling a fresh session?
 
-| Input              | Action                                                |
-| ------------------ | ----------------------------------------------------- |
-| `write`            | write or update this session's handoff (target below) |
-| `write <folder>`   | write or update `scratch/<folder>/HANDOFF.md`         |
-| `write --no-check` | skip the reviewer pass                                |
-| `read <folder>`    | rehydrate from `scratch/<folder>/HANDOFF.md`          |
-| `read`             | one handoff exists: read it; several: list and ask    |
-| `list`             | slug, date, cycle, task line - newest first           |
-| `check [folder]`   | run the reviewer pass on an existing handoff, fix it  |
+- Yes - a file edited, a decision settled, a finding the repo does
+  not already record, a handoff read here. Write.
+- No - none of that. A session whose opening move this is, and
+  equally one that has only looked something up. Read.
+
+Ask it of the content, never the position: a session that answered one
+question and edited nothing holds nothing worth passing on, however
+many messages came first. That is how the two are used. Write is the
+last move of a working session, read is the first move of the session
+that replaces it, and there is no third case.
+
+An argument is always a folder under `scratch/`; the document inside
+is always `HANDOFF.md`, never named by the caller. It pins the
+target and leaves the verb inferred.
+
+| Input                   | Action                                       |
+| ----------------------- | -------------------------------------------- |
+| `/handoff`              | write, or read when the session is fresh     |
+| `/handoff <slug>`       | the same, against `scratch/<slug>/`          |
+| `/handoff list`         | slug, date, cycle, task line - newest first  |
+| `/handoff check [slug]` | reviewer pass on an existing handoff, fix it |
+
+`write` and `read` are still accepted as the first word and override
+the inference; `--no-check` may sit anywhere. A first argument that
+matches `write`, `read`, `list`, or `check` is that word, not a slug.
+
+Guess neither the verb nor the target. Where either is ambiguous,
+say so, list the candidates, and stop - touch nothing.
 
 A folder argument resolves the same way everywhere: exact folder
 name, else a unique prefix of the `scratch/*/` names, else list the
@@ -46,9 +63,9 @@ its `HANDOFF.md` exists.
 Target, first match wins - an argument is never required:
 
 1. an explicit folder argument
-2. the handoff this session read or wrote, if this session continued
-   that thread; several threads this session - name the candidates
-   and ask
+2. the handoff this session read, wrote, or checked, when the work
+   since has been that same task; several threads this session - name
+   the candidates and ask
 3. an existing `scratch/` folder whose slug or Task line matches this
    session's task - update it, never create a twin
 4. a new slug: 2-4 kebab-case words drawn from the Task line
@@ -233,8 +250,8 @@ Past cycle 5 or 400 lines, after those fixes land, one opus-tier
 agent rewrites the whole file for precision and returns it. Apply it
 and land back under the ceiling - compress wording, rehome overflow
 to sibling files, never drop what only the session knows. Past the
-budget, prefer `write --no-check` and run `check` from the fresh
-session instead.
+budget, prefer `/handoff --no-check` and run `/handoff check` from
+the fresh session instead.
 
 ### Report
 
@@ -244,13 +261,16 @@ path, the size, and the resume line - with `--no-check` too:
 ```
 Wrote scratch/auth-token-refresh/HANDOFF.md (~1.4K tokens, cycle 3).
 Resume: kill this session, start a fresh one, run
-  /handoff read auth-token-refresh
+  /handoff auth-token-refresh
 ```
 
 ## read
 
-1. Resolve `<folder>` per the shared rule; none given, follow the
-   table.
+1. Resolve `<slug>` per the shared rule. With none given: one
+   `scratch/*/HANDOFF.md` exists, read it; several exist, list the
+   slugs and ask which; none exists, say `scratch/` holds no handoff.
+   The last two stop there - never pick the newest, and never fall
+   through to write.
 2. Read the file, then the `Read now` files and every todo file the
    Plan points at. A target with no conforming header names its own
    reading order or read-first pointers - follow those instead.
@@ -265,7 +285,7 @@ Resume: kill this session, start a fresh one, run
    present: put them to the user and stop. Otherwise state the task
    and the Now step in two sentences, then execute Now; the Plan
    follows.
-5. This handoff is now the target of a later bare `/handoff write`.
+5. A later bare `/handoff` targets this handoff - write rule 2.
 
 ## list
 

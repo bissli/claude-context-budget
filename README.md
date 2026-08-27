@@ -89,18 +89,18 @@ warned much earlier in absolute tokens.
 At the end of a turn, once:
 
 > Context 291K of a 350K budget, growing 19K a turn. About 4 turns of
-> room left - a good point to run /handoff write.
+> room left - a good point to run /handoff.
 
 Then nothing until the next band:
 
-> Context 362K, at the 350K budget. Run /handoff write, then read it back
-> in a fresh session with /handoff read: that restarts near 69K plus the
-> file, against 123K for /compact. Compact instead only to carry the tail
-> of this conversation, which buys about 12 more turns.
+> Context 362K, at the 350K budget. Run /handoff, then run it again in
+> a fresh session to read it back: that restarts near 69K plus the
+> file, against 123K for /compact. Compact instead only to carry the
+> tail of this conversation, which buys about 12 more turns.
 
 > Context 517K, about $2.27 a turn - 1.5x the $1.54 target. Every
-> further turn pays to re-read history you are not using. Run /handoff
-> write.
+> further turn pays to re-read history you are not using. Run
+> /handoff.
 
 The last two also raise a desktop notification.
 
@@ -141,40 +141,50 @@ the file and the repo are all that survive - so the skill is built to
 capture exactly what rehydration needs:
 
 ```
-/handoff write                     writes or updates the handoff, checks it
+/handoff                       writes or updates the handoff, checks it
   (kill the session, start fresh)
-/handoff read auth-token-refresh   rehydrates and resumes the plan
+/handoff auth-token-refresh    rehydrates and resumes the plan
 ```
 
-- `write` needs no argument: it picks a folder name from the task, or
+There is no verb to type. The question is what the session holds, not
+how long it has run. A session that edited a file or settled a
+decision holds something worth telling a fresh session, so `/handoff`
+writes. One that only looked something up holds nothing, so it reads a
+handoff back instead. Write is the last move of a working session and
+read is the first move of the session that replaces it, so the two
+never collide. Neither the verb nor the target is ever guessed: where
+either is ambiguous - several handoffs and no name given - the skill
+lists the candidates and stops.
+
+- Writing needs no argument: it picks a folder name from the task, or
   takes one if you choose - the file inside is always `HANDOFF.md`. It
   records the plan, the state, key files with line anchors, settled
   decisions, and dead ends - pointers into the repo, never pasted code.
   Most handoffs land between 2K and 5K tokens, against ~22K for a
   /compact summary.
-- Run `write` again a session later and it updates the same file in
-  place: state is rewritten, the plan is ticked off, decisions and dead
-  ends accumulate, and a one-line log per cycle keeps the trajectory.
-  The prior version stays beside it as `HANDOFF.prev.md`.
+- Run it again a session later and it updates the same file in place:
+  state is rewritten, the plan is ticked off, decisions and dead ends
+  accumulate, and a one-line log per cycle keeps the trajectory. The
+  prior version stays beside it as `HANDOFF.prev.md`.
 - A handoff some other tool or session wrote is adopted, not
   discarded: the first write keeps a permanent `HANDOFF.orig.md` copy,
   converts the structure, and rehomes overflow to sibling notes files.
   The form converges. The content survives.
 - When the work has a ledger of its own (`todo/foobar.md`), the
-  handoff points at the live item rather than copying it: `write`
-  syncs the todo first, and `read` reads it and trusts it on what is
-  open, the handoff on how. One home per fact, so nothing drifts.
+  handoff points at the live item rather than copying it: writing
+  syncs the todo first, and reading trusts it on what is open, the
+  handoff on how. One home per fact, so nothing drifts.
 - Each write ends with a reviewer pass - a skeptic that must
   rehydrate from the file alone, a merge auditor on updates, a trimmer
   once the file passes 150 lines. A reviewer seat costs cents; a
   dropped decision costs the turns it takes to re-derive.
-- `read` verifies the file's git anchors, reads only the files the
+- Reading verifies the file's git anchors, reads only the files the
   handoff marks "read now", and executes the handoff's Now step - the
   single next action, with the plan behind it. It stops only for open
   questions the file left for you; decisions stay settled, and nothing
   is re-planned or re-litigated.
-- `list` shows what exists; `check` re-reviews one in place and
-  applies what survives.
+- `/handoff list` shows what exists; `/handoff check` re-reviews one in
+  place and applies what survives.
 
 Add `scratch/` to your gitignore if handoffs should stay untracked.
 
