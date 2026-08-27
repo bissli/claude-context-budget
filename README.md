@@ -30,17 +30,23 @@ workflows, but not `statusLine` - so this one is wired by hand. Add to
 {
   "statusLine": {
     "type": "command",
-    "command": "python3 ~/.claude/plugins/marketplaces/context-budget/scripts/statusline.py"
+    "command": "python3 \"$(ls ~/.claude/plugins/cache/*/context-budget/*/scripts/statusline.py | sort -V | tail -1)\""
   }
 }
 ```
 
-If that path does not exist, find it with
-`ls -d ~/.claude/plugins/marketplaces/*/scripts`.
+That resolves the installed copy, which is what actually runs. An
+installed plugin lives at
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` - the
+version is in the path, so the glob is what keeps the line working
+across an upgrade, and `sort -V` is what keeps 0.10.0 ahead of 0.9.0.
+Point it at a checkout instead if you run one:
+`python3 /path/to/claude-context-budget/scripts/statusline.py`.
 
 The status line reads the growth rate from a file the hook writes each
-turn, so the two never disagree. Without the hook it falls back to a
-default rate and still works.
+turn, so the two never disagree - which is also why the line has to
+resolve the same tree the hook runs from. Without the hook it falls
+back to a default rate and still works.
 
 ### Update
 
@@ -48,11 +54,14 @@ default rate and still works.
 /plugin marketplace update context-budget
 ```
 
-The plugin runs from the marketplace clone, so one update moves the
-hook, the skill, and the scripts the status line points at together.
-There is no migration: the state under `~/.claude/cache/context-budget/`
-is rewritten every turn by whichever version is running, and handoff
-files are plain markdown that no version needs to convert.
+That moves the marketplace clone. The plugin itself runs from a copy
+taken at install time under `~/.claude/plugins/cache/`, pinned to the
+version in its path, so the clone is the source and the copy is what
+executes - check which you are looking at before concluding an edit
+did nothing. There is no migration either way: the state under
+`~/.claude/cache/context-budget/` is rewritten every turn by whichever
+version is running, and handoff files are plain markdown that no
+version needs to convert.
 
 ### Uninstall
 
@@ -183,8 +192,12 @@ lists the candidates and stops.
   single next action, with the plan behind it. It stops only for open
   questions the file left for you; decisions stay settled, and nothing
   is re-planned or re-litigated.
-- `/handoff list` shows what exists; `/handoff check` re-reviews one in
-  place and applies what survives.
+- `/handoff list` shows what exists, newest first, with plan items
+  ticked over plan items total beside each - `7/7` is a finished thread
+  and `0/5` one that never started, which is most of what you need to
+  pick. `/handoff list 5` shows only the five most recent and reads only
+  those five files. `/handoff check` re-reviews one in place and applies
+  what survives.
 
 Add `scratch/` to your gitignore if handoffs should stay untracked.
 
