@@ -85,35 +85,33 @@ def test_the_over_band_holds_the_dollar_limit_and_the_order():
     passed the limit.
     """
     for tier in budget.PRICE_PER_MTOK:
-        over = budget.over_budget_tokens(tier, 1_900)
+        over = budget.over_budget_tokens(tier, budget.target_tokens(tier))
         assert abs(budget.cost_per_turn(over, tier)
                    - budget.COST_PER_TURN_LIMIT) < 0.02
         for per_call in (1_200, 1_900, 2_500, 6_300, 10_000):
-            assert (budget.over_budget_tokens(tier, per_call)
-                    >= budget.target_tokens(tier, per_call))
-    assert (budget.over_budget_tokens('fable', 6_300)
-            == budget.target_tokens('fable', 6_300))
+            target = budget.target_tokens(tier, per_call)
+            assert budget.over_budget_tokens(tier, target) >= target
+    assert budget.over_budget_tokens('fable', 400_200) == 400_200
 
 
-def test_a_floor_inflated_target_is_announced_at_its_real_cost():
-    """Verify the loudest band fires at a floor-dominated target, in
-    dollars.
+def test_the_over_band_prices_a_turn_in_dollars_not_in_tokens():
+    """Verify the loudest band names what a turn costs, not a ratio of
+    two token counts.
 
-    Mutation: scaling the over band with the inflated target (the
-    shipped defect), which lets a fable session reading 6K tokens a call
-    march to $5 a turn before the overpriced warning fires.
-    Oracle: hand-computed - at 6,300 tokens a call fable's cycle floor
-    is 123,000 + 44 * 6,300 = 400,200, past the $2.20 point at 250,000,
-    so at 400,200 the band is 2 and the message prices the turn at
-    $3.52, 2.3x the $1.54 target.
+    Mutation: printing context/target in the band-2 message. It reads
+    1.2x at the very point the turn costs 1.4x the target, so the number
+    that decides whether to keep going is understated by a fifth.
+    Oracle: hand-computed - fable crosses the over band at the $2.20
+    point, 250,000 tokens, which is 1.4286x the $1.54 target, while the
+    same context against fable's 206,600 target is only 1.21x.
     """
-    per_call = 6_300
-    target = budget.target_tokens('fable', per_call)
-    assert target == 400_200
-    band, message = cb.compose(target, 'fable', per_call)
+    target = budget.target_tokens('fable')
+    assert target == 206_600
+    band, message = cb.compose(250_000, 'fable', 1_900, target)
     assert band == 2
-    assert '$3.52' in message
-    assert '2.3x' in message
+    assert '$2.20' in message
+    assert '1.4x' in message
+    assert '1.2x' not in message
 
 
 def test_the_countdown_rounds_up_so_it_never_sticks():
@@ -134,7 +132,7 @@ def test_the_countdown_rounds_up_so_it_never_sticks():
         'context_window': {'total_input_tokens': 251_352},
         }))
     assert 'handoff in 2' in line
-    _, message = cb.compose(300_000, 'opus', 1_900)
+    _, message = cb.compose(300_000, 'opus', 1_900, 350_000)
     assert 'About 3 turns' in message
 
 
@@ -199,12 +197,12 @@ def test_bands_fire_in_order_and_not_before_the_handoff_point():
     """
     per_call = 1_900
     assert budget.reserve_tokens(350_000, per_call) == 75_240
-    assert cb.compose(274_759, 'opus', per_call)[0] == -1
-    assert cb.compose(274_760, 'opus', per_call)[0] == 0
-    assert cb.compose(349_999, 'opus', per_call)[0] == 0
-    assert cb.compose(350_000, 'opus', per_call)[0] == 1
-    assert cb.compose(499_999, 'opus', per_call)[0] == 1
-    assert cb.compose(500_000, 'opus', per_call)[0] == 2
+    assert cb.compose(274_759, 'opus', per_call, 350_000)[0] == -1
+    assert cb.compose(274_760, 'opus', per_call, 350_000)[0] == 0
+    assert cb.compose(349_999, 'opus', per_call, 350_000)[0] == 0
+    assert cb.compose(350_000, 'opus', per_call, 350_000)[0] == 1
+    assert cb.compose(499_999, 'opus', per_call, 350_000)[0] == 1
+    assert cb.compose(500_000, 'opus', per_call, 350_000)[0] == 2
 
 
 def test_handoff_warning_arrives_earlier_when_the_session_fills_faster():
@@ -217,8 +215,8 @@ def test_handoff_warning_arrives_earlier_when_the_session_fills_faster():
     Oracle: differential - the same context is silent at the slow rate
     and already warning at the fast one.
     """
-    slow = cb.compose(250_000, 'opus', 1_900)
-    fast = cb.compose(250_000, 'opus', 6_000)
+    slow = cb.compose(250_000, 'opus', 1_900, 350_000)
+    fast = cb.compose(250_000, 'opus', 6_000, 350_000)
     assert slow[0] == -1
     assert fast[0] == 0
 
@@ -231,7 +229,7 @@ def test_message_names_the_numbers_the_reader_has_to_act_on():
     Oracle: the hand-computed strings for a 300K context on a 350K
     target growing 16,720 tokens a turn.
     """
-    _, message = cb.compose(300_000, 'opus', 1_900)
+    _, message = cb.compose(300_000, 'opus', 1_900, 350_000)
     assert '300K' in message
     assert '350K' in message
     assert 'handoff' in message
@@ -255,7 +253,7 @@ def test_the_warning_names_the_skill_the_plugin_ships():
         front = handle.read().split('---\n', 2)[1]
     name = re.search(r'^name:\s*(\S+)', front, re.M).group(1)
     for context in (300_000, 360_000, 600_000):
-        _, message = cb.compose(context, 'opus', 1_900)
+        _, message = cb.compose(context, 'opus', 1_900, 350_000)
         assert re.search(rf'/{name}\b', message)
 
 
@@ -436,40 +434,101 @@ def test_a_barely_growing_session_never_reads_as_zero_growth():
     Oracle: hand-computed - 100 tokens a call is 880 a turn, under the
     1K floor, so the message must carry "<1K a turn".
     """
-    _, message = cb.compose(300_000, 'opus', 100)
+    _, message = cb.compose(300_000, 'opus', 100, 350_000)
     assert '<1K a turn' in message
     assert ' 0K a turn' not in message
 
 
-def test_the_state_file_records_the_target_the_session_was_held_to(
-        monkeypatch, tmp_path):
-    """Verify the stored target uses the session's measured growth.
+def test_the_target_falls_within_a_session_and_never_rises():
+    """Verify the latch is one-directional and released only by a drop.
 
-    Mutation: dropping per_call from the store_state call, which records
-    the fallback-growth target while compose warned against the measured
-    one - the two figures in the state file would describe different
-    sessions.
-    Oracle: hand-computed - a transcript climbing 10,000 tokens a call
-    puts opus's cycle floor at 123,000 + 44 * 10,000 = 563,000, past the
-    350,000 cost target, and that is the figure the file must hold.
+    Mutation: max() in place of min() in latched_target, or seeding an
+    empty latch from the measured rate rather than the fallback - either
+    lets the target rise mid-session, which is what walks the gauge
+    backwards from over-budget to "handoff now".
+    Oracle: hand-computed - fable's fallback seed is 206,600 against a
+    cost parity of 175,000, so a quiet stretch pulls the latch down to
+    175,000, and a 6,000-per-call burst, which on its own justifies
+    123,000 + 44 * 6,000 = 387,000, must still read 175,000.
+    """
+    assert budget.target_tokens('fable', 6_000) == 387_000
+    assert cb.latched_target('fable', 6_000, 0) == 206_600
+    assert cb.latched_target('fable', 900, 206_600) == 175_000
+    assert cb.latched_target('fable', 6_000, 175_000) == 175_000
+    # A file written before the latch existed holds a target it would
+    # never grant now, so the seed clamps that on the way in.
+    assert cb.latched_target('fable', 6_000, 563_000) == 206_600
+
+
+def test_a_growth_burst_never_widens_the_budget(monkeypatch, capsys,
+                                                tmp_path):
+    """Verify a session already past its budget is not handed more room.
+
+    Mutation: deriving the target in compose or in render from the rate
+    measured this turn - the shipped defect. A fable session that starts
+    reading large files lifts its measured rate from 900 to 4,537 a
+    call, the cycle floor lifts the target from 175,000 to 322,628 with
+    it, and a context shown as over budget one turn reads "handoff now"
+    with room to spare the next.
+    Oracle: differential against the defect - replaying a quiet climb
+    followed by a 30,000-a-call burst, the stored target must never
+    exceed the one before it, the status line must never leave red once
+    it has entered it, and the over band must still fire. At the burst
+    the unlatched target would be 322,628, which renders amber at a
+    context of 206,300 and pushes the over boundary out to 546,720, past
+    every context the session reaches.
     """
     monkeypatch.setattr(cb, 'STATE_DIR', str(tmp_path / 'state'))
+    monkeypatch.setattr(sl, 'STATE_DIR', str(tmp_path / 'state'))
     path = tmp_path / 's.jsonl'
-    records = [{
-        'type': 'assistant',
-        'message': {
-            'id': f'm{index}', 'role': 'assistant',
-            'model': 'claude-opus-5',
-            'usage': {'cache_read_input_tokens': 100_000 + 10_000 * index,
-                      'cache_creation_input_tokens': 0, 'input_tokens': 0},
-            },
-        } for index in range(6)]
-    path.write_text('\n'.join(json.dumps(r) for r in records))
-    payload = {'session_id': 'S2', 'transcript_path': str(path)}
-    monkeypatch.setattr(sys, 'stdin', _Stdin(json.dumps(payload)))
-    cb.main()
-    with open(tmp_path / 'state' / 'S2.json') as handle:
-        assert json.load(handle)['target'] == 563_000
+    series = [170_000, 170_900, 171_800, 172_700, 173_600, 174_500,
+              175_400, 176_300, 206_300, 236_300, 266_300]
+
+    def run(upto):
+        records = [{
+            'type': 'assistant',
+            'message': {
+                'id': f'm{index}', 'role': 'assistant',
+                'model': 'claude-fable-5',
+                'usage': {'cache_read_input_tokens': value,
+                          'cache_creation_input_tokens': 0,
+                          'input_tokens': 0},
+                },
+            } for index, value in enumerate(series[:upto])]
+        path.write_text('\n'.join(json.dumps(r) for r in records))
+        payload = {'session_id': 'B', 'transcript_path': str(path)}
+        monkeypatch.setattr(sys, 'stdin', _Stdin(json.dumps(payload)))
+        cb.main()
+        capsys.readouterr()
+        with open(tmp_path / 'state' / 'B.json') as handle:
+            stored = json.load(handle)['target']
+        line = re.sub(r'\x1b\[[0-9;]*m', '', sl.render({
+            'session_id': 'B',
+            'model': {'id': 'claude-fable-5', 'display_name': 'Fable 5'},
+            'workspace': {'current_dir': '/x/proj'},
+            'context_window': {'total_input_tokens': series[upto - 1]},
+            }))
+        return stored, line
+
+    targets, lines = [], []
+    for upto in range(1, len(series) + 1):
+        stored, line = run(upto)
+        targets.append(stored)
+        lines.append(line)
+    assert budget.target_tokens('fable', 4_537) == 322_628
+    assert targets == sorted(targets, reverse=True)
+    assert targets[-1] == 175_000
+    entered = next(index for index, line in enumerate(lines) if 'over' in line)
+    assert all('over' in line for line in lines[entered:])
+    assert '1.2x over' in lines[8]
+    with open(tmp_path / 'state' / 'B.json') as handle:
+        assert json.load(handle)['band'] == 2
+
+    # A compaction is the one thing that releases the latch, and it
+    # reseeds rather than jumping to whatever the burst justified.
+    series.append(120_000)
+    stored, _ = run(len(series))
+    assert stored == budget.target_tokens('fable')
 
 
 class _Stdin:
@@ -484,23 +543,42 @@ class _Stdin:
 
 
 def test_an_expensive_model_gets_a_workable_compaction_cycle():
-    """Verify the target clears where a compaction lands, by real turns.
+    """Verify the target a session is seeded with clears where a
+    compaction lands, by real turns.
 
     Mutation: deriving the target from cost alone. Fable's cost-parity
-    target is 175K while a compaction lands at 123K, so a fast fable
-    session would be handed a cycle of under three turns - and at some
-    rates a target below the point it restarts at.
-    Oracle: hand-computed - at 2,500 tokens a call the cycle floor is
-    123,000 + 5 * 2,500 * 8.8 = 233,000, which beats cost parity, and
-    every cycle must be worth at least MIN_CYCLE_TURNS.
+    target is 175K while a compaction lands at 123K, so every fable
+    session would be seeded with a cycle of under four turns.
+    Oracle: hand-computed - at the 1,900-per-call fallback the cycle
+    floor is 123,000 + 5 * 1,900 * 8.8 = 206,600, which beats fable's
+    cost parity of 175,000, and both tiers must clear MIN_CYCLE_TURNS.
     """
-    assert budget.target_tokens('fable', 2_500) == 233_000
+    assert budget.target_tokens('fable') == 206_600
+    assert budget.tokens_for_cost(budget.COST_PER_TURN_TARGET, 'fable') \
+        == 175_000
+    per_turn = budget.FALLBACK_GROWTH_PER_CALL * budget.CALLS_PER_TURN
     for tier in budget.PRICE_PER_MTOK:
-        for per_call in (1_200, 1_900, 2_500, 4_000):
-            target = budget.target_tokens(tier, per_call)
-            per_turn = per_call * budget.CALLS_PER_TURN
-            cycle = (target - budget.POST_COMPACTION_TOKENS) / per_turn
-            assert cycle >= budget.MIN_CYCLE_TURNS - 0.01
+        seeded = cb.latched_target(tier, budget.FALLBACK_GROWTH_PER_CALL, 0)
+        assert seeded == budget.target_tokens(tier)
+        cycle = (seeded - budget.POST_COMPACTION_TOKENS) / per_turn
+        assert cycle >= budget.MIN_CYCLE_TURNS - 0.01
+
+
+def test_a_fast_session_is_told_how_little_a_compaction_buys():
+    """Verify the budget message counts the cycle at the live rate.
+
+    Mutation: computing the cycle from FALLBACK_GROWTH_PER_CALL, or from
+    the target's own floor, which promises five more turns to a session
+    that will get two. The latched target no longer moves with growth,
+    so this sentence is the only place a fast session learns its cycle
+    has collapsed.
+    Oracle: hand-computed - fable is held to 206,600, a compaction lands
+    at 123,000, and at 6,000 tokens a call a turn eats 52,800, so the
+    cycle is 83,600 / 52,800 = 1.6 turns.
+    """
+    _, message = cb.compose(206_600, 'fable', 6_000,
+                            budget.target_tokens('fable'))
+    assert 'about 2 more turns' in message
 
 
 def test_the_warning_never_lands_below_where_a_compaction_restarts():
@@ -515,9 +593,10 @@ def test_the_warning_never_lands_below_where_a_compaction_restarts():
     """
     for tier in budget.PRICE_PER_MTOK:
         for per_call in (1_200, 1_900, 2_500, 4_000, 8_000):
-            target = budget.target_tokens(tier, per_call)
-            handoff = target - budget.reserve_tokens(target, per_call)
-            assert handoff >= budget.POST_COMPACTION_TOKENS
+            for target in (budget.target_tokens(tier, per_call),
+                           cb.latched_target(tier, per_call, 0)):
+                handoff = target - budget.reserve_tokens(target, per_call)
+                assert handoff >= budget.POST_COMPACTION_TOKENS
 
 
 def test_the_gauge_stays_readable_past_the_budget():

@@ -172,21 +172,24 @@ def target_tokens(tier: str, per_call: int = FALLBACK_GROWTH_PER_CALL) -> int:
       expensive model a session you must keep compacting simply costs
       more per turn than a cheap one, and the honest move is to say by
       how much rather than to set a threshold nobody can hold.
+    - This is what the growth rate justifies right now, not what the
+      session is held to. The rate is re-measured every turn and swings
+      by a factor of three, so a caller tracking one session latches
+      this figure downward rather than following it up.
     """
     return max(tokens_for_cost(COST_PER_TURN_TARGET, tier),
                cycle_floor_tokens(per_call))
 
 
-def over_budget_tokens(tier: str,
-                       per_call: int = FALLBACK_GROWTH_PER_CALL) -> int:
+def over_budget_tokens(tier: str, target: int) -> int:
     """Context size past which a turn is plainly overpriced.
 
     Parameters
     ----------
     tier : str
         Price tier from :func:`model_tier`.
-    per_call : int, default FALLBACK_GROWTH_PER_CALL
-        Estimated tokens added per assistant call.
+    target : int
+        The compaction target in force for this session, in tokens.
 
     Returns
     -------
@@ -196,19 +199,19 @@ def over_budget_tokens(tier: str,
     Notes
     -----
     - The boundary sits where a turn costs COST_PER_TURN_LIMIT, or at
-      the target when the cycle floor has passed that point.
-    - Never below target_tokens(tier, per_call), so the over band
-      cannot fire before the budget band.
+      the target when the cycle floor has pushed that past the limit.
+    - Never below the target it is handed, so the over band cannot fire
+      before the budget band.
     """
     # Notes:
     # - The limit is a dollar figure, so the boundary comes from price
     #   alone - scaling the target instead lets the cycle floor push
     #   "overpriced" to $5 a turn on a fast-growing session.
-    # - A floor past the limit already prices a turn over it at the
-    #   target, so the boundary rises there to keep the thresholds
-    #   ordered.
-    return max(tokens_for_cost(COST_PER_TURN_LIMIT, tier),
-               target_tokens(tier, per_call))
+    # - Taking the target rather than a growth rate is what lets a
+    #   caller pass the latched one. Deriving it here from the live
+    #   rate would move the boundary under a target that no longer
+    #   moves.
+    return max(tokens_for_cost(COST_PER_TURN_LIMIT, tier), target)
 
 
 def reserve_tokens(target: int, per_call: int) -> int:

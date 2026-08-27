@@ -23,6 +23,11 @@ Notes
 - Bands fire on ENTRY only. A Stop hook runs every turn, so repeating a
   band already reached would be noise. The highest band announced is kept
   in a per-session state file and rearmed when the context drops.
+- The target is latched in that same file and may fall within a session,
+  never rise. It is derived from the measured growth rate, and that rate
+  triples when a session starts reading large files, so an unlatched
+  target outruns the context it is measuring: a session already shown as
+  over budget is handed more room and told it is fine.
 - Growth is measured from the context series itself, not by counting
   turns. Transcripts interleave real user prompts with injected system
   reminders, tool results, and hook output, and no reliable rule
@@ -141,7 +146,8 @@ def read_transcript(path: str) -> tuple[int, str, int]:
     return series[-1], model, growth_per_call(series)
 
 
-def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
+def compose(context: int, tier: str, per_call: int,
+            target: int) -> tuple[int, str]:
     """Pick the band for a context size and write its message.
 
     Parameters
@@ -152,6 +158,8 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
         Price tier from ``budget.model_tier``.
     per_call : int
         Estimated tokens added per assistant call.
+    target : int
+        The compaction target in force for this session, in tokens.
 
     Returns
     -------
@@ -161,11 +169,16 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
 
     Notes
     -----
+    - The target is handed in rather than derived, so the bands move
+      with the session's latched target and not with the growth rate
+      measured this turn.
     - A floor-inflated target can equal the over boundary. Band 1 is
       then never entered, so the band-2 message also names /handoff.
+    - The growth rate still shapes the reserve and both countdowns.
+      Those are estimates of how much room is left and are meant to
+      react; only the thresholds have to hold still.
     """
-    target = budget.target_tokens(tier, per_call)
-    over = budget.over_budget_tokens(tier, per_call)
+    over = budget.over_budget_tokens(tier, target)
     handoff_at = target - budget.reserve_tokens(target, per_call)
     per_turn = per_call * budget.CALLS_PER_TURN
     cost = budget.cost_per_turn(context, tier)
@@ -197,8 +210,44 @@ def compose(context: int, tier: str, per_call: int) -> tuple[int, str]:
     return -1, ''
 
 
-def load_state(state_path: str) -> tuple[int, int]:
-    """Read the band already announced and the context it was seen at.
+def latched_target(tier: str, per_call: int, in_force: int) -> int:
+    """Hold a session's target where it is, or lower, never higher.
+
+    Parameters
+    ----------
+    tier : str
+        Price tier from ``budget.model_tier``.
+    per_call : int
+        Estimated tokens added per assistant call.
+    in_force : int
+        Target this session was held to last turn, 0 when it has none.
+
+    Returns
+    -------
+    int
+        Billed context in tokens.
+
+    Notes
+    -----
+    - Context only grows, so a rising target walks the gauge backwards.
+      A burst of large tool results lifts the measured growth rate, the
+      cycle floor lifts the target with it, and a session already past
+      the budget is shown as having room again.
+    - Raising the target is also backwards on cost, which is what the
+      budget is for. A fast-growing session is the expensive one, and
+      following its rate up hands it the most room of all.
+    - A session with no target yet starts at the one the fallback rate
+      justifies. That is what the status line already shows before the
+      first Stop writes any state, so starting anywhere higher would
+      itself be a rise on the first turn.
+    """
+    seed = budget.target_tokens(tier)
+    ceiling = min(in_force, seed) if in_force > 0 else seed
+    return min(budget.target_tokens(tier, per_call), ceiling)
+
+
+def load_state(state_path: str) -> tuple[int, int, int]:
+    """Read the band announced, the context seen, and the target in force.
 
     Parameters
     ----------
@@ -207,16 +256,17 @@ def load_state(state_path: str) -> tuple[int, int]:
 
     Returns
     -------
-    tuple[int, int]
-        The stored band index and billed context, or ``(-1, 0)`` when
-        nothing is recorded.
+    tuple[int, int, int]
+        The stored band index, billed context, and target, or
+        ``(-1, 0, 0)`` when nothing is recorded.
     """
     try:
         with open(state_path) as handle:
             data = json.load(handle)
-        return int(data.get('band', -1)), int(data.get('context', 0))
+        return (int(data.get('band', -1)), int(data.get('context', 0)),
+                int(data.get('target', 0)))
     except (OSError, ValueError, AttributeError, TypeError):
-        return -1, 0
+        return -1, 0, 0
 
 
 def store_state(state_path: str, band: int, per_call: int, target: int,
@@ -273,16 +323,20 @@ def main() -> int:
     tier = budget.model_tier(model)
     if tier is None:
         return 0
-    band, message = compose(context, tier, per_call)
 
     state_path = os.path.join(STATE_DIR, f'{session}.json')
-    announced, last_context = load_state(state_path)
-    # The stored band falls only when the context itself fell - a
-    # compaction - never because slowing growth lifted a threshold past
-    # the current context, which would re-fire a band already announced.
-    kept = band if context < last_context else max(band, announced)
-    store_state(state_path, kept, per_call,
-                budget.target_tokens(tier, per_call), context)
+    announced, last_context, in_force = load_state(state_path)
+    # A compaction is the one event that resets a session: it rearms the
+    # bands and releases the target latch, so the cycle that follows is
+    # measured on its own terms.
+    compacted = context < last_context
+    target = latched_target(tier, per_call, 0 if compacted else in_force)
+    band, message = compose(context, tier, per_call, target)
+    # The stored band falls only when the context itself fell, never
+    # because slowing growth lifted a threshold past the current
+    # context, which would re-fire a band already announced.
+    kept = band if compacted else max(band, announced)
+    store_state(state_path, kept, per_call, target, context)
     if band <= announced or band < 0:
         return 0
 

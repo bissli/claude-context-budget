@@ -43,10 +43,10 @@ across an upgrade, and `sort -V` is what keeps 0.10.0 ahead of 0.9.0.
 Point it at a checkout instead if you run one:
 `python3 /path/to/claude-context-budget/scripts/statusline.py`.
 
-The status line reads the growth rate from a file the hook writes each
-turn, so the two never disagree - which is also why the line has to
-resolve the same tree the hook runs from. Without the hook it falls
-back to a default rate and still works.
+The status line reads the growth rate and the target from a file the
+hook writes each turn, so the two never disagree - which is also why the
+line has to resolve the same tree the hook runs from. Without the hook it
+falls back to a default rate and still works.
 
 ### Update
 
@@ -207,10 +207,10 @@ One knob, `COST_PER_TURN_TARGET` in `scripts/budget.py`, set in dollars
 per user turn. Each model's token target is derived from it and that
 model's price:
 
-| Model | Target                  | Over budget           | $/turn at target |
-| ----- | ----------------------- | --------------------- | ----------------: |
-| Opus  | 350,000                 | 500,000               | $1.54            |
-| Fable | 175,000+, growth-scaled | 250,000 or the target | $1.54 and up     |
+| Model | Target                    | Over budget | $/turn at target |
+| ----- | ------------------------- | ----------- | ---------------: |
+| Opus  | 350,000                   | 500,000     | $1.54            |
+| Fable | 206,600, down to 175,000  | 250,000     | $1.82, down to $1.54 |
 
 A model billing at twice the rate hits the same cost per turn at half the
 context, so giving every model one token target quietly lets the
@@ -219,21 +219,29 @@ expensive one cost double.
 Opus is held by cost: 350,000 whatever the session does, and growth only
 changes how long a cycle lasts. Fable is held by the compaction cycle
 instead - cost parity would put it at 175,000, but a compaction lands
-near 123,000, so a target there leaves under three turns of room, and at
-a fast growth rate it would sit below where the session restarts, firing
-every turn forever. Its target is therefore the larger of what cost wants
-and what a five-turn cycle needs at the session's own growth rate:
-206,600 at the typical 1,900 tokens a call, 400,200 for a session
-reading 6,300 a call. The consequence is worth saying plainly: a fable
-session you keep compacting costs what its growth demands - $1.82 a turn
-at typical growth, $3.52 for that heavy reader - not $1.54. On fable the
-lever is the growth rate, not the target.
+near 123,000, so a target there leaves under four turns of room. Its
+target is the larger of what cost wants and what a five-turn cycle needs
+at the assumed 1,900 tokens a call: 206,600, which is $1.82 a turn, not
+$1.54. That gap is the price of a fable session you keep compacting, and
+it is worth saying plainly rather than hiding behind a threshold nobody
+can hold.
 
-Over budget stays a dollar figure. It fires at $2.20 a turn - 500,000
-tokens on opus, 250,000 on fable - or at the target itself once the
-cycle floor has passed that point. It is never scaled up with an
-inflated target. Scaling would let a heavy fable session march to $5 a
-turn before the loudest warning fired.
+The target is latched per session. It may fall - a quiet session pulls
+fable's down to cost parity at 175,000 - but it never rises, and only a
+compaction releases it. The rate it is derived from is re-measured every
+turn and swings by a factor of three when a session starts reading large
+files, so a target that followed it would outrun the context measuring
+it: on a real fable session it climbed 206,600 -> 398,132 -> 294,336
+while the context climbed 74K -> 305K, and the gauge went red, back to
+amber at 300K, then red again. Raising a target because a session got
+expensive is backwards anyway. The countdowns still track the live rate,
+because "two turns of room left" is meant to react; only the thresholds
+have to hold still.
+
+Over budget stays a dollar figure: $2.20 a turn, 500,000 tokens on opus
+and 250,000 on fable. It is never scaled up with the target. Scaling
+would let a heavy fable session march to $5 a turn before the loudest
+warning fired.
 
 Sonnet and Haiku are deliberately absent. A long session on either costs
 little enough that interrupting it to talk about money would spend more
@@ -262,7 +270,8 @@ Each band fires once, on entry. A Stop hook runs every turn, so repeating
 a band already reached would be noise. Compacting drops the context below
 the announced band and rearms it. Only a real drop in context rearms a
 band; slowing growth that lifts a threshold back above the context does
-not.
+not. The target is latched in the same file and released by the same
+drop, so neither the warning nor the gauge can walk backwards.
 
 Subagents are skipped. A subagent's context is short-lived, it cannot
 compact, and warning about it gives you nothing to act on.

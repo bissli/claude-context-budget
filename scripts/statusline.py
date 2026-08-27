@@ -18,10 +18,12 @@ Notes
 - Claude Code has no plugin surface for a status line, so unlike the Stop
   hook this script cannot install itself. Point ``statusLine.command`` in
   settings.json at it; the project README gives the exact block.
-- The growth rate comes from the state file the Stop hook writes each
-  turn, so the gauge and the warning never disagree. Re-deriving it here
-  would mean re-reading the transcript on a line that repaints
-  continuously.
+- The growth rate and the target both come from the state file the Stop
+  hook writes each turn, so the gauge and the warning never disagree.
+  Re-deriving them here would mean re-reading the transcript on a line
+  that repaints continuously - and would re-derive the target from a
+  rate the hook has already latched, which is the one number that must
+  not move.
 - Every threshold comes from :mod:`budget`, shared with the hook, so the
   gauge cannot drift from the warning it is meant to anticipate.
 - Ordered by what has to survive truncation. A status line sharing a
@@ -57,25 +59,43 @@ BAR_FILL = '='
 BAR_TRACK = '-'
 
 
-def session_growth(session: str) -> int:
-    """Read this session's measured growth per call, or the fallback.
+def session_state(session: str, tier: str) -> tuple[int, int]:
+    """Read this session's growth per call and the target it is held to.
 
     Parameters
     ----------
     session : str
         Session id from the status line payload.
+    tier : str
+        Price tier from ``budget.model_tier``.
 
     Returns
     -------
-    int
-        Estimated tokens added per assistant call.
+    tuple[int, int]
+        Estimated tokens added per assistant call, and the compaction
+        target in tokens.
+
+    Notes
+    -----
+    - Before the first Stop there is no state, so both fall back to what
+      the fallback growth rate justifies. The hook latches the target
+      down from that same figure, so the gauge can only ever tighten as
+      state appears - it never jumps outward.
+    - A target from an older state file is clamped to that figure too.
+      The latch was added after some files were written, and those hold
+      targets it would never grant now.
     """
     safe = session.replace('/', '_')
+    per_call, target = budget.FALLBACK_GROWTH_PER_CALL, 0
     try:
         with open(os.path.join(STATE_DIR, f'{safe}.json')) as handle:
-            return max(1, int(json.load(handle)['growth_per_call']))
+            state = json.load(handle)
+        per_call = max(1, int(state['growth_per_call']))
+        target = int(state.get('target') or 0)
     except (OSError, ValueError, KeyError, TypeError):
-        return budget.FALLBACK_GROWTH_PER_CALL
+        pass
+    seed = budget.target_tokens(tier)
+    return per_call, min(target, seed) if target > 0 else seed
 
 
 def render(payload: dict[str, Any]) -> str:
@@ -104,8 +124,8 @@ def render(payload: dict[str, Any]) -> str:
     tier = budget.model_tier(str(model.get('id') or ''))
     if tier is None:
         return plain
-    per_call = session_growth(str(payload.get('session_id') or ''))
-    target = budget.target_tokens(tier, per_call)
+    per_call, target = session_state(str(payload.get('session_id') or ''),
+                                     tier)
     per_turn = per_call * budget.CALLS_PER_TURN
     handoff_at = target - budget.reserve_tokens(target, per_call)
 
