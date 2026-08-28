@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="300" viewBox="0 0 800 300" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+<text x="56" y="24" fill="#ffffff" font-size="13.5" text-anchor="start" font-weight="600">Every request re-sends the whole conversation</text>
+<text x="56" y="42" fill="#898781" font-size="11.5" text-anchor="start">tokens sent to the API, turn by turn</text>
+<line x1="56" y1="184" x2="620" y2="184" stroke="#2c2c2a" stroke-width="1"/>
+<text x="48" y="188" fill="#898781" font-size="11" text-anchor="end">100K</text>
+<line x1="56" y1="120" x2="620" y2="120" stroke="#2c2c2a" stroke-width="1"/>
+<text x="48" y="124" fill="#898781" font-size="11" text-anchor="end">200K</text>
+<line x1="56" y1="56" x2="620" y2="56" stroke="#2c2c2a" stroke-width="1"/>
+<text x="48" y="60" fill="#898781" font-size="11" text-anchor="end">300K</text>
+<line x1="56" y1="248" x2="620" y2="248" stroke="#383835" stroke-width="1"/>
+<rect x="67.5" y="203.8" width="24" height="44.2" fill="#1c5cab"/>
+<path d="M 67.5 201.8 L 67.5 195 Q 67.5 191 71.5 191 L 87.5 191 Q 91.5 191 91.5 195 L 91.5 201.8 Z" fill="#3987e5"/>
+<text x="79.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">1</text>
+<rect x="114.5" y="193" width="24" height="55" fill="#1c5cab"/>
+<path d="M 114.5 191 L 114.5 184.1 Q 114.5 180.1 118.5 180.1 L 134.5 180.1 Q 138.5 180.1 138.5 184.1 L 138.5 191 Z" fill="#3987e5"/>
+<text x="126.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">2</text>
+<rect x="161.5" y="182.1" width="24" height="65.9" fill="#1c5cab"/>
+<path d="M 161.5 180.1 L 161.5 173.2 Q 161.5 169.2 165.5 169.2 L 181.5 169.2 Q 185.5 169.2 185.5 173.2 L 185.5 180.1 Z" fill="#3987e5"/>
+<text x="173.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">3</text>
+<rect x="208.5" y="171.2" width="24" height="76.8" fill="#1c5cab"/>
+<path d="M 208.5 169.2 L 208.5 162.3 Q 208.5 158.3 212.5 158.3 L 228.5 158.3 Q 232.5 158.3 232.5 162.3 L 232.5 169.2 Z" fill="#3987e5"/>
+<text x="220.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">4</text>
+<rect x="255.5" y="160.3" width="24" height="87.7" fill="#1c5cab"/>
+<path d="M 255.5 158.3 L 255.5 151.4 Q 255.5 147.4 259.5 147.4 L 275.5 147.4 Q 279.5 147.4 279.5 151.4 L 279.5 158.3 Z" fill="#3987e5"/>
+<text x="267.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">5</text>
+<rect x="302.5" y="149.4" width="24" height="98.6" fill="#1c5cab"/>
+<path d="M 302.5 147.4 L 302.5 140.6 Q 302.5 136.6 306.5 136.6 L 322.5 136.6 Q 326.5 136.6 326.5 140.6 L 326.5 147.4 Z" fill="#3987e5"/>
+<text x="314.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">6</text>
+<rect x="349.5" y="138.6" width="24" height="109.4" fill="#1c5cab"/>
+<path d="M 349.5 136.6 L 349.5 129.7 Q 349.5 125.7 353.5 125.7 L 369.5 125.7 Q 373.5 125.7 373.5 129.7 L 373.5 136.6 Z" fill="#3987e5"/>
+<text x="361.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">7</text>
+<rect x="396.5" y="127.7" width="24" height="120.3" fill="#1c5cab"/>
+<path d="M 396.5 125.7 L 396.5 118.8 Q 396.5 114.8 400.5 114.8 L 416.5 114.8 Q 420.5 114.8 420.5 118.8 L 420.5 125.7 Z" fill="#3987e5"/>
+<text x="408.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">8</text>
+<rect x="443.5" y="116.8" width="24" height="131.2" fill="#1c5cab"/>
+<path d="M 443.5 114.8 L 443.5 107.9 Q 443.5 103.9 447.5 103.9 L 463.5 103.9 Q 467.5 103.9 467.5 107.9 L 467.5 114.8 Z" fill="#3987e5"/>
+<text x="455.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">9</text>
+<rect x="490.5" y="105.9" width="24" height="142.1" fill="#1c5cab"/>
+<path d="M 490.5 103.9 L 490.5 97 Q 490.5 93 494.5 93 L 510.5 93 Q 514.5 93 514.5 97 L 514.5 103.9 Z" fill="#3987e5"/>
+<text x="502.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">10</text>
+<rect x="537.5" y="95" width="24" height="153" fill="#1c5cab"/>
+<path d="M 537.5 93 L 537.5 86.2 Q 537.5 82.2 541.5 82.2 L 557.5 82.2 Q 561.5 82.2 561.5 86.2 L 561.5 93 Z" fill="#3987e5"/>
+<text x="549.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">11</text>
+<rect x="584.5" y="84.2" width="24" height="163.8" fill="#1c5cab"/>
+<path d="M 584.5 82.2 L 584.5 75.3 Q 584.5 71.3 588.5 71.3 L 604.5 71.3 Q 608.5 71.3 608.5 75.3 L 608.5 82.2 Z" fill="#3987e5"/>
+<text x="596.5" y="266" fill="#898781" font-size="10.5" text-anchor="middle">12</text>
+<text x="338" y="286" fill="#898781" font-size="11" text-anchor="middle">turns</text>
+<line x1="630" y1="76.7" x2="646" y2="76.7" stroke="#383835" stroke-width="1"/>
+<text x="652" y="80.7" fill="#c3c2b7" font-size="11.5" text-anchor="start">what this turn adds</text>
+<line x1="630" y1="166.1" x2="646" y2="166.1" stroke="#383835" stroke-width="1"/>
+<text x="652" y="163.1" fill="#c3c2b7" font-size="11.5" text-anchor="start">everything before it,</text>
+<text x="652" y="177.1" fill="#c3c2b7" font-size="11.5" text-anchor="start">re-sent every time</text>
+</svg>

@@ -16,14 +16,319 @@ room, that the conversation has grown expensive enough to hand off.
 /plugin install context-budget@context-budget
 ```
 
-That installs the warning hook and the /handoff skill together. It
-needs `python3` on `PATH` and nothing else.
+The first command registers this repo as a plugin source (a
+"marketplace"); the second installs the warning hook and the `/handoff`
+command from it. It needs `python3` on `PATH` and nothing else. The
+status line takes one manual step, described
+[below](#status-line-optional-one-manual-step).
 
-### Status line (optional, one manual step)
+## The problem
 
-Claude Code has no plugin surface for a status line - a plugin can ship
-commands, skills, agents, hooks, themes, output styles, monitors, and
-workflows, but not `statusLine` - so this one is wired by hand. Add to
+Claude Code talks to a stateless API: every request re-sends the whole
+conversation. A turn - one prompt from you, plus everything Claude does
+before it waits for you again - is about 9 requests, one per tool call,
+and every one of them re-sends everything that came before it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/resend-dark.svg">
+  <img alt="Stacked columns of tokens sent per turn. Each turn adds about
+17K new tokens on top of everything before it, and the whole stack is
+re-sent every turn, reaching about 270K by turn 12."
+src="docs/resend-light.svg">
+</picture>
+
+Prompt caching is what makes this affordable at all: a token re-read
+from the cache costs a tenth of a fresh one. The two models where this
+is worth money are Opus 5, Claude Code's default, and Fable 5, the top
+tier, which bills exactly double.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/cache-discount-dark.svg">
+  <img alt="Two panels comparing the cost of one turn as context grows to
+500K. On Opus 5 the turn costs $22.00 at full price and $2.20 through the
+cache. On Fable 5 it costs $44.00 at full price and $4.40 through the
+cache."
+src="docs/cache-discount-light.svg">
+</picture>
+
+But the discount is not a cure. The cache lowers the price of each
+re-read token; it does nothing about the number of tokens re-read, which
+grows every turn and never shrinks. Zoom in on the cached lines above
+and the climb is still there:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/cost-per-turn-dark.svg">
+  <img alt="Cost of one turn against context, at cache-read prices.
+Fable 5 crosses the $1.54 target at 175K tokens and $2.20 at 250K.
+Opus 5 crosses $1.54 at 350K and $2.20 at 500K."
+src="docs/cost-per-turn-light.svg">
+</picture>
+
+So the plugin holds a dollar line, not a token line: **$1.54 a turn** as
+the target and **$2.20 a turn** as over budget. Each model's token
+thresholds fall out of its own price, which is why Fable's gauge fills
+about twice as fast as Opus's. (Fable's held target lands at $1.82, not
+$1.54: a compaction restarts too high for a $1.54 target to leave
+working room. [The budget knob](#the-budget-knob) has the arithmetic.)
+
+Every figure below already includes the cache discount. The bill being
+discussed is the discounted one.
+
+## What a turn costs, point by point
+
+One turn costs `context x cache-read rate x 8.8 calls`. The tables show
+that cost at each context size, the multiple of that model's own target
+cost, and what the same turn would have cost without the cache.
+
+**Opus 5** - cache read $0.50 per million tokens, target $1.54 at 350K:
+
+| context           | one turn | vs target | without cache | cache saved |
+| ----------------- | --------: | ---------: | -------------: | -----------: |
+| 100K              | $0.44    | 0.3x      | $4.40         | $3.96       |
+| 200K              | $0.88    | 0.6x      | $8.80         | $7.92       |
+| **350K** - target | $1.54    | 1.0x      | $15.40        | $13.86      |
+| 400K              | $1.76    | 1.1x      | $17.60        | $15.84      |
+| **500K** - over   | $2.20    | 1.4x      | $22.00        | $19.80      |
+| 700K              | $3.08    | 2.0x      | $30.80        | $27.72      |
+| 1M                | $4.40    | 2.9x      | $44.00        | $39.60      |
+
+**Fable 5** - cache read $1.00 per million tokens, target $1.82 at
+206.6K:
+
+| context             | one turn | vs target | without cache | cache saved |
+| ------------------- | --------: | ---------: | -------------: | -----------: |
+| 100K                | $0.88    | 0.5x      | $8.80         | $7.92       |
+| **206.6K** - target | $1.82    | 1.0x      | $18.18        | $16.36      |
+| **250K** - over     | $2.20    | 1.2x      | $22.00        | $19.80      |
+| 400K                | $3.52    | 1.9x      | $35.20        | $31.68      |
+| 500K                | $4.40    | 2.4x      | $44.00        | $39.60      |
+| 700K                | $6.16    | 3.4x      | $61.60        | $55.44      |
+| 1M                  | $8.80    | 4.8x      | $88.00        | $79.20      |
+
+Read the Fable row you are sitting at: a session parked at 400K pays
+$3.52 for every further turn - 1.9x what it would pay at its target -
+and the cache is already saving it $31.68 a turn. Both columns grow
+together, because both are the same line at different prices.
+
+## What a whole session costs
+
+Per-turn cost climbs in a straight line, so a session's total climbs as
+its square: each new turn costs more than the one before it. Handing off
+resets the line; running on rides it up.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/session-cost-dark.svg">
+  <img alt="Cumulative cost of a 40-turn session, growing 17K a turn.
+On Opus 5, running on reaches $70 while handing off at 350K holds it to
+$34. On Fable 5, running on reaches $141 while handing off at 207K holds
+it to $46."
+src="docs/session-cost-light.svg">
+</picture>
+
+Forty turns, growing 17K a turn, starting at the 69K fresh-session
+floor, restarting at 72K after each handoff. Writing a handoff spends
+about two of those turns, so the held column also buys a little less
+finished work, not only fewer dollars:
+
+| 40 turns on | hand off at target | run on to 732K | held vs run on |
+| ----------- | ------------------: | --------------: | --------------: |
+| Opus 5      | $34                | $70            | -52%           |
+| Fable 5     | $46                | $141           | -67%           |
+
+The cache and the handoff attack different halves of the bill. On the
+run-on Fable session the cache already turned a would-be $1,410 into
+$141; handing off is what turns the $141 into $46. Neither substitutes
+for the other.
+
+## The exit: /handoff
+
+The warnings point at `/handoff`, a command the plugin installs. It
+writes the session's state - plan, key files with line anchors, settled
+decisions, dead ends - to `scratch/<task-name>/HANDOFF.md`, the folder
+named after the task, and a fresh session reads it back and resumes.
+The alternative exit, `/compact`, summarizes the conversation in place.
+They restart at very different sizes:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/restarts-dark.svg">
+  <img alt="Billed context on the first call after each exit: a new
+session starts at 69K, a handoff restart at 72K, a compact restart at
+123K."
+src="docs/restarts-light.svg">
+</picture>
+
+Compaction cannot touch the ~69K floor - the system prompt, tool
+schemas, and instruction files are re-sent in full either way - so it
+compresses only the conversation, the part that was already smallest,
+and its summary plus preserved tail land the restart near 123K. A
+handoff file is 2-5K, exact rather than summarized, and starts a
+session that carries nothing else. Compact still earns its place
+mid-task, when the preserved tail - the messages you were part-way
+through - is worth paying for.
+
+Using it:
+
+```
+/handoff                       writes or updates the handoff, checks it
+  (kill the session, start fresh)
+/handoff auth-token-refresh    reads that handoff back, resumes its plan
+```
+
+(`auth-token-refresh` stands for whatever folder name the writing
+session chose.)
+
+- There is no verb to type. A session that edited a file or settled a
+  decision holds something worth telling a fresh session, so `/handoff`
+  writes; one that only looked something up reads a handoff back
+  instead. Where either the verb or the target is ambiguous, it lists
+  the candidates and stops rather than guessing.
+- Run again a session later, it updates the same file in place: state
+  rewritten, plan ticked off, decisions and dead ends accumulated, the
+  prior version kept as `HANDOFF.prev.md`.
+- Each write ends with a reviewer pass that must reconstruct the task
+  from the file alone; reading checks that the commits and line
+  references the file recorded still match the repo, then executes the
+  file's next step without re-litigating settled decisions.
+- `/handoff list` shows what exists with plan progress beside each;
+  `/handoff check` re-reviews one in place.
+
+Add `scratch/` to your gitignore if handoffs should stay untracked.
+
+## What you see
+
+At the end of a turn, once as each line is crossed - approaching the
+target, at it, over budget:
+
+> Context 291K of a 350K budget, growing 19K a turn. About 4 turns of
+> room left - a good point to run /handoff.
+
+> Context 362K, at the 350K budget. Run /handoff, then run it again in a
+> fresh session to read it back: that restarts near 69K plus the file,
+> against 123K for /compact. Compact instead only to carry the tail of
+> this conversation, which buys about 12 more turns.
+
+> Context 517K, about $2.27 a turn - 1.5x the $1.54 target. Every
+> further turn pays to re-read history you are not using. Run /handoff.
+
+The last two also raise a desktop notification.
+
+## The budget knob
+
+One knob, `COST_PER_TURN_TARGET` in `scripts/budget.py`, in dollars per
+turn. Each model's token thresholds are derived from it; the
+parenthetical figures are where a quiet session settles:
+
+| model   | target                    | over budget | $/turn at target      |
+| ------- | ------------------------- | ----------- | --------------------- |
+| Opus 5  | 350,000                   | 500,000     | $1.54                 |
+| Fable 5 | 206,600 (down to 175,000) | 250,000     | $1.82 (down to $1.54) |
+
+Cost parity would put Fable's target at 175,000, but a compaction lands
+near 123,000, so a target there leaves under four turns of room. Its
+target is therefore the larger of what cost wants and what a five-turn
+compaction cycle needs: 206,600, which is $1.82 a turn. That gap is the
+real price of a Fable session you keep compacting, stated rather than
+hidden. A quiet session pulls the target down toward parity; it is
+latched per session and never rises.
+
+Over budget stays a dollar figure ($2.20) and is never scaled up with
+the target, so a heavy session cannot march the loudest warning out to
+$5 a turn. Sonnet and Haiku are deliberately absent: a long session on
+either costs little enough that interrupting it would cost more
+attention than it saves.
+
+## The math
+
+Anthropic list prices (August 2026), per million tokens:
+
+| model   | input  | cache read | cache write | output |
+| ------- | ------: | ----------: | -----------: | ------: |
+| Opus 5  | $5.00  | $0.50      | $6.25       | $25.00 |
+| Fable 5 | $10.00 | $1.00      | $12.50      | $50.00 |
+
+The plugin's cost model:
+
+```
+one turn = context x cache-read rate x calls per turn
+         = context / 1M x (0.1 x input rate) x 8.8
+```
+
+Worked examples:
+
+```
+Opus  at 350K:  0.35 x $0.50 x 8.8 = $1.54 a turn
+Fable at 400K:  0.40 x $1.00 x 8.8 = $3.52 a turn
+```
+
+And inverted, to set the thresholds:
+
+```
+target tokens = budget / (cache-read rate x 8.8 / 1M)
+Opus:  $1.54 / ($0.50 x 8.8 / 1M) = 350,000
+Fable: $2.20 / ($1.00 x 8.8 / 1M) = 250,000  (over-budget line)
+```
+
+Two costs are deliberately left out. Writing a turn's new tokens into
+the cache (~17K at 1.25x input) and the output tokens themselves are
+both real, but neither grows with context - they add a roughly flat few
+tenths of a dollar to every turn regardless of size. Deep in a session,
+cache reads are nearly the whole bill, and they are the only part that
+climbs, so they are the part the thresholds track.
+
+The defaults, measured from a month of the author's usage - sessions
+with different tool habits will measure differently, which is why the
+hook re-measures growth per session:
+
+- **8.8** assistant calls per user turn
+- **1,900** tokens of growth per call (~17K a turn) until a session has
+  history enough to measure its own rate
+- **69,000** billed tokens for a fresh session, **123,000** after a
+  compaction
+
+## Glossary
+
+| term           | meaning                                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------------------------------- |
+| turn           | one prompt from you plus everything Claude does before waiting again                                              |
+| call           | one API request; each tool use is one, ~9 per turn                                                                |
+| context        | everything re-sent with every call: system prompt, tools, conversation                                            |
+| billed context | `cache_read + cache_creation + uncached_input` on the last call                                                   |
+| cache read     | a re-sent token served from the prompt cache, at 10% of input price                                               |
+| cache write    | a new token added to the cache, at 125% of input price                                                            |
+| target         | context where a turn costs $1.54, lifted where the compaction cycle needs more ($1.82 on Fable); the gauge's 100% |
+| over budget    | context where a turn costs $2.20; never scaled up                                                                 |
+| reserve        | room held below the target so the handoff itself still fits                                                       |
+| floor          | what a session is billed before any conversation: ~69K                                                            |
+| handoff        | write state to a file, start fresh; restarts at floor + file                                                      |
+| compaction     | `/compact`; summarizes in place and restarts near 123K                                                            |
+
+## How it decides
+
+- Growth is measured from the billed-context series itself, not by
+  counting turns - transcripts interleave prompts with injected
+  reminders and tool results, and the series has no such ambiguity. The
+  series is cut at every compaction so the drop never reads as negative
+  growth.
+- The warning sits a reserve below the target: two turns of growth at
+  the measured rate plus half again for slack, floored at 60,000 tokens
+  so a quiet session still gets room to write, and capped at a quarter
+  of the budget - or that same floor, where the floor is larger - so a
+  fast session is never warned beside a half-filled bar.
+- The target and warning point latch downward per session; only a
+  compaction releases them. The countdowns still track the live rate -
+  "two turns left" is meant to react - but the thresholds hold still.
+- A compaction is a drop that frees at least half of what a compaction
+  restarts at; smaller dips (an expired cache block, a tool result
+  leaving the window) do not reset the growth measurement.
+- A failed API call is written to the transcript with a zeroed usage
+  block; it is skipped, not read as a context of zero.
+- Subagents are skipped: their context is short-lived and cannot
+  compact, so a warning there gives you nothing to act on.
+
+## Status line (optional, one manual step)
+
+A plugin cannot set the status line - that setting lives in your
+personal config - so this one is wired by hand. Add to
 `~/.claude/settings.json`:
 
 ```json
@@ -35,296 +340,39 @@ workflows, but not `statusLine` - so this one is wired by hand. Add to
 }
 ```
 
-That resolves the installed copy, which is what actually runs. An
-installed plugin lives at
+An installed plugin lives at
 `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` - the
-version is in the path, so the glob is what keeps the line working
-across an upgrade, and `sort -V` is what keeps 0.10.0 ahead of 0.9.0.
-Point it at a checkout instead if you run one:
-`python3 /path/to/claude-context-budget/scripts/statusline.py`.
+version is in the path, so the glob keeps the line working across an
+upgrade, and `sort -V` keeps 0.10.0 ahead of 0.9.0. Running the plugin
+from a git clone instead? Point the command at
+`/path/to/clone/scripts/statusline.py`. The status line reads the growth rate
+and target from a file the hook writes each turn, so the two never
+disagree; without the hook it falls back to a default rate and still
+works.
 
-The status line reads the growth rate and the target from a file the
-hook writes each turn, so the two never disagree - which is also why the
-line has to resolve the same tree the hook runs from. Without the hook it
-falls back to a default rate and still works.
-
-### Update
+## Update
 
 ```
 /plugin marketplace update context-budget
 ```
 
-That moves the marketplace clone. The plugin itself runs from a copy
-taken at install time under `~/.claude/plugins/cache/`, pinned to the
-version in its path, so the clone is the source and the copy is what
-executes - check which you are looking at before concluding an edit
-did nothing. There is no migration either way: the state under
-`~/.claude/cache/context-budget/` is rewritten every turn by whichever
-version is running, and handoff files are plain markdown that no
-version needs to convert.
+That updates the plugin source. The plugin itself runs from a copy
+taken at install time under `~/.claude/plugins/cache/`, so the clone is
+the source and the copy is what executes. There is no migration either
+way: the state under `~/.claude/cache/context-budget/` is rewritten
+every turn, and handoff files are plain markdown.
 
-### Uninstall
+## Uninstall
 
 ```
 /plugin uninstall context-budget@context-budget
 /plugin marketplace remove context-budget
 ```
 
-That removes the hook and the skill with the plugin. Two things
-outlive it: the `statusLine` block above (remove it from
+Two things outlive it: the `statusLine` block above (remove it from
 settings.json) and the cache directory
-(`rm -rf ~/.claude/cache/context-budget`). Handoffs under `scratch/`
-are yours, not the plugin's; uninstalling touches none of them.
-
-## Why
-
-Claude Code resends the whole conversation on every API call. A cached
-re-read is ten times cheaper than a fresh one, but it is not free, so the
-cost of a session tracks the area under its context curve. Past a certain
-size every turn pays to re-read a history it is no longer using.
-
-Leaving cleanly takes time. You have to write the handoff, and the turn
-already in flight when you decide to go is spent too. By the time a
-session feels too big, there is often no room left to get out.
-
-So this plugin does not warn at a fixed token count. It warns when the
-room left before your budget has shrunk to what those turns will
-consume, measured at the rate your session is actually growing. A
-session reading large files fills up several times faster than a
-conversation, and is warned much earlier in absolute tokens.
-
-## What you see
-
-At the end of a turn, once:
-
-> Context 291K of a 350K budget, growing 19K a turn. About 4 turns of
-> room left - a good point to run /handoff.
-
-Then nothing until the next band:
-
-> Context 362K, at the 350K budget. Run /handoff, then run it again in
-> a fresh session to read it back: that restarts near 69K plus the
-> file, against 123K for /compact. Compact instead only to carry the
-> tail of this conversation, which buys about 12 more turns.
-
-> Context 517K, about $2.27 a turn - 1.5x the $1.54 target. Every
-> further turn pays to re-read history you are not using. Run
-> /handoff.
-
-The last two also raise a desktop notification.
-
-## Why it says hand off rather than compact
-
-Compaction touches only the conversation. Your `CLAUDE.md`, the system
-prompt, tool schemas and instruction files are re-sent in full on the
-very next call, unchanged. Measured over 296 compactions, the median
-restart was 123,620 tokens: about 98,000 of untouchable instruction and
-tool floor, 22,000 of summary, and 17,000 of preserved tail. Roughly 80%
-of what you restart with was never conversation, so compaction squeezes
-the one part that was already smallest.
-
-A fresh session in the same project starts at that same floor with no
-summary and no tail. Write the handoff to a file and the file replaces
-the summary - exactly, rather than compressed:
-
-|                              | restart                                   |
-| ---------------------------- | -----------------------------------------: |
-| `/compact`                   | 123,620                                   |
-| handoff file + fresh session | floor + your file, typically ~20,000 less |
-
-Compaction is also a lossy compressor applied repeatedly to its own
-output. In one measured session it ran 15 times and the summary grew from
-24K to 62K - paying more each cycle for a progressively worse rendering
-of the same material. A file does neither.
-
-`/compact` still earns its place for one thing: the ~17,000-token
-preserved tail, the messages you were part-way through. Mid-task that is
-worth carrying. Between tasks it is weight you pay to keep.
-
-## The exit itself: /handoff
-
-The plugin ships the skill its warnings point at. One file per task
-thread, `scratch/<slug>/HANDOFF.md` at the repo root (the current
-directory outside a git repo). Between sessions the reset is total -
-the file and the repo are all that survive - so the skill is built to
-capture exactly what rehydration needs:
-
-```
-/handoff                       writes or updates the handoff, checks it
-  (kill the session, start fresh)
-/handoff auth-token-refresh    rehydrates and resumes the plan
-```
-
-There is no verb to type. The question is what the session holds, not
-how long it has run. A session that edited a file or settled a
-decision holds something worth telling a fresh session, so `/handoff`
-writes. One that only looked something up holds nothing, so it reads a
-handoff back instead. Write is the last move of a working session and
-read is the first move of the session that replaces it, so the two
-never collide. Neither the verb nor the target is ever guessed: where
-either is ambiguous - several handoffs and no name given - the skill
-lists the candidates and stops.
-
-- Writing needs no argument: it picks a folder name from the task, or
-  takes one if you choose - the file inside is always `HANDOFF.md`. It
-  records the plan, the state, key files with line anchors, settled
-  decisions, and dead ends - pointers into the repo, never pasted code.
-  Most handoffs land between 2K and 5K tokens, against ~22K for a
-  /compact summary.
-- Run it again a session later and it updates the same file in place:
-  state is rewritten, the plan is ticked off, decisions and dead ends
-  accumulate, and a one-line log per cycle keeps the trajectory. The
-  prior version stays beside it as `HANDOFF.prev.md`.
-- A handoff some other tool or session wrote is adopted, not
-  discarded: the first write keeps a permanent `HANDOFF.orig.md` copy,
-  converts the structure, and rehomes overflow to sibling notes files.
-  The form converges. The content survives.
-- When the work has a ledger of its own (`todo/foobar.md`), the
-  handoff points at the live item rather than copying it: writing
-  syncs the todo first, and reading trusts it on what is open, the
-  handoff on how. One home per fact, so nothing drifts.
-- Each write ends with a reviewer pass - a skeptic that must
-  rehydrate from the file alone, a merge auditor on updates, a trimmer
-  once the file passes 150 lines. A reviewer seat costs cents; a
-  dropped decision costs the turns it takes to re-derive.
-- Reading verifies the file's git anchors, reads only the files the
-  handoff marks "read now", and executes the handoff's Now step - the
-  single next action, with the plan behind it. It stops only for open
-  questions the file left for you; decisions stay settled, and nothing
-  is re-planned or re-litigated.
-- `/handoff list` shows what exists, newest first, with plan items
-  ticked over plan items total beside each - `7/7` is a finished thread
-  and `0/5` one that never started, which is most of what you need to
-  pick. `/handoff list 5` shows only the five most recent and reads only
-  those five files. `/handoff check` re-reviews one in place and applies
-  what survives.
-
-Add `scratch/` to your gitignore if handoffs should stay untracked.
-
-## The budget is in dollars, not tokens
-
-One knob, `COST_PER_TURN_TARGET` in `scripts/budget.py`, set in dollars
-per user turn. Each model's token target is derived from it and that
-model's price:
-
-| Model | Target                    | Over budget | $/turn at target |
-| ----- | ------------------------- | ----------- | ---------------: |
-| Opus  | 350,000                   | 500,000     | $1.54            |
-| Fable | 206,600, down to 175,000  | 250,000     | $1.82, down to $1.54 |
-
-A model billing at twice the rate hits the same cost per turn at half the
-context, so giving every model one token target quietly lets the
-expensive one cost double.
-
-Opus is held by cost: 350,000 whatever the session does, and growth only
-changes how long a cycle lasts. Fable is held by the compaction cycle
-instead - cost parity would put it at 175,000, but a compaction lands
-near 123,000, so a target there leaves under four turns of room. Its
-target is the larger of what cost wants and what a five-turn cycle needs
-at the assumed 1,900 tokens a call: 206,600, which is $1.82 a turn, not
-$1.54. That gap is the price of a fable session you keep compacting, and
-it is worth saying plainly rather than hiding behind a threshold nobody
-can hold.
-
-The target is latched per session. It may fall - a quiet session pulls
-fable's down to cost parity at 175,000 - but it never rises, and only a
-compaction releases it. The rate it is derived from is re-measured every
-turn and swings by a factor of three when a session starts reading large
-files, so a target that followed it would outrun the context measuring
-it: on a real fable session it climbed 206,600 -> 398,132 -> 294,336
-while the context climbed 74K -> 305K, and the gauge went red, back to
-amber at 300K, then red again. Raising a target because a session got
-expensive is backwards anyway. The countdowns still track the live rate,
-because "two turns of room left" is meant to react; only the thresholds
-have to hold still.
-
-Over budget stays a dollar figure: $2.20 a turn, 500,000 tokens on opus
-and 250,000 on fable. It is never scaled up with the target. Scaling
-would let a heavy fable session march to $5 a turn before the loudest
-warning fired.
-
-Sonnet and Haiku are deliberately absent. A long session on either costs
-little enough that interrupting it to talk about money would spend more
-attention than it saves.
-
-Fable's budget is small enough that a fast session cannot both stay
-inside it and keep room to leave: a quarter of 206,600 is 51,650, which
-at 6,000 tokens a call is under a turn. The reserve floor lifts that to
-60,000 and the warning still arrives with a median 1.6 turns of room,
-against 5.2 on opus. That is the same admission the target already
-makes - on this tier a session you keep compacting costs more per turn
-than a cheap one - and the budget and over-budget bands are what say it
-out loud.
-
-## How it decides
-
-Billed context is `cache_read + cache_creation + uncached_input` on the
-last assistant call - the same figure Claude Code reports as
-`compactMetadata.preTokens` when you compact.
-
-Growth is measured from the context series itself rather than by counting
-turns. Transcripts interleave real user prompts with injected system
-reminders, tool results, and hook output, and no reliable rule separates
-them; a turn count built that way came out 35% high against an
-independent oracle. The context series has no such ambiguity. The series
-is cut at every drop, since a drop means a compaction and averaging
-across one reads as no growth at all.
-
-A turn, throughout, means one thing you say plus everything Claude does
-before it waits for you again, tool calls included. It is derived, not
-counted: 8.8 assistant API calls, measured across 604 compaction cycles.
-All the arithmetic underneath is per-call.
-
-The warning point sits a reserve below the target: two turns of growth
-at the measured rate, with half again for slack. A handoff write
-measures 17.5 assistant calls, which is those two turns; reading it
-back costs the session that reads it, not this one, so it is not
-reserved for here. The reserve is floored at 60,000 tokens so a quiet
-session still gets room to write anything, and capped at a quarter of
-the budget so a fast one is never told to hand off beside a half-filled
-bar. Where a budget is small enough that the quarter falls under the
-floor, the floor wins - a fraction of a small budget is not room to
-write anything.
-
-Both the target and the warning point are latched per session, and only
-a compaction releases them. The reserve follows the growth rate, so an
-unlatched warning point walks outward on its own: the line counts down,
-announces the handoff, then reports turns of room again on the next
-repaint. Each band fires once, on entry - a Stop hook runs every turn,
-so repeating a band already reached would be noise.
-
-Telling a compaction from a dip is a size, not just a fall. Billed
-context drops without a compaction - a cached block expiring, a tool
-result leaving the window. Across 301 real drops the smallest true
-compaction freed 72,591 tokens and the largest dip 59,611, so the test
-is whether the drop freed half of what a compaction restarts at.
-
-A call that failed is not a point on the context curve. An overloaded
-request is written to the transcript as an assistant message all the
-same, carrying a zeroed usage block, and reading that as a context of
-zero is indistinguishable from a compaction: the growth run restarts
-there and counts the whole conversation as growth since. One 529 used
-to triple a session's measured rate for the rest of its life, which
-pinned the warning at exactly half the budget. What separates such a
-record from a real one is where the token counts are - a real call puts
-them at the top level or under `iterations`, a failed one has neither -
-never the error flag, which two thirds of them do not carry.
-
-Subagents are skipped. A subagent's context is short-lived, it cannot
-compact, and warning about it gives you nothing to act on.
-
-## Where the defaults came from
-
-Fitted against roughly 190,000 real API calls across a month of heavy
-use, where 89% of main-thread spend landed above 200K of context and 22%
-above 500K:
-
-- **$1.54 a turn** is what a 350,000-token Opus session costs. Holding to
-  it cut total spend by about 9%. Tighter budgets save more - a 200,000
-  ceiling saves about 22% - at the cost of handing off every three turns.
-- **$2.20 a turn** is where a fifth of that spend was going.
-- **123,000 tokens** is the median billed context after a compaction, and
-  **69,000** is the median for a new session.
+(`rm -rf ~/.claude/cache/context-budget`). Handoffs under `scratch/` are
+yours, not the plugin's.
 
 ## Development
 
@@ -332,8 +380,9 @@ above 500K:
 python3 -m pytest tests/ -q
 ```
 
-State lives in `~/.claude/cache/context-budget/<session>.json` and is safe
-to delete; the next turn rewrites it.
+State lives in `~/.claude/cache/context-budget/<session>.json` and is
+safe to delete; the next turn rewrites it. The README's charts are
+generated by `python3 docs/charts.py`.
 
 ## License
 
