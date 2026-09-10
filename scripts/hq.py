@@ -1397,6 +1397,31 @@ def _norm_heading(text: str) -> str:
     return text.strip().lower()
 
 
+def _split_where(where: str) -> list[str]:
+    """Split a ledger ``where`` field into its anchors.
+
+    Parameters
+    ----------
+    where : str
+        The field as stored: anchors joined with ``;``, or ``-``.
+
+    Returns
+    -------
+    list[str]
+        The anchors, stripped, with empty parts dropped; ``-`` gives none.
+
+    Notes
+    -----
+    - A ``;`` inside a heading's text is written ``\\;`` in the field, so
+      the split is on an unescaped ``;`` and each anchor gets its ``;``
+      back before it is matched.
+    """
+    if where in {'-', ''}:
+        return []
+    parts = re.split(r'(?<!\\);', where)
+    return [part.replace('\\;', ';').strip() for part in parts if part.strip()]
+
+
 def _extract_terms(text: str) -> set[str]:
     """Extract backticked tokens and distinctive terms from text.
 
@@ -1785,7 +1810,7 @@ def _assemble_handoff(
         file_text = (
             fp.read_text(encoding='utf-8', errors='replace') if fp.is_file() else '')
         if row['where'] != '-':
-            anchor_list = [a.strip() for a in row['where'].split(';') if a.strip()]
+            anchor_list = _split_where(row['where'])
             resolved, unresolved = resolve_where(file_text, anchor_list)
             bad = set(unresolved)
             resolved_iter = iter(resolved)
@@ -3524,7 +3549,7 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         if not p.is_file():
             continue
         file_text = p.read_text(encoding='utf-8', errors='replace')
-        anchor_list = [a.strip() for a in row['where'].split(';') if a.strip()]
+        anchor_list = _split_where(row['where'])
         new_spans, unresolved = resolve_where(file_text, anchor_list)
         for anchor_str in unresolved:
             print(f'unresolved anchor in {row["path"]}: {anchor_str!r}')
@@ -3597,7 +3622,7 @@ def _verb_read(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     file_text = file_path.read_text(encoding='utf-8', errors='replace')
     file_lines = file_text.splitlines()
     if row['where'] != '-':
-        anchor_list = [a.strip() for a in row['where'].split(';') if a.strip()]
+        anchor_list = _split_where(row['where'])
         spans, unresolved = resolve_where(file_text, anchor_list)
         for span in spans:
             print('\n'.join(file_lines[span[0] - 1:span[1]]))

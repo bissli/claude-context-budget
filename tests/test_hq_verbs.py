@@ -1171,6 +1171,38 @@ def test_adopt_drops_the_continuation_lines_of_a_wrapped_header(
     assert 'conservation: every original line carried' in capsys.readouterr().out
 
 
+def test_where_anchor_escapes_a_semicolon_inside_a_heading(
+        tmp_path, monkeypatch, capsys):
+    """`\\;` in a `--where` anchor names a heading whose text carries `;`.
+
+    Mutation: the where field split on every `;`, so each fragment of the
+    heading is an unresolved anchor and the read block renders `?`; or
+    the escape left in the anchor, so the literal never equals the heading.
+    Oracle: after stamping notes-findings.md with the escaped heading,
+    finish renders `notes-findings.md:3-4`, open prints no `unresolved
+    anchor` line, and read prints the heading and its body line.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'notes-findings.md').write_text(
+        '# Findings\n\n## F7. Cache hit ratio holds (n>=2; n=1 excluded)\n'
+        'body\n## Next\nmore\n')
+    assert hq.main([
+        'stamp', _SLUG, 'notes-findings.md', '--read-before', 'always',
+        '--where', 'F7. Cache hit ratio holds (n>=2\\; n=1 excluded)',
+        '--label', 'f7']) == 0
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {_SLUG}\n\nWritten: 2026-09-01 | Cycle: 1\n\n## Task\nx\n')
+    assert hq.main(['finish', _SLUG, '--log', 'one']) == 0
+    assert 'notes-findings.md:3-4' in (folder / 'HANDOFF.md').read_text()
+    capsys.readouterr()
+    assert hq.main(['open', _SLUG]) == 0
+    assert 'unresolved anchor' not in capsys.readouterr().out
+    assert hq.main(['read', _SLUG, 'notes-findings.md']) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        '## F7. Cache hit ratio holds (n>=2; n=1 excluded)', 'body']
+
+
 def test_key_files_continuation_with_one_space_joins_the_label(
         tmp_path, monkeypatch):
     """Any indented line under a pointer continues its free text.

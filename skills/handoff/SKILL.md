@@ -381,7 +381,8 @@ hq stamp <slug> notes-old.md --defer
   notes, todo, snapshot, probe-dir, or other; `--read-before` always,
   edit, mention, or never; `--status` live, superseded, archived, or
   missing; any other value is a usage error (exit 2). `--where` joins several
-  anchors with `;`, each a heading's text without its number, or `s<n>`
+  anchors with `;` (a `;` inside a heading's text is written `\;`),
+  each a heading's text without its number, or `s<n>`
   for the heading numbered `<n>` - `4.`, `4:`, `4 -`, `s4.`, and `s4:`
   all count as the number 4; a bare `S4 ...` is a word, not a number. A
   number may carry one letter when a `.`, `:`, or ` - ` follows it:
