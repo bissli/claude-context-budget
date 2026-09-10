@@ -1407,23 +1407,24 @@ def test_adopt_not_carried_five_line_limit(tmp_path, monkeypatch, capsys):
     assert 'STANDLIM99' not in out
 
 
-def test_adopt_missing_top_level_draft_r1_forced(tmp_path, monkeypatch):
-    """A missing top-level .py pointer is R1-forced to live/always.
+def test_adopt_missing_top_level_draft_keeps_kind_and_stays_missing(
+        tmp_path, monkeypatch):
+    """A missing top-level .py pointer is seeded `draft missing never`.
 
     Mutation: `base == 'folder'` changed to `base != 'folder'` (mutmut_540)
     or `base == 'FOLDER'` (mutmut_542), so at_top is False and infer_kind
-    gives 'other' instead of 'draft'. check_r1 only fires on 'spec'/'draft',
-    so the mutation bypasses R1, leaving read_before='never'/status='missing'.
+    gives 'other' instead of 'draft'; or the row lifted to live/always for
+    a gated kind, so finish stops on `missing live gated`.
     Oracle: a missing top-level script.py with a Key files label is seeded
-    as status='live' with read_before='always' (R1 forces these values).
+    kind='draft', status='missing', read_before='never'.
     """
     folder = _root(tmp_path, monkeypatch)
     _handoff(folder, key_files='- `script.py` the draft script\n')
     assert hq.main(['adopt', _SLUG]) == 0
     rows = {r['path']: r for r in _ledger(folder)}
-    assert 'script.py' in rows
-    assert rows['script.py']['read_before'] == 'always'
-    assert rows['script.py']['status'] == 'live'
+    row = rows['script.py']
+    assert (row['kind'], row['status'], row['read_before']) == (
+        'draft', 'missing', 'never')
 
 
 def test_adopt_not_carried_line_truncated_at_72(tmp_path, monkeypatch, capsys):

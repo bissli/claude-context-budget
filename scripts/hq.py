@@ -2007,6 +2007,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             ) or '-'
         first_stored = ''
         first_part = '-'
+        first_dir: pathlib.Path | None = None
         for tok in path_toks:
             tok_free = free
             # A `path:12-40` pointer names lines; the ledger has no
@@ -2016,7 +2017,19 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             if range_m:
                 tok = range_m.group(1)
                 tok_free = f'lines {range_m.group(2)}; {tok_free}'.rstrip('; ')
-            stored, path_obj, base = _pointer_path(folder, tok)
+            # A bare name after the first path lists a sibling of it, so
+            # it is tried beside that path before the folder and the
+            # search bases.
+            clean_tok = tok.strip('`')
+            sibling = first_dir / clean_tok if first_dir is not None else None
+            if (sibling is not None and '/' not in clean_tok
+                    and not clean_tok.startswith(('~', '.'))
+                    and sibling.exists()):
+                stored, path_obj, base = _stored_path(folder, str(sibling))
+            else:
+                stored, path_obj, base = _pointer_path(folder, tok)
+            if first_dir is None:
+                first_dir = path_obj.parent
             # An anchor is seeded only where it resolves: a bare `s1` in
             # prose most often names a step of another file, and a seed
             # that cannot resolve prints `?` in the read block every
@@ -2188,10 +2201,13 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         if row['status'] == 'live' and row['read_before'] in _GATE_RB:
             gated_names.append(name)
 
-    # A pointer outside the top-level walk - an abs path or a file in a
-    # subdirectory - keeps its label in a row of its own; a path that is
-    # not on disk is seeded missing, and R1 lifts a gated one back to
-    # live/always with a receipt so the agent must discharge it.
+    # Notes:
+    # - A pointer outside the top-level walk - an abs path or a file in
+    #   a subdirectory - keeps its label in a row of its own.
+    # - A path that is not on disk is seeded missing/never whatever its
+    #   kind: R1 governs transitions of an existing row, and the `not on
+    #   disk` line below is the signal. A row on disk is live and a
+    #   gated kind reads always, so R1 has nothing to refuse here.
     for stored in kf_map:
         if stored in kf_matched:
             continue
@@ -2230,11 +2246,6 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
                 else str(_line_count(path_obj)) if on_disk else '-'),
             'reason': '-', 'label': kf_label,
             }
-        refusal = check_r1(row, kind, False)
-        if refusal:
-            row['reason'] = f'refused: {refusal}'
-            row['status'] = 'live'
-            row['read_before'] = 'always'
         _append_tsv(ledger_path, LEDGER_FIELDS, row, _LEDGER_HEADER)
         if kf_label != '-':
             seeded_labels.append(kf_label)

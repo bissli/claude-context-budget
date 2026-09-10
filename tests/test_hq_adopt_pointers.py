@@ -330,6 +330,63 @@ def test_where_seed_keeps_only_anchors_the_file_resolves(
     assert "  where dropped: notes-cache.md 's1'" in out
 
 
+# --- Pointers not on disk ---
+
+
+def test_missing_draft_pointer_stays_missing_never_and_finish_passes(
+        tmp_path, monkeypatch, capsys):
+    """A `.py` pointer not on disk is seeded `draft missing never`, not gated.
+
+    Mutation: R1 run on the seeded row and its refusal branch rewriting
+    the row to `live/always`, so the ledger holds a live gated row for a
+    file that does not exist, the summary lists it under `gated (n)`, and
+    the next finish stops on `missing live gated`.
+    Oracle: the ledger row for smooth.py reads kind draft, status missing,
+    read_before never, reason `-`; the summary has no `gated (` line; and
+    `begin` then `finish` exit 0 with no `missing live gated` line.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'panels.json').write_text('{}\n')
+    _handoff(folder, key_files='- panels.json, smooth.py - paper kit.\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    row = rows['smooth.py']
+    assert (row['kind'], row['status'], row['read_before'], row['reason']) == (
+        'draft', 'missing', 'never', '-')
+    out = capsys.readouterr().out
+    assert 'gated (' not in out
+    assert 'Key files pointer not on disk: smooth.py' in out
+    monkeypatch.setenv('HQ_CYCLE', '4')
+    assert hq.main(['begin', _SLUG]) == 0
+    assert hq.main(['finish', _SLUG, '--log', 'kit']) == 0
+    assert 'missing live gated' not in capsys.readouterr().out
+
+
+def test_bare_continuation_token_resolves_beside_the_first_path(
+        tmp_path, monkeypatch):
+    """`- sub/a.py, b.py` reads b.py as sub/b.py when that file exists.
+
+    Mutation: every continuation token resolved against the folder, the
+    root, the cwd, and home alone, so a sibling listed by bare name is
+    seeded as a missing top-level draft.
+    Oracle: the ledger holds a live row for sub/b.py and no row for b.py.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'sub').mkdir()
+    (folder / 'sub' / 'a.py').write_text('a = 1\n')
+    (folder / 'sub' / 'b.py').write_text('b = 2\n')
+    _handoff(folder, key_files='- sub/a.py, b.py - the pair\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert 'b.py' not in rows
+    assert rows['sub/b.py']['status'] == 'live'
+    assert rows['sub/b.py']['label'] == 'the pair'
+
+
 # --- The adopt Log roll-up ---
 
 

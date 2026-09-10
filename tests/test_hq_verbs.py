@@ -1065,8 +1065,8 @@ def test_missing_row_whose_file_returns_reads_live(tmp_path, monkeypatch):
 def test_adopt_never_renders_an_absent_pointer_in_full(tmp_path, monkeypatch):
     """A Key files pointer to a file not on disk is counted, never listed.
 
-    Mutation: the rendered rows taken straight from the ledger, so the R1
-    lift to live/always puts a nonexistent spec in the read block.
+    Mutation: the seeded status `'live' if on_disk else 'missing'`
+    collapsed to `'live'`, so a nonexistent spec lands in the read block.
     Oracle: no read line names SPEC-GONE.md and the artifacts block counts
     one missing row.
     """
