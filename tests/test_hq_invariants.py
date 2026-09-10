@@ -293,3 +293,17 @@ def _assert_dangling_named(folder, out, where):
         if row['status'] == 'superseded' and successor != '-' \
                 and not (folder / successor).is_file():
             assert f'successor missing: {path} -> {successor}' in out, (where, out)
+
+
+def test_live_sha_prefers_the_rewrite_and_falls_back_to_the_archive():
+    """live_sha() returns rewrite_sha where set, else handoff_sha.
+
+    Mutation: the precedence flipped, so an adopt row answers with the
+    archive digest and every begin after adopt saves a .hand.md copy; or
+    the fallback dropped, so a finish row or a row written before the
+    column existed answers `-` and every begin after finish saves one.
+    Oracle: hand-computed - three rows, one per branch.
+    """
+    assert hq.live_sha({'handoff_sha': 'a' * 12, 'rewrite_sha': 'b' * 12}) == 'b' * 12
+    assert hq.live_sha({'handoff_sha': 'a' * 12, 'rewrite_sha': '-'}) == 'a' * 12
+    assert hq.live_sha({'handoff_sha': 'a' * 12}) == 'a' * 12

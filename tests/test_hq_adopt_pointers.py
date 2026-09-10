@@ -523,7 +523,8 @@ def test_adopt_note_joins_wrapped_log_items_before_separating_them(
 
     last = _manifest(folder)[-1]
     assert last['note'] == (
-        '- day one: shipped a / b / c; the readout count 2^16 | - day two: x')
+        f'adopted 2026-09-01 by {_SESSION}'
+        ' | - day one: shipped a / b / c; the readout count 2^16 | - day two: x')
     assert last['log'] == 'adopted; prior Log: 4 lines in cycles/c01.md'
 
 
@@ -532,8 +533,10 @@ def test_adopt_log_field_is_bare_adopted_with_no_log_section(
     """Adopt sets log='adopted' with no suffix when the file has no Log.
 
     Mutation: legacy_log condition missing, so the summary suffix is
-    appended even when there are no legacy lines (e.g. '0 lines in ...').
-    Oracle: manifest log == 'adopted' exactly; note == '-'.
+    appended even when there are no legacy lines (e.g. '0 lines in ...');
+    or the note joining an empty Log with a bar, leaving a trailing ` | `.
+    Oracle: manifest log == 'adopted' exactly; note is the adopt-time
+    provenance alone, `adopted <date> by <session>`.
     """
     folder = _root(tmp_path, monkeypatch)
     folder.mkdir(parents=True, exist_ok=True)
@@ -546,7 +549,57 @@ def test_adopt_log_field_is_bare_adopted_with_no_log_section(
     manifest = _manifest(folder)
     last = manifest[-1]
     assert last['log'] == 'adopted'
-    assert last['note'] == '-'
+    assert last['note'] == f'adopted 2026-09-01 by {_SESSION}'
+
+
+def test_adopt_row_describes_the_archive_and_notes_its_own_provenance(
+        tmp_path, monkeypatch):
+    """The adopt row for cycle N carries cycles/cNN.md's own facts.
+
+    Mutation: `written` taken from the adopt date rather than the
+    archived `Written:`; `repos` from the adopt-time git state rather
+    than the header's `branch @ sha`; `session` credited to the adopting
+    session; `cursor_lines`, `payload_tokens`, or `handoff_sha` measured
+    on the rewritten HANDOFF.md rather than the archive; `rewrite_sha`
+    left blank, so the next begin archives the rewrite as a hand edit.
+    Oracle: hand-computed from a header dated ten days before HQ_NOW on
+    a branch git cannot report (HQ_GIT=0): written `2026-08-22`, repos
+    `trunk@9abc123`, session `-`, 12 cursor lines (three sections of
+    four lines each, the blank before `## Log` included) and
+    len(archive) // 4 tokens counted on cycles/c04.md, handoff_sha the
+    digest of that file
+    and rewrite_sha the digest of HANDOFF.md, the two unequal; the note
+    leads with `adopted 2026-09-01 by <session>` and the rendered Log
+    line dates the cycle `2026-08-22 (cycle 4, trunk@9abc123)`.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {folder.name}\n\n'
+        'Written: 2026-08-22 | Cycle: 4 | trunk @ 9abc123 | clean\n\n'
+        '## Task\n\nDo the work.\n\n'
+        '## Now\n\nNext step.\n\n'
+        '## State\n\nState line.\n\n'
+        '## Log\n- 2026-08-22: started\n', encoding='utf-8')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    archive = folder / 'cycles' / 'c04.md'
+    handoff = folder / 'HANDOFF.md'
+    row = _manifest(folder)[-1]
+    assert row['cycle'] == '4'
+    assert row['written'] == '2026-08-22'
+    assert row['repos'] == 'trunk@9abc123'
+    assert row['session'] == '-'
+    assert row['cursor_lines'] == '12'
+    assert row['payload_tokens'] == str(len(archive.read_text(encoding='utf-8')) // 4)
+    assert row['handoff_sha'] == hq._sha12_path(archive)
+    assert row['rewrite_sha'] == hq._sha12_path(handoff)
+    assert row['handoff_sha'] != row['rewrite_sha']
+    assert row['note'] == f'adopted 2026-09-01 by {_SESSION} | - 2026-08-22: started'
+    log_body = handoff.read_text(encoding='utf-8').split('## Log\n', 1)[1]
+    assert log_body.strip() == (
+        '- 2026-08-22 (cycle 4, trunk@9abc123): adopted; prior Log: 1 lines'
+        ' in cycles/c04.md')
 
 
 # --- HANDOFF*.md at the top level only ---

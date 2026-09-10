@@ -46,10 +46,12 @@ LEDGER_FIELDS = [
     'cycle', 'ts', 'path', 'base', 'kind', 'status', 'read_before',
     'successor', 'where', 'sha12', 'lines', 'reason', 'label',
     ]
+# rewrite_sha trails note so a manifest written before the column
+# existed still reads by position; _read_tsv pads it to `-`.
 MANIFEST_FIELDS = [
     'cycle', 'written', 'session', 'repos', 'cursor_lines', 'payload_tokens',
     'handoff_sha', 'ledger_bytes', 'ledger_sha', 'standing_bytes',
-    'standing_sha', 'log', 'note',
+    'standing_sha', 'log', 'note', 'rewrite_sha',
     ]
 
 _LEDGER_HEADER = '\t'.join(LEDGER_FIELDS)
@@ -379,6 +381,32 @@ def witness(
                 )
             breaks.append(msg)
     return breaks
+
+
+def live_sha(row: dict) -> str:
+    """Return the digest a manifest row's write left in HANDOFF.md.
+
+    Parameters
+    ----------
+    row : dict
+        One manifest row keyed by ``MANIFEST_FIELDS``.
+
+    Returns
+    -------
+    str
+        ``rewrite_sha`` where the row records one, else ``handoff_sha``.
+
+    Notes
+    -----
+    - ``handoff_sha`` names ``cycles/c<N>.md``. finish writes one text to
+      that archive and to HANDOFF.md, so its row leaves ``rewrite_sha``
+      as ``-``; adopt archives the file it read and rewrites HANDOFF.md,
+      so its row names the rewrite here.
+    - A row written before the column existed reads as ``-`` and falls
+      back, which is right: only finish wrote rows then.
+    """
+    rewrite = row.get('rewrite_sha', '-')
+    return rewrite if rewrite not in {'', '-'} else row.get('handoff_sha', '')
 
 
 def latest_rows(rows: list[Row]) -> dict[str, Row]:
@@ -2397,6 +2425,22 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         )
     fresh_manifest = _read_tsv(manifest_path, MANIFEST_FIELDS)
     repos = f'{anch["branch"]}@{anch["sha"]}' if anch['branch'] != '-' else '-'
+    # Notes:
+    # - The row indexes cycles/c<N>.md, so its date, repos, sizes, and
+    #   handoff_sha are read off that file, not the rewrite made today.
+    # - The archive is read back rather than reusing `text`: a c<N>.md
+    #   already on disk is kept, and the row must describe what is there.
+    # - The header carries no session, so that column stays `-` and the
+    #   adopting session rides in the note with the adopt date and sha.
+    archive_text = archive.read_text(encoding='utf-8-sig', errors='replace')
+    archive_parsed = split_handoff(archive_text)
+    written_m = re.search(r'Written:\s*(\S+)', archive_parsed['header'])
+    archive_written = written_m.group(1) if written_m else ts[:10]
+    repos_m = re.search(r'\|\s*(\S+)\s*@\s*([0-9a-f]+)', archive_parsed['header'])
+    archive_repos = f'{repos_m.group(1)}@{repos_m.group(2)}' if repos_m else '-'
+    adopt_provenance = f'adopted {ts[:10]} by {anch["session"]}'
+    if repos != '-':
+        adopt_provenance += f' at {repos}'
     # The Log block renders this row's log field, so it carries a
     # one-line roll-up; the legacy Log lines ride in the row's note
     # field, and the archived file keeps them as written.
@@ -2419,17 +2463,17 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             f'adopted; prior Log: {len(legacy_log)} lines'
             f' in cycles/c{cycle:02d}.md'
         )
-    note_items = legacy_items
+    note_items = [adopt_provenance]
     if header_tail:
-        note_items = [f'header: {" ".join(header_tail)}'] + legacy_items
-    adopt_note = ' | '.join(note_items) or '-'
+        note_items.append(f'header: {" ".join(header_tail)}')
+    adopt_note = ' | '.join(note_items + legacy_items)
     # The row adopt appends belongs in the Log it renders, the same way
     # finish renders its own row; the file would otherwise carry an
     # empty ## Log the cycle it was adopted.
     log_body_f = render_log(fresh_manifest + [{
         'cycle': cycle_str,
-        'written': ts[:10],
-        'repos': repos,
+        'written': archive_written,
+        'repos': archive_repos,
         'log': adopt_log,
         }])
     branch_a = anch['branch']
@@ -2445,25 +2489,25 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         folder, cursor_text, header_line_a, log_body_f,
         _reconcile_missing(folder, fresh_live), walk, fresh_standing_text)
     handoff_path.write_text(new_handoff, encoding='utf-8')
+    # The ledger and standing digests stay adopt-time: witness() checks
+    # the next finish against the files as this write left them.
     lb_final = ledger_path.read_bytes()
     sb_final = standing_path.read_bytes() if standing_path.exists() else b''
-    handoff_sha = _sha12(new_handoff.encode())
-    cursor_lines_a = len(cursor_text.splitlines())
-    payload_tokens_a = len(new_handoff) // 4
     adopt_manifest_row: dict = {
         'cycle': cycle_str,
-        'written': ts[:10],
-        'session': anch['session'],
-        'repos': repos,
-        'cursor_lines': str(cursor_lines_a),
-        'payload_tokens': str(payload_tokens_a),
-        'handoff_sha': handoff_sha,
+        'written': archive_written,
+        'session': '-',
+        'repos': archive_repos,
+        'cursor_lines': str(len(archive_parsed['cursor'].splitlines())),
+        'payload_tokens': str(len(archive_text) // 4),
+        'handoff_sha': _sha12_path(archive),
         'ledger_bytes': str(len(lb_final)),
         'ledger_sha': _sha12(lb_final),
         'standing_bytes': str(len(sb_final)),
         'standing_sha': _sha12(sb_final),
         'log': adopt_log,
         'note': adopt_note,
+        'rewrite_sha': _sha12(new_handoff.encode()),
         }
     _append_tsv(manifest_path, MANIFEST_FIELDS, adopt_manifest_row, _MANIFEST_HEADER)
 
@@ -2688,14 +2732,13 @@ def _take_lock(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
             lock_path.write_text(content, encoding='utf-8')
 
     # A hand edit since the last finish or adopt: HANDOFF.md no longer
-    # hashes to what that write recorded in its manifest row. The row,
-    # not the cycle archive, is the reference: adopt archives the
-    # original and records the rewrite.
+    # hashes to what that write left in it. live_sha reads the rewrite
+    # an adopt row records, not the archive its handoff_sha names.
     manifest_rows = _read_tsv(folder / 'cycles' / 'manifest.tsv', MANIFEST_FIELDS)
     handoff = folder / 'HANDOFF.md'
     if manifest_rows and handoff.exists():
         last = manifest_rows[-1]
-        if _sha12_path(handoff) != last.get('handoff_sha', ''):
+        if _sha12_path(handoff) != live_sha(last):
             hand_path = folder / 'cycles' / f'c{int(last["cycle"]):02d}.hand.md'
             hand_path.write_bytes(handoff.read_bytes())
             print(

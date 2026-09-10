@@ -602,7 +602,7 @@ def test_gate_survives_a_corrupt_state_file(monkeypatch, capsys, tmp_path):
     assert 'SPEC.md' in capsys.readouterr().out
 
 
-def _finished(folder: pathlib.Path, cycle: str, sha: str) -> None:
+def _finished(folder: pathlib.Path, cycle: str, sha: str, **overrides: str) -> None:
     """Append one finished-cycle row to a handoff folder's manifest.
 
     Parameters
@@ -613,6 +613,8 @@ def _finished(folder: pathlib.Path, cycle: str, sha: str) -> None:
         Cycle number the row records.
     sha : str
         HANDOFF.md digest the cycle finished on.
+    **overrides : str
+        Further manifest fields to set, ``rewrite_sha`` among them.
 
     Returns
     -------
@@ -621,6 +623,7 @@ def _finished(folder: pathlib.Path, cycle: str, sha: str) -> None:
     (folder / 'cycles').mkdir(exist_ok=True)
     row = dict.fromkeys(hq.MANIFEST_FIELDS, '-')
     row.update({'cycle': cycle, 'written': _NOW, 'handoff_sha': sha})
+    row.update(overrides)
     hq._append_tsv(folder / 'cycles' / 'manifest.tsv', hq.MANIFEST_FIELDS,
                    row, _MANIFEST_HEADER)
 
@@ -656,6 +659,30 @@ def test_stop_reports_when_handoff_sha_differs_from_manifest(monkeypatch,
         f'handoff: working/{_SLUG}/HANDOFF.md was written by hand since'
         f' cycle 2 finished; run hq begin {_SLUG}, then hq finish'
         f' {_SLUG} --log "...", or the next open reports LEDGER BEHIND')}
+
+
+def test_stop_compares_against_the_rewrite_an_adopt_row_records(
+        monkeypatch, capsys, tmp_path):
+    """Verify an adopted folder is silent while HANDOFF.md is the adopt rewrite.
+
+    Mutation: comparing the file against the row's handoff_sha alone,
+    which on an adopt row names the archived original, so every Stop
+    after an adopt reports the rewrite hq itself wrote as a hand edit;
+    or preferring handoff_sha over a recorded rewrite_sha.
+    Oracle: a spy on stdout - a last row whose handoff_sha is a foreign
+    digest and whose rewrite_sha is the file's digest is silent, and the
+    same folder reports once the file is edited.
+    """
+    root, folder = _handoff_root(tmp_path)
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
+    handoff = folder / 'HANDOFF.md'
+    _finished(folder, '3', 'aaaaaaaaaaaa',
+              rewrite_sha=hq._sha12_path(handoff))
+    assert _run(monkeypatch, capsys, handoff_stop,
+                _stop_payload(root, 'R1')) == ''
+    handoff.write_text('# Handoff\n\n## Task\n\nOther.\n', encoding='utf-8')
+    assert 'since cycle 3 finished' in _run(
+        monkeypatch, capsys, handoff_stop, _stop_payload(root, 'R2'))
 
 
 def test_stop_silent_when_it_matches(monkeypatch, capsys, tmp_path):

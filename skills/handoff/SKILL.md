@@ -257,10 +257,15 @@ How to read the generated blocks:
   first line reads `adopted`, or `adopted; prior Log: N lines in
   cycles/cNN.md` when the file had a Log; the archived file holds those
   lines, and the manifest row's `note` field carries them, each wrapped
-  item joined back onto one line, separated by ` | `. A `Written:`
-  header wrapped over several lines - the lines under it up to the next
-  blank line or heading - puts that tail first, as one `header: <text>`
-  item, since `finish` rewrites the header from the git state.
+  item joined back onto one line, separated by ` | `. The note opens
+  with the adopt-time provenance, `adopted <date> by <session>` plus
+  ` at <branch>@<sha>` under git; the row's other columns describe
+  `cycles/cNN.md` - its `Written:` date, its `branch @ sha`, its cursor
+  lines, its digest - and `rewrite_sha` names the HANDOFF.md adopt
+  wrote. A `Written:` header wrapped over several lines - the lines
+  under it up to the next blank line or heading - follows the
+  provenance as one `header: <text>` item, since `finish` rewrites the
+  header from the git state.
 
 Rules:
 

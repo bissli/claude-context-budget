@@ -1151,9 +1151,9 @@ def test_adopt_carries_the_continuation_lines_of_a_wrapped_header_in_the_note(
     carried, so the note lacks them; or conservation counting them
     against the union, so they print as not carried.
     Oracle: the adopted cursor holds the real preamble line as its only
-    Unfiled bullet, the manifest note reads `header: <both lines joined>
-    | <the Log item>`, and the summary prints `conservation: every
-    original line carried`.
+    Unfiled bullet, the manifest note reads `adopted <date> by <session>
+    | header: <both lines joined> | <the Log item>`, and the summary
+    prints `conservation: every original line carried`.
     """
     folder = _new_root(tmp_path, monkeypatch)
     folder.mkdir(parents=True, exist_ok=True)
@@ -1173,7 +1173,8 @@ def test_adopt_carries_the_continuation_lines_of_a_wrapped_header_in_the_note(
     assert 'conservation: every original line carried' in capsys.readouterr().out
     manifest = hq._read_tsv(folder / 'cycles' / 'manifest.tsv', hq.MANIFEST_FIELDS)
     assert manifest[-1]['note'] == (
-        'header: pyproject.toml modified; alpha/ and beta/ untracked'
+        f'adopted {_NOW[:10]} by {_SESSION}'
+        ' | header: pyproject.toml modified; alpha/ and beta/ untracked'
         ' (pre-existing WIP). | - 2026-09-01: started')
 
 
@@ -1184,8 +1185,9 @@ def test_a_line_glued_under_the_header_reaches_the_note_not_the_void(
     Mutation: the header paragraph's continuation dropped on the floor,
     so the line is absent from the cursor, the note, and the not-carried
     list alike.
-    Oracle: no Unfiled bullet, the manifest note reads `header: Status:
-    blocked on the adapter.`, and conservation reports every line carried.
+    Oracle: no Unfiled bullet, the manifest note reads `adopted <date> by
+    <session> | header: Status: blocked on the adapter.`, and conservation
+    reports every line carried.
     """
     folder = _new_root(tmp_path, monkeypatch)
     folder.mkdir(parents=True, exist_ok=True)
@@ -1200,7 +1202,8 @@ def test_a_line_glued_under_the_header_reaches_the_note_not_the_void(
     assert '- unfiled:' not in (folder / 'HANDOFF.md').read_text()
     assert 'conservation: every original line carried' in capsys.readouterr().out
     manifest = hq._read_tsv(folder / 'cycles' / 'manifest.tsv', hq.MANIFEST_FIELDS)
-    assert manifest[-1]['note'] == 'header: Status: blocked on the adapter.'
+    assert manifest[-1]['note'] == (
+        f'adopted {_NOW[:10]} by {_SESSION} | header: Status: blocked on the adapter.')
 
 
 def test_conservation_knows_a_bold_header_by_its_pattern(
@@ -1227,7 +1230,7 @@ def test_conservation_knows_a_bold_header_by_its_pattern(
 
 def test_where_anchor_escapes_a_semicolon_inside_a_heading(
         tmp_path, monkeypatch, capsys):
-    """`\\;` in a `--where` anchor names a heading whose text carries `;`.
+    r"""`\\;` in a `--where` anchor names a heading whose text carries `;`.
 
     Mutation: the where field split on every `;`, so each fragment of the
     heading is an unresolved anchor and the read block renders `?`; or
@@ -1259,7 +1262,7 @@ def test_where_anchor_escapes_a_semicolon_inside_a_heading(
 
 def test_finish_flags_a_one_line_span_ended_by_a_same_level_heading(
         tmp_path, monkeypatch, capsys):
-    """finish prints an advisory for a one-line span that a same-level heading ends.
+    """Finish prints an advisory for a one-line span that a same-level heading ends.
 
     Mutation: the span-length test dropped, so every anchored row is
     flagged; the next-line level compared loosely, so a one-line section

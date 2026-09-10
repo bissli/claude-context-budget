@@ -616,7 +616,8 @@ def test_adopt_manifest_row_has_lowercase_keys_and_correct_date(
     or written date is ts[:11] instead of ts[:10] (mutmut_950), giving
     'YYYY-MM-DDT' instead of 'YYYY-MM-DD'.
     Oracle: manifest row has 'written'='2026-09-01', all required keys
-    with lowercase names.
+    with lowercase names, and the adopting session in the note rather
+    than the session column, which the archived header cannot fill.
     """
     folder = _root(tmp_path, monkeypatch)
     _handoff(folder)
@@ -626,18 +627,20 @@ def test_adopt_manifest_row_has_lowercase_keys_and_correct_date(
     row = rows[0]
     assert row['written'] == '2026-09-01'
     assert row['cycle'] == '3'
-    assert row['session'] == _SESSION
+    assert row['session'] == '-'
+    assert row['note'] == f'adopted 2026-09-01 by {_SESSION}'
     assert row['log'].startswith('adopted')
 
 
 def test_adopt_payload_tokens_uses_integer_division(tmp_path, monkeypatch):
-    """payload_tokens is len(handoff) // 4 (int), not / 4 (float).
+    """payload_tokens is len(archive) // 4 (int), not / 4 (float).
 
     Mutation: `// 4` changed to `/ 4` (mutmut_943), producing a float like
     '512.0' instead of '512'; or to `// 5` (mutmut_944), underestimating
-    by 20 percent.
+    by 20 percent; or the count taken on the rewritten HANDOFF.md, which
+    the row does not index.
     Oracle: payload_tokens is a string of digits with no decimal point;
-    its value equals len(new_handoff) // 4.
+    its value equals len(cycles/c03.md) // 4, and the rewrite differs.
     """
     folder = _root(tmp_path, monkeypatch)
     _handoff(folder)
@@ -645,8 +648,10 @@ def test_adopt_payload_tokens_uses_integer_division(tmp_path, monkeypatch):
     manifest_rows = _manifest(folder)
     token_str = manifest_rows[0]['payload_tokens']
     assert '.' not in token_str
+    archive_text = (folder / 'cycles' / 'c03.md').read_text(encoding='utf-8')
     handoff_text = (folder / 'HANDOFF.md').read_text(encoding='utf-8')
-    assert int(token_str) == len(handoff_text) // 4
+    assert int(token_str) == len(archive_text) // 4
+    assert len(archive_text) // 4 != len(handoff_text) // 4
 
 
 def test_adopt_anchor_cycle_uses_parsed_cycle(tmp_path, monkeypatch):
@@ -1004,7 +1009,6 @@ def test_adopt_prints_every_orig_not_carried_line_in_full(
         f'  not carried: {item}' for item in items]
 
 
-
 def test_adopt_on_disk_false_prints_missing_notice(tmp_path, monkeypatch,
                                                    capsys):
     """A Key files pointer not found on disk prints a notice.
@@ -1074,15 +1078,16 @@ def test_adopt_manifest_repos_field_stored(tmp_path, monkeypatch):
     'payload_tokens' (mutmut_961), 'ledger_sha' (mutmut_969),
     'standing_sha' (mutmut_975), 'note' (mutmut_980) written as uppercase,
     making those fields read back as '-'.
-    Oracle: all named fields have non-'-' values (repos='-', note='-' are
-    expected, so pick cursor_lines and ledger_sha as witnesses).
+    Oracle: all named fields have non-'-' values (repos='-' is expected,
+    so pick cursor_lines and ledger_sha as witnesses; note opens with the
+    adopt provenance).
     """
     folder = _root(tmp_path, monkeypatch)
     _handoff(folder)
     assert hq.main(['adopt', _SLUG]) == 0
     rows = _manifest(folder)
     row = rows[0]
-    assert row['note'] == '-'
+    assert row['note'].startswith('adopted ')
     assert row['cursor_lines'] != ''
     assert row['ledger_sha'] != ''
     assert row['ledger_sha'] != '-'
@@ -1413,7 +1418,6 @@ def test_adopt_pointer_notes_edit_applied(tmp_path, monkeypatch):
     assert rows['sub/notes-bg.md']['read_before'] == 'edit'
 
 
-
 def test_adopt_missing_top_level_draft_keeps_kind_and_stays_missing(
         tmp_path, monkeypatch):
     """A missing top-level .py pointer is seeded `draft missing never`.
@@ -1432,8 +1436,6 @@ def test_adopt_missing_top_level_draft_keeps_kind_and_stays_missing(
     row = rows['script.py']
     assert (row['kind'], row['status'], row['read_before']) == (
         'draft', 'missing', 'never')
-
-
 
 
 # --- String and none class spot-check (140 string, 93 none) ----------
