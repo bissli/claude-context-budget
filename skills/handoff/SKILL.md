@@ -38,7 +38,10 @@ calls for. Five usage lines can come from any verb: `hq: invalid slug
 `hq: --now must be an ISO 8601 timestamp` (each exit 2), and `hq:
 cycles/manifest.tsv row N has a non-integer cycle` (exit 1, a hand-edited
 manifest). `hq: HANDOFF.md is a directory` (exit 1) names a folder whose
-file was replaced by a directory.
+file was replaced by a directory. `hq: cannot access <path>: <reason>`
+(exit 1) names a file or directory the script could not read or create -
+a permission, or a path that is not a directory; fix it and re-run. A
+`~` in `--root` or `HQ_ROOT` is expanded.
 
 ## The folder
 
@@ -369,7 +372,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp <slug> notes-old.md --defer
   `~` or absolute path. `hq stamp <slug>` with no path prints `hq stamp:
   path is required` (exit 2); a path holding a tab, newline, or
   carriage return prints `hq stamp: path may not contain a tab,
-  newline, or carriage return` (exit 2).
+  newline, or carriage return` (exit 2); a socket or a FIFO prints
+  `hq stamp: <path> is not a regular file or directory` (exit 2).
 - `--kind`, `--read-before`, `--status`, `--where`, and `--label` each
   default to the previous row's value; `--reason` carries only while
   kind, status, and read_before all hold. Omit `--label` and `--where`
@@ -459,7 +463,8 @@ block, and `finish` consults neither: what blocks `finish` is R3, and
 a re-stamp clears R3.
 
 - The gate runs on every Bash, Edit, Write, and NotebookEdit call. It
-  arms on the first `hq.py open <slug>` in the session's transcript.
+  arms on the first `hq.py open <slug>` in the session's transcript and
+  follows the slug opened most recently.
   On the first write after that - an Edit or Write outside
   `scratch/<slug>/`, or a Bash command that redirects to a file, runs
   `sed -i`, `tee`, `git add`, or `git commit` - it names each gated
@@ -471,12 +476,15 @@ a re-stamp clears R3.
   Evidence is a Read tool call, a `cat`/`head`/`tail`/`less`/`sed -n`
   naming the path, or an `hq.py read` receipt; `ls`, `wc`, `grep`, and
   a `stamp` naming the path do not count. A command containing `hq.py`
-  and a write inside the handoff folder are exempt. `HQ_GATE=0` in the
+  and a write whose target is inside the handoff folder are exempt; a
+  command that only reads from the folder is not, and a target reached
+  through a shell variable is not recognized. `HQ_GATE=0` in the
   environment turns the gate off; `HQ_GATE_DENY=1` makes it deny the
   write instead of reporting.
 - The Stop hook runs at the end of every turn. When a folder's
   `HANDOFF.md` no longer matches the sha its last finished cycle
-  recorded and no cycle is open, it tells the user once: `handoff:
+  recorded and no cycle is open, it tells the user once (the line can
+  repeat when the state directory cannot be written): `handoff:
   scratch/<slug>/HANDOFF.md was written by hand since cycle N finished;
   run hq.py begin <slug>, then hq.py finish <slug> --log "...", or the
   next open reports LEDGER BEHIND`. The move is the one it names.
