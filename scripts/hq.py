@@ -2399,6 +2399,18 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     # one-line roll-up; the legacy Log lines ride in the row's note
     # field, and the archived file keeps them as written.
     legacy_log = [ln.strip() for ln in sections_raw.get('Log', []) if ln.strip()]
+    # A Log item starts at an unindented line and runs on through the
+    # indented lines below it, so a bullet wrapped at the column joins
+    # back onto one line before the items are separated; ` / ` is not
+    # the separator because a sha list carries it at a line end.
+    legacy_items: list[str] = []
+    for ln in sections_raw.get('Log', []):
+        if not ln.strip():
+            continue
+        if ln.startswith(' ') and legacy_items:
+            legacy_items[-1] += ' ' + ln.strip()
+        else:
+            legacy_items.append(ln.strip())
     adopt_log = 'adopted'
     adopt_note = '-'
     if legacy_log:
@@ -2406,7 +2418,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             f'adopted; prior Log: {len(legacy_log)} lines'
             f' in cycles/c{cycle:02d}.md'
         )
-        adopt_note = ' / '.join(legacy_log)
+        adopt_note = ' | '.join(legacy_items)
     # The row adopt appends belongs in the Log it renders, the same way
     # finish renders its own row; the file would otherwise carry an
     # empty ## Log the cycle it was adopted.

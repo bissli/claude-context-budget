@@ -421,6 +421,36 @@ def test_adopt_log_field_is_summary_not_full_lines(tmp_path, monkeypatch):
     assert 'cache layout drafted' not in hf_text
 
 
+def test_adopt_note_joins_wrapped_log_items_before_separating_them(
+        tmp_path, monkeypatch):
+    """A wrapped Log bullet is one note item, and items are separated by ` | `.
+
+    Mutation: every Log line joined with the separator, so a bullet
+    wrapped mid-sentence splits into two items and a sha list wrapped
+    after its own ` / ` reads ` / / `; or the separator left as ` / `,
+    which the lines themselves carry.
+    Oracle: hand-computed - two bullets, the first wrapped over three
+    lines, give the note `- day one: shipped a / b / c; the readout count
+    2^16 | - day two: x`, and the log field still counts the 4 lines the
+    archive holds.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {folder.name}\n\nWritten: 2026-09-01 | Cycle: 1\n\n'
+        '## Task\nt\n\n## Now\nn\n\n## Log\n'
+        '- day one: shipped a / b /\n'
+        '  c; the readout\n'
+        '  count 2^16\n'
+        '- day two: x\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    last = _manifest(folder)[-1]
+    assert last['note'] == (
+        '- day one: shipped a / b / c; the readout count 2^16 | - day two: x')
+    assert last['log'] == 'adopted; prior Log: 4 lines in cycles/c01.md'
+
+
 def test_adopt_log_field_is_bare_adopted_with_no_log_section(
         tmp_path, monkeypatch):
     """Adopt sets log='adopted' with no suffix when the file has no Log.

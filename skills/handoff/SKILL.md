@@ -256,8 +256,8 @@ How to read the generated blocks:
 - `Log`: `+1` counts dirty paths at that finish. An adopted folder's
   first line reads `adopted`, or `adopted; prior Log: N lines in
   cycles/cNN.md` when the file had a Log; the archived file holds those
-  lines, and the manifest row's `note` field carries them joined with
-  ` / `.
+  lines, and the manifest row's `note` field carries them, each wrapped
+  item joined back onto one line, separated by ` | `.
 
 Rules:
 
