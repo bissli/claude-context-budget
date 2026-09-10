@@ -663,7 +663,7 @@ def test_stop_reports_when_handoff_sha_differs_from_manifest(monkeypatch,
 
 def test_stop_compares_against_the_rewrite_an_adopt_row_records(
         monkeypatch, capsys, tmp_path):
-    """Verify an adopted folder is silent while HANDOFF.md is the adopt rewrite.
+    """Verify an adopted folder is silent while HANDOFF.md is the rewrite.
 
     Mutation: comparing the file against the row's handoff_sha alone,
     which on an adopt row names the archived original, so every Stop

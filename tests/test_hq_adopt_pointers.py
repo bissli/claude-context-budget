@@ -632,6 +632,62 @@ def test_adopt_row_written_is_the_date_alone_or_the_adopt_date(
     assert _manifest(undated)[-1]['written'] == '2026-09-01'
 
 
+
+def test_adopt_note_names_the_adopting_git_state_and_the_row_keeps_the_archive(
+        tmp_path, monkeypatch):
+    """Under git the note ends ` at <branch>@<sha>` while repos stays the archive's.
+
+    Mutation: the ` at` clause dropped, so a real adopt records no sha of
+    its own; or repos taken from the adopt-time git state rather than
+    the archived header.
+    Oracle: a stub _git_state answering ('trunk', 'abc1234', []) against
+    a header naming `old @ 1111111`: note `adopted 2026-09-01 by
+    <session> at trunk@abc1234`, repos `old@1111111`.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    monkeypatch.setenv('HQ_GIT', '1')
+    monkeypatch.setattr(hq, '_git_state', lambda root: ('trunk', 'abc1234', []))
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {folder.name}\n\n'
+        'Written: 2026-08-22 | Cycle: 3 | old @ 1111111 | clean\n\n## Task\n\nx\n',
+        encoding='utf-8')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    row = _manifest(folder)[-1]
+    assert row['note'] == f'adopted 2026-09-01 by {_SESSION} at trunk@abc1234'
+    assert row['repos'] == 'old@1111111'
+
+
+def test_adopt_row_describes_an_archive_already_on_disk(tmp_path, monkeypatch):
+    """A cycles/cNN.md already present is kept, and the row describes it.
+
+    Mutation: the row measured on the text adopt read rather than the
+    archive read back, so written, repos, and handoff_sha describe
+    HANDOFF.md while cycles/c03.md holds another file.
+    Oracle: a pre-created cycles/c03.md headed `Written: 2026-01-05 |
+    Cycle: 3 | old @ 1111111`: row written `2026-01-05`, repos
+    `old@1111111`, handoff_sha its digest and not HANDOFF.md's.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    _handoff(folder)
+    (folder / 'cycles').mkdir()
+    archive = folder / 'cycles' / 'c03.md'
+    archive.write_text(
+        f'# Handoff: {folder.name}\n\n'
+        'Written: 2026-01-05 | Cycle: 3 | old @ 1111111 | clean\n\n## Task\n\nold\n',
+        encoding='utf-8')
+    archive_sha = hq._sha12_path(archive)
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    row = _manifest(folder)[-1]
+    assert row['written'] == '2026-01-05'
+    assert row['repos'] == 'old@1111111'
+    assert row['handoff_sha'] == archive_sha
+    assert row['handoff_sha'] != hq._sha12_path(folder / 'HANDOFF.md')
+
+
 # --- HANDOFF*.md at the top level only ---
 
 

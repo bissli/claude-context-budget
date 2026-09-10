@@ -608,24 +608,26 @@ def test_adopt_prev_path_filename_is_uppercase(tmp_path, monkeypatch):
 
 def test_adopt_manifest_row_has_lowercase_keys_and_correct_date(
         tmp_path, monkeypatch):
-    """Manifest row keys are lowercase; written is YYYY-MM-DD (10 chars).
+    """Manifest row keys are lowercase; written is the archive's YYYY-MM-DD.
 
-    Mutation: manifest row keys written as 'CYCLE', 'TS', 'SESSION',
-    'REPOS', 'CURSOR_LINES', 'PAYLOAD_TOKENS', 'LEDGER_SHA', 'STANDING_SHA',
-    'NOTE', 'WRITTEN' etc. (mutmut_888,893,949,952,956,958,961,969,975,980);
-    or written date is ts[:11] instead of ts[:10] (mutmut_950), giving
-    'YYYY-MM-DDT' instead of 'YYYY-MM-DD'.
-    Oracle: manifest row has 'written'='2026-09-01', all required keys
-    with lowercase names, and the adopting session in the note rather
-    than the session column, which the archived header cannot fill.
+    Mutation: manifest row keys written as 'CYCLE', 'WRITTEN', 'LOG',
+    'NOTE' etc. (mutmut_888,893,949,952), so the column reads `-`;
+    written taken from the adopt timestamp rather than the archived
+    header; or the provenance date cut as ts[:11] instead of ts[:10]
+    (mutmut_950), giving 'adopted YYYY-MM-DDT by'.
+    Oracle: a header dated 2026-08-22 adopted at HQ_NOW 2026-09-01 gives
+    written '2026-08-22', cycle '3', session '-', and the note
+    `adopted 2026-09-01 by <session>`.
     """
     folder = _root(tmp_path, monkeypatch)
-    _handoff(folder)
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {folder.name}\n\nWritten: 2026-08-22 | Cycle: 3\n\n' + _CURSOR,
+        encoding='utf-8')
     assert hq.main(['adopt', _SLUG]) == 0
     rows = _manifest(folder)
     assert len(rows) == 1
     row = rows[0]
-    assert row['written'] == '2026-09-01'
+    assert row['written'] == '2026-08-22'
     assert row['cycle'] == '3'
     assert row['session'] == '-'
     assert row['note'] == f'adopted 2026-09-01 by {_SESSION}'
