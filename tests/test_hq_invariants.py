@@ -37,7 +37,7 @@ def _env(tmp_path, monkeypatch):
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
     monkeypatch.delenv('HQ_CYCLE', raising=False)
-    folder = root / 'scratch' / _SLUG
+    folder = root / 'working' / _SLUG
     folder.mkdir(parents=True)
     for name, content in _CONTENT.items():
         (folder / name).write_text(content)

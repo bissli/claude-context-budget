@@ -35,7 +35,7 @@ def _new_root(tmp_path, monkeypatch, cycle='1', now=_NOW, slug=_SLUG):
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
-    return root / 'scratch' / slug
+    return root / 'working' / slug
 
 
 def _run(argv):
@@ -1064,7 +1064,7 @@ def test_verb_begin_no_ledger_triggers_creation(tmp_path, monkeypatch):
     Oracle: a folder with both HANDOFF.md and ledger.tsv must NOT re-create.
     """
     folder = _new_root(tmp_path, monkeypatch)
-    # Create from scratch.
+    # Build fresh.
     rc0, _, _ = _run(['begin', _SLUG])
     assert rc0 == 0
     # Stamp a file so ledger.tsv has content.

@@ -134,7 +134,7 @@ def _new_root(
     Returns
     -------
     pathlib.Path
-        The expected folder path root/scratch/<slug>/ (not yet created).
+        The expected folder path root/working/<slug>/ (not yet created).
     """
     root = pathlib.Path(tmp_path) / 'root'
     root.mkdir(exist_ok=True)
@@ -145,7 +145,7 @@ def _new_root(
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
-    return root / 'scratch' / slug
+    return root / 'working' / slug
 
 
 def _thread(
@@ -173,7 +173,7 @@ def _thread(
     Returns
     -------
     pathlib.Path
-        The handoff folder path (root/scratch/thread-slug/).
+        The handoff folder path (root/working/thread-slug/).
 
     Notes
     -----
@@ -184,7 +184,7 @@ def _thread(
     slug = 'thread-slug'
     root = pathlib.Path(str(tmp_path)) / 'root'
     root.mkdir(exist_ok=True)
-    folder = root / 'scratch' / slug
+    folder = root / 'working' / slug
     folder.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setenv('HQ_ROOT', str(root))
@@ -685,8 +685,10 @@ def test_log_line_carries_the_dirty_count(tmp_path, monkeypatch):
     folder = _new_root(tmp_path, monkeypatch)
     root = folder.parent.parent
     subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+    # Exclude the handoff dir from git status so only tracked.txt is dirty.
+    (root / '.gitignore').write_text('working/\n', encoding='utf-8')
     (root / 'tracked.txt').write_text('one\n')
-    subprocess.run(['git', 'add', 'tracked.txt'], cwd=root, check=True)
+    subprocess.run(['git', 'add', 'tracked.txt', '.gitignore'], cwd=root, check=True)
     subprocess.run([
         'git', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid',
         'commit', '-q', '-m', 'init'], cwd=root, check=True)
@@ -1194,7 +1196,7 @@ def test_key_files_group_labels_grade_and_loose_lines_go_unfiled(
     _conforming(folder, 3, '## Task\nx\n\n## Key files\nRead now:\n'
                 '- `notes-a.md` the live sketch\n\nReference only:\n'
                 '- `notes-b.md` the older sketch\n'
-                'Everything else is scratch.\n\n## Log\n')
+                'Everything else is draft.\n\n## Log\n')
     (folder / 'notes-a.md').write_text('# A\n')
     (folder / 'notes-b.md').write_text('# B\n')
 
@@ -1206,7 +1208,7 @@ def test_key_files_group_labels_grade_and_loose_lines_go_unfiled(
     assert rows['notes-a.md']['read_before'] == 'always'
     assert rows['notes-a.md']['label'] == 'the live sketch'
     assert rows['notes-b.md']['read_before'] == 'edit'
-    assert '- unfiled: Everything else is scratch.' in (
+    assert '- unfiled: Everything else is draft.' in (
         folder / 'HANDOFF.md').read_text()
 
 
@@ -1679,7 +1681,7 @@ def test_adopt_of_a_non_conforming_handoff_changes_nothing(tmp_path,
     root = tmp_path / 'root'
     root.mkdir()
     src = os.path.join(FIXTURES, 'legacy-import-notes')
-    dst = str(root / 'scratch' / 'legacy-import-notes')
+    dst = str(root / 'working' / 'legacy-import-notes')
     shutil.copytree(src, dst)
 
     monkeypatch.setenv('HQ_ROOT', str(root))
@@ -1690,7 +1692,7 @@ def test_adopt_of_a_non_conforming_handoff_changes_nothing(tmp_path,
     monkeypatch.setenv('HQ_GIT', '0')
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
 
-    folder = root / 'scratch' / 'legacy-import-notes'
+    folder = root / 'working' / 'legacy-import-notes'
     ret = hq.main(['adopt', 'legacy-import-notes'])
     assert ret == 1
     assert not (folder / 'ledger.tsv').exists()
@@ -1711,11 +1713,11 @@ def test_adopt_conservation_excludes_the_archive(tmp_path, monkeypatch):
     root = tmp_path / 'root'
     root.mkdir()
     src = os.path.join(FIXTURES, 'orbit-cache-rewrite')
-    dst = str(root / 'scratch' / 'orbit-cache-rewrite')
+    dst = str(root / 'working' / 'orbit-cache-rewrite')
     shutil.copytree(src, dst)
 
     slug = 'orbit-cache-rewrite'
-    folder = root / 'scratch' / slug
+    folder = root / 'working' / slug
     original_bytes = (folder / 'HANDOFF.md').read_bytes()
     original_text = (folder / 'HANDOFF.md').read_text()
 

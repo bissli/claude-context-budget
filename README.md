@@ -144,7 +144,7 @@ for the other.
 
 The warnings point at `/handoff`, a command the plugin installs. It
 writes the session's state - plan, key files with line anchors, settled
-decisions, dead ends - to `scratch/<task-name>/HANDOFF.md`, the folder
+decisions, dead ends - to `working/<task-name>/HANDOFF.md`, the folder
 named after the task, and a fresh session reads it back and resumes.
 The alternative exit, `/compact`, summarizes the conversation in place.
 They restart at very different sizes:
@@ -184,7 +184,7 @@ session chose.)
   writes; one that only looked something up reads a handoff back
   instead. Where either the verb or the target is ambiguous, it lists
   the candidates and stops rather than guessing.
-- The folder outlives any one file. `scratch/<task-name>/` holds the
+- The folder outlives any one file. `working/<task-name>/` holds the
   hand-written cursor - task, next step, plan, state, open questions -
   in `HANDOFF.md`; an append-only ledger of the thread's artifacts in
   `ledger.tsv` (which spec, draft, or notes file matters, and whether
@@ -215,8 +215,9 @@ session chose.)
   ledger: one path's history, the cursor lines that changed between
   two cycles, every live artifact, every standing item.
 
-`scratch/` belongs in the project's gitignore when handoffs should stay
-untracked.
+`working/` belongs in the project's gitignore when handoffs should stay
+untracked. Versions before 0.2.2 wrote to `scratch/`; move each
+`scratch/<task-name>/` to `working/<task-name>/` once.
 
 ## What you see
 
@@ -396,7 +397,7 @@ text.
 
 Two things outlive it: the `statusLine` block above (remove it from
 settings.json) and the cache directory
-(`rm -rf ~/.claude/cache/context-budget`). Handoffs under `scratch/`
+(`rm -rf ~/.claude/cache/context-budget`). Handoffs under `working/`
 belong to the project, not the plugin.
 
 ## Development

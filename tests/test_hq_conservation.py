@@ -36,7 +36,7 @@ def _setup(
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
     monkeypatch.delenv('HQ_CYCLE', raising=False)
-    folder = root / 'scratch' / slug
+    folder = root / 'working' / slug
     folder.mkdir(parents=True, exist_ok=True)
     return folder
 

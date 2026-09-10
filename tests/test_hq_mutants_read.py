@@ -26,7 +26,7 @@ def _new_root(
     cycle: str = '1',
     now: str = _NOW,
 ) -> 'pathlib.Path':
-    """Return scratch/slug folder path and configure all HQ_* env vars."""
+    """Return working/slug folder path and configure all HQ_* env vars."""
     root = pathlib.Path(tmp_path) / 'root'
     root.mkdir(exist_ok=True)
     monkeypatch.setenv('HQ_ROOT', str(root))
@@ -36,7 +36,7 @@ def _new_root(
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
-    return root / 'scratch' / slug
+    return root / 'working' / slug
 
 
 def _handoff(folder: 'pathlib.Path', cycle: int = 1) -> None:

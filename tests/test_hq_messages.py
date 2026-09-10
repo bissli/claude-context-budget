@@ -36,7 +36,7 @@ def _root(tmp_path, monkeypatch, git=False):
         monkeypatch.delenv('HQ_GIT', raising=False)
     else:
         monkeypatch.setenv('HQ_GIT', '0')
-    folder = root / 'scratch' / _SLUG
+    folder = root / 'working' / _SLUG
     folder.mkdir(parents=True)
     return folder
 
@@ -408,10 +408,12 @@ def test_the_example_file_in_the_skill_is_the_scripts_own_output(
     auth_lines = ['def poll():'] + [
         f'    step_{i:03d}()' for i in range(1, 119)] + ['    return 401']
     (root / 'scripts' / 'auth.py').write_text('\n'.join(auth_lines) + '\n')
-    subprocess.run(git + ['-C', str(root), 'add', 'scripts/auth.py'], check=True)
+    # Exclude the handoff dir so git status only shows code changes.
+    (root / '.gitignore').write_text('working/\n', encoding='utf-8')
+    subprocess.run(git + ['-C', str(root), 'add', 'scripts/auth.py', '.gitignore'], check=True)
     subprocess.run(git + ['-C', str(root), 'commit', '-qm', 'poller'], check=True)
     (root / 'scripts' / 'auth.py').write_text('\n'.join(auth_lines[:-1]) + '\n    raise Refresh()\n')
-    folder = root / 'scratch' / 'auth-token-refresh'
+    folder = root / 'working' / 'auth-token-refresh'
     folder.mkdir(parents=True)
     (folder / 'SPEC.md').write_text(
         '# Spec\n\n## 1. Token store\n\nKeep tokens in memory only.\n\n'

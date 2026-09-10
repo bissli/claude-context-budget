@@ -201,11 +201,12 @@ def gate(payload: dict[str, Any]) -> int:
     """
     if os.environ.get('HQ_GATE') == '0':
         return 0
+    name = hq.HANDOFF_DIRNAME
     cwd = str(payload.get('cwd') or '')
     start = pathlib.Path(cwd or '.')
     root = None
     for candidate in [start, *start.parents]:
-        if next((candidate / 'scratch').glob('*/ledger.tsv'), None):
+        if next((candidate / name).glob('*/ledger.tsv'), None):
             root = candidate
             break
     if root is None:
@@ -221,8 +222,8 @@ def gate(payload: dict[str, Any]) -> int:
         target = pathlib.Path(named).expanduser()
         if not target.is_absolute():
             target = pathlib.Path(cwd) / target
-        scratch = os.path.normpath(str(root / 'scratch')) + os.sep
-        if os.path.normpath(str(target)).startswith(scratch):
+        handoffs = os.path.normpath(str(root / name)) + os.sep
+        if os.path.normpath(str(target)).startswith(handoffs):
             return 0
     elif tool == 'Bash':
         if not bash_writes(command):
@@ -268,12 +269,12 @@ def gate(payload: dict[str, Any]) -> int:
 
     folder = None
     if slug:
-        exact = root / 'scratch' / slug
+        exact = root / name / slug
         if exact.is_dir():
             folder = exact
         else:
             matches = [
-                entry for entry in (root / 'scratch').iterdir()
+                entry for entry in (root / name).iterdir()
                 if entry.is_dir() and entry.name.startswith(slug)
                 ]
             folder = matches[0] if len(matches) == 1 else None
@@ -283,14 +284,14 @@ def gate(payload: dict[str, Any]) -> int:
     #   source: the prefix must follow a redirect, an in-place edit, or
     #   a write verb.
     # - A quoted target keeps its text while a quoted operator loses
-    #   its angle brackets, so `> "scratch/x/f"` counts as a write into
-    #   the folder and `grep '>' scratch/x/f > out` does not.
-    if folder is not None and f'scratch/{folder.name}/' in command:
+    #   its angle brackets, so `> "working/x/f"` counts as a write into
+    #   the folder and `grep '>' working/x/f > out` does not.
+    if folder is not None and f'{name}/{folder.name}/' in command:
         text = _QUOTED.sub(
             lambda m: re.sub(r'[<>]', ' ', m.group(0)[1:-1]),
             _strip_heredocs(command))
         text = _NULL_REDIRECT.sub(' ', _FD_REDIRECT.sub(' ', text))
-        prefix = f'scratch/{folder.name}/'
+        prefix = f'{name}/{folder.name}/'
         operator_ends = [m.end() for m in re.finditer(r'>>?', text)]
         operator_ends += [m.end() for m in _INPLACE.finditer(text)]
         operator_ends += [m.end() for m in _WRITE_VERB.finditer(text)]

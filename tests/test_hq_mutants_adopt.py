@@ -38,7 +38,7 @@ def _root(tmp_path, monkeypatch, slug=_SLUG, cycle=None):
         monkeypatch.delenv('HQ_CYCLE', raising=False)
     else:
         monkeypatch.setenv('HQ_CYCLE', cycle)
-    folder = root / 'scratch' / slug
+    folder = root / 'working' / slug
     folder.mkdir(parents=True, exist_ok=True)
     return folder
 
@@ -290,7 +290,7 @@ def test_pointer_path_returns_early_when_exists():
     """
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
-        folder = pathlib.Path(tmp) / 'scratch' / 'demo'
+        folder = pathlib.Path(tmp) / 'working' / 'demo'
         folder.mkdir(parents=True)
         # Decoy in grandparent (folder.parent.parent = tmp); the search
         # loop would find this under mutmut_6.

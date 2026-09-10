@@ -28,7 +28,7 @@ def _root(tmp_path, monkeypatch, cycle='1'):
     monkeypatch.setenv('HQ_HOST', 'host')
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
-    return root / 'scratch' / _SLUG
+    return root / 'working' / _SLUG
 
 
 def _run(argv):
@@ -222,13 +222,13 @@ def test_a_fifo_is_named_unstampable_by_begin_and_finish(
     assert 'advisory: unstampable name: pipe.md' in out
 
 
-def test_a_bad_cycle_on_begin_creates_no_scratch_directory(
+def test_a_bad_cycle_on_begin_creates_no_handoff_directory(
         tmp_path, monkeypatch):
     """`begin --cycle abc` on a fresh root exits 2 and leaves the disk alone.
 
-    Mutation: the resolver creating scratch/ for begin before the anchors
+    Mutation: the resolver creating working/ for begin before the anchors
     are validated, so an exit-2 run leaves a directory behind.
-    Oracle: exit 2 and no scratch/ under the root.
+    Oracle: exit 2 and no working/ under the root.
     """
     folder = _root(tmp_path, monkeypatch)
     monkeypatch.setenv('HQ_CYCLE', 'abc')

@@ -61,17 +61,18 @@ def report(payload: dict[str, Any]) -> int:
     """
     if payload.get('agent_id') or payload.get('stop_hook_active'):
         return 0
+    name = hq.HANDOFF_DIRNAME
     start = pathlib.Path(str(payload.get('cwd') or '') or '.')
     root = None
     for candidate in [start, *start.parents]:
-        if next((candidate / 'scratch').glob('*/cycles/manifest.tsv'), None):
+        if next((candidate / name).glob('*/cycles/manifest.tsv'), None):
             root = candidate
             break
     if root is None:
         return 0
 
     drifted: list[tuple[str, str, str]] = []
-    for folder in sorted((root / 'scratch').iterdir()):
+    for folder in sorted((root / name).iterdir()):
         handoff = folder / 'HANDOFF.md'
         manifest = folder / 'cycles' / 'manifest.tsv'
         if not manifest.is_file() or not handoff.is_file():
@@ -113,7 +114,7 @@ def report(payload: dict[str, Any]) -> int:
     except OSError:
         pass
     clauses = '; '.join(
-        f'scratch/{slug}/HANDOFF.md was written by hand since cycle {cycle} '
+        f'{name}/{slug}/HANDOFF.md was written by hand since cycle {cycle} '
         f'finished; run hq.py begin {slug}, then hq.py finish {slug} '
         f'--log "...", or the next open reports LEDGER BEHIND'
         for slug, _, cycle in fresh)

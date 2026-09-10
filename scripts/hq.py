@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Handoff ledger script: twelve verbs for managing per-project handoff files.
+"""Handoff ledger script: thirteen verbs for managing per-project handoff files.
 
-Each handoff lives in scratch/<slug>/: HANDOFF.md written by the agent,
+Each handoff lives in working/<slug>/: HANDOFF.md written by the agent,
 ledger.tsv stamping every artifact, and standing.md for decisions,
 constraints, and dead ends. Three rendered blocks keep the payload bounded
 across cycles, because each block shows live counts and unsuperseded items,
@@ -53,6 +53,7 @@ MANIFEST_FIELDS = [
 _LEDGER_HEADER = '\t'.join(LEDGER_FIELDS)
 _MANIFEST_HEADER = '\t'.join(MANIFEST_FIELDS)
 _SKIP_NAMES = {'HANDOFF.md', 'ledger.tsv', 'standing.md', 'cycles', '.hq.lock'}
+HANDOFF_DIRNAME = 'working'
 # Notes:
 # - A grading label under Key files may be written as its own heading;
 #   there it is structure and stays in the section rather than opening
@@ -1034,7 +1035,7 @@ def _resolve_root(argv: argparse.Namespace) -> pathlib.Path:
     Notes
     -----
     - A root that exists and is not a directory exits 2; every caller
-      would otherwise raise NotADirectoryError joining ``scratch`` onto
+      would otherwise raise NotADirectoryError joining ``working`` onto
       it.
     """
     root = getattr(argv, 'root', None) or os.environ.get('HQ_ROOT')
@@ -1208,9 +1209,9 @@ def _find_folder(
     root : pathlib.Path
         Project root.
     slug : str
-        Exact folder name or a unique prefix under ``root/scratch/``.
+        Exact folder name or a unique prefix under ``root/working/``.
     missing_ok : bool, default False
-        When True, return ``scratch/<slug>`` instead of exiting when no
+        When True, return ``working/<slug>`` instead of exiting when no
         folder matches; still exits on ambiguity. ``begin`` creates it.
 
     Returns
@@ -1221,19 +1222,19 @@ def _find_folder(
     Notes
     -----
     - The slug is one path component: ``[A-Za-z0-9][A-Za-z0-9._-]*``. It
-      is joined onto ``scratch/`` unquoted, so ``..`` or an embedded
-      separator would place a handoff folder outside ``scratch/``.
+      is joined onto ``working/`` unquoted, so ``..`` or an embedded
+      separator would place a handoff folder outside ``working/``.
     - Nothing here writes: a read-only verb on a mistyped root leaves
       the disk as it found it, and ``begin`` creates the folder itself.
     """
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', slug) or '..' in slug:
         print(f'hq: invalid slug {slug!r}')
         sys.exit(2)
-    scratch = root / 'scratch'
-    exact = scratch / slug
+    handoffs = root / HANDOFF_DIRNAME
+    exact = handoffs / slug
     if exact.is_dir():
         return exact
-    siblings = sorted(scratch.iterdir()) if scratch.is_dir() else []
+    siblings = sorted(handoffs.iterdir()) if handoffs.is_dir() else []
     candidates = [
         d for d in siblings
         if d.is_dir() and d.name.startswith(slug)
@@ -1246,7 +1247,7 @@ def _find_folder(
         sys.exit(2)
     if missing_ok:
         return exact
-    print(f'hq: no folder matching {slug!r} under {scratch}')
+    print(f'hq: no folder matching {slug!r} under {handoffs}')
     sys.exit(2)
 
 
@@ -2616,7 +2617,7 @@ def _print_worklist(folder: pathlib.Path, anch: dict) -> None:
         elif not (folder / path).exists():
             missing_live.append(path)
     for path in missing_live[:5]:
-        print(f'  missing live: {path}')
+        print(f'  missing live: {path} - hq.py when {folder.name} {path}')
     if len(missing_live) > 5:
         print(f'  ... and {len(missing_live) - 5} more')
     dangling = dangling_successors(folder, live)
@@ -3662,13 +3663,93 @@ def _verb_standing(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -
     return 0
 
 
+def _verb_list(root: pathlib.Path, argv: argparse.Namespace) -> int:
+    """Print one line per handoff folder, newest first.
+
+    Parameters
+    ----------
+    root : pathlib.Path
+        Project root; the handoff folders sit under ``root / HANDOFF_DIRNAME``.
+    argv : argparse.Namespace
+        Parsed ``list`` arguments; ``count`` caps the lines, None for all.
+
+    Returns
+    -------
+    int
+        0, also when no folder holds a ``HANDOFF.md`` and the one line is
+        ``hq list: no handoff under <dir>``; 2 on a count below 1.
+
+    Notes
+    -----
+    - Order is each ``HANDOFF.md``'s modification time, newest first,
+      the order ``ls -t`` gives; files changed in the same second list
+      A to Z by slug.
+    - The line is ``<slug>  <written>  c<N>  <done>/<total>  <task>``.
+      A non-conforming header gives ``-`` for the date and the cycle; a
+      Plan with no checkbox item, or no Plan, gives ``-`` for the
+      progress; a missing Task line gives ``-``.
+    - Only ``- [ ]``, ``- [x]``, and ``- [X]`` bullets under ``## Plan``
+      count; a checkbox under any other section is not a plan item.
+    - A file the script cannot read prints its slug with ``-`` in every
+      field and ``unreadable: <reason>`` as the Task; the survey goes on
+      and the exit stays 0.
+    """
+    count = getattr(argv, 'count', None)
+    if count is not None and count < 1:
+        print('hq list: count must be a positive integer')
+        return 2
+    handoffs = root / HANDOFF_DIRNAME
+    files = []
+    if handoffs.is_dir():
+        files = sorted(
+            (path for path in handoffs.glob('*/HANDOFF.md') if path.is_file()),
+            key=lambda path: path.parent.name)
+        files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    if not files:
+        print(f'hq list: no handoff under {handoffs}')
+        return 0
+    for path in files[:count]:
+        try:
+            text = path.read_text(encoding='utf-8-sig', errors='replace')
+        except OSError as exc:
+            reason = exc.strerror or type(exc).__name__
+            print(f'{path.parent.name}  -  -  -  unreadable: {reason}')
+            continue
+        parsed = split_handoff(text)
+        written = cycle = '-'
+        if parsed['cycle'] is not None:
+            written_match = re.search(r'Written:\s*(\S+)', parsed['header'])
+            written = written_match.group(1) if written_match else '-'
+            cycle = f'c{parsed["cycle"]}'
+        task = '-'
+        done = total = 0
+        section = ''
+        for line in text.splitlines():
+            if line.startswith('## '):
+                section = line[3:].strip()
+                continue
+            if line.startswith('<!-- hq:'):
+                section = ''
+                continue
+            if section == 'Task' and task == '-' and line.strip():
+                task = line.strip()
+            elif section == 'Plan':
+                box = re.match(r'\s*- \[([ xX])\]', line)
+                if box:
+                    total += 1
+                    done += box.group(1) != ' '
+        progress = f'{done}/{total}' if total else '-'
+        print(f'{path.parent.name}  {written}  {cycle}  {progress}  {task}')
+    return 0
+
+
 # ----------------------------------------------------------------------
 # Argument parser
 # ----------------------------------------------------------------------
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Return the top-level argument parser for all twelve verbs.
+    """Return the top-level argument parser for all thirteen verbs.
     """
     p = argparse.ArgumentParser(prog='hq.py', description='Handoff ledger manager')
     p.add_argument('--root', help='project root (HQ_ROOT)')
@@ -3745,6 +3826,8 @@ def _build_parser() -> argparse.ArgumentParser:
     st.add_argument('slug')
     st.add_argument('--all', action='store_true')
 
+    sub.add_parser('list').add_argument('count', nargs='?', type=int)
+
     return p
 
 
@@ -3794,8 +3877,10 @@ def main(argv: list[str]) -> int:
         args.body = ' '.join([getattr(args, 'body', None) or ''] + leftover).strip()
     try:
         root = _resolve_root(args)
-        slug = getattr(args, 'slug', '')
         verb = args.verb
+        if verb == 'list':
+            return _verb_list(root, args)
+        slug = getattr(args, 'slug', '')
         is_begin = verb == 'begin'
         folder = _find_folder(root, slug, missing_ok=is_begin)
         anch = anchors(folder, args)

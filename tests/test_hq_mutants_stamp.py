@@ -25,7 +25,7 @@ _NOW = '2026-09-10T10:00:00'
 def _root(tmp_path, monkeypatch, slug=_SLUG, cycle='1', now=_NOW):
     """Create HQ_ROOT and set all HQ_* env vars for one slug.
 
-    Returns the folder path root/scratch/<slug>/ before creation.
+    Returns the folder path root/working/<slug>/ before creation.
     """
     root = pathlib.Path(tmp_path) / 'root'
     root.mkdir(exist_ok=True)
@@ -36,7 +36,7 @@ def _root(tmp_path, monkeypatch, slug=_SLUG, cycle='1', now=_NOW):
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
-    return root / 'scratch' / slug
+    return root / 'working' / slug
 
 
 def _rows(folder):
@@ -86,7 +86,7 @@ def test_anchors_env_used_when_argv_attrs_absent(tmp_path, monkeypatch):
     monkeypatch.setenv('HQ_SESSION', 'env-sess')
     monkeypatch.setenv('HQ_HOST', 'env-host')
     monkeypatch.setenv('HQ_GIT', '0')
-    folder = root / 'scratch' / 'test'
+    folder = root / 'working' / 'test'
     folder.mkdir(parents=True)
     ns = argparse.Namespace()
     anch = hq.anchors(folder, ns)
@@ -112,7 +112,7 @@ def test_anchors_session_fallback_to_unknown(tmp_path, monkeypatch):
     monkeypatch.delenv('HQ_SESSION', raising=False)
     monkeypatch.delenv('CLAUDE_CODE_SESSION_ID', raising=False)
     monkeypatch.delenv('claude_code_session_id', raising=False)
-    folder = tmp_path / 'root' / 'scratch' / 'test'
+    folder = tmp_path / 'root' / 'working' / 'test'
     folder.mkdir(parents=True)
     anch = hq.anchors(folder, argparse.Namespace())
     assert anch['session'] == 'unknown'
@@ -133,7 +133,7 @@ def test_anchors_session_reads_correct_env_var(tmp_path, monkeypatch):
     monkeypatch.delenv('HQ_SESSION', raising=False)
     monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'real-sess-id')
     monkeypatch.delenv('claude_code_session_id', raising=False)
-    folder = tmp_path / 'root' / 'scratch' / 'test'
+    folder = tmp_path / 'root' / 'working' / 'test'
     folder.mkdir(parents=True)
     anch = hq.anchors(folder, argparse.Namespace())
     assert anch['session'] == 'real-sess-id'
@@ -153,7 +153,7 @@ def test_anchors_host_from_hq_host_env(tmp_path, monkeypatch):
     monkeypatch.setenv('HQ_GIT', '0')
     monkeypatch.setenv('HQ_HOST', 'from-env-host')
     monkeypatch.delenv('hq_host', raising=False)
-    folder = tmp_path / 'root' / 'scratch' / 'test'
+    folder = tmp_path / 'root' / 'working' / 'test'
     folder.mkdir(parents=True)
     anch = hq.anchors(folder, argparse.Namespace())
     assert anch['host'] == 'from-env-host'
@@ -173,7 +173,7 @@ def test_anchors_host_falls_back_to_gethostname(tmp_path, monkeypatch):
     monkeypatch.setenv('HQ_GIT', '0')
     monkeypatch.delenv('HQ_HOST', raising=False)
     monkeypatch.delenv('hq_host', raising=False)
-    folder = tmp_path / 'root' / 'scratch' / 'test'
+    folder = tmp_path / 'root' / 'working' / 'test'
     folder.mkdir(parents=True)
     anch = hq.anchors(folder, argparse.Namespace())
     assert anch['host'] == socket.gethostname()
@@ -195,7 +195,7 @@ def test_anchors_hq_git_zero_disables_git_state(tmp_path, monkeypatch):
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.setenv('HQ_GIT', '0')
     monkeypatch.delenv('hq_git', raising=False)
-    folder = root / 'scratch' / 'test'
+    folder = root / 'working' / 'test'
     folder.mkdir(parents=True)
     anch = hq.anchors(folder, argparse.Namespace())
     assert anch['branch'] == '-'
@@ -217,7 +217,7 @@ def test_anchors_now_isoformat_uses_seconds(tmp_path, monkeypatch):
     monkeypatch.setenv('HQ_SESSION', _SESSION)
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.delenv('HQ_NOW', raising=False)
-    folder = root / 'scratch' / 'test'
+    folder = root / 'working' / 'test'
     folder.mkdir(parents=True)
     anch = hq.anchors(folder, argparse.Namespace())
     # seconds resolution: no fractional seconds part
@@ -343,9 +343,9 @@ def test_find_folder_rejects_uppercase_slug(tmp_path):
     Oracle: slug 'TestSlug' is accepted; slug '--bad' is rejected.
     """
     root = tmp_path
-    scratch = root / 'scratch'
-    scratch.mkdir()
-    folder = scratch / 'TestSlug'
+    handoff_dir = root / 'working'
+    handoff_dir.mkdir()
+    folder = handoff_dir / 'TestSlug'
     folder.mkdir()
     result = hq._find_folder(root, 'TestSlug')
     assert result == folder
@@ -358,10 +358,10 @@ def test_find_folder_returns_first_candidate(tmp_path):
     Oracle: unique prefix 'pre' resolves to 'prefix-a', not 'prefix-b'.
     """
     root = tmp_path
-    scratch = root / 'scratch'
-    scratch.mkdir()
-    (scratch / 'prefix-a').mkdir()
-    (scratch / 'prefix-b').mkdir()
+    handoff_dir = root / 'working'
+    handoff_dir.mkdir()
+    (handoff_dir / 'prefix-a').mkdir()
+    (handoff_dir / 'prefix-b').mkdir()
     # exact match returns immediately; prefix match returns candidates[0]
     result = hq._find_folder(root, 'prefix-a')
     assert result.name == 'prefix-a'
@@ -374,13 +374,13 @@ def test_find_folder_ambiguous_exits_2(tmp_path):
     Oracle: one folder 'slug-a' with prefix 'slug' resolves, not errors.
     """
     root = tmp_path
-    scratch = root / 'scratch'
-    scratch.mkdir()
-    (scratch / 'slug-a').mkdir()
+    handoff_dir = root / 'working'
+    handoff_dir.mkdir()
+    (handoff_dir / 'slug-a').mkdir()
     result = hq._find_folder(root, 'slug')
     assert result.name == 'slug-a'
     # two matches should exit 2
-    (scratch / 'slug-b').mkdir()
+    (handoff_dir / 'slug-b').mkdir()
     try:
         hq._find_folder(root, 'slug')
         raise AssertionError('expected SystemExit')
@@ -395,7 +395,7 @@ def test_find_folder_missing_exits_code_2(tmp_path):
     Oracle: SystemExit.code == 2 for an unknown slug.
     """
     root = tmp_path
-    (root / 'scratch').mkdir()
+    (root / 'working').mkdir()
     try:
         hq._find_folder(root, 'no-such-slug')
         raise AssertionError('expected SystemExit')
@@ -1461,7 +1461,7 @@ def test_anchors_hq_git_zero_in_real_git_repo(tmp_path, monkeypatch):
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.setenv('HQ_GIT', '0')
     monkeypatch.delenv('hq_git', raising=False)
-    folder = repo / 'scratch' / 'test'
+    folder = repo / 'working' / 'test'
     folder.mkdir(parents=True)
     anch = hq.anchors(folder, argparse.Namespace())
     assert anch['branch'] == '-'
@@ -1476,7 +1476,7 @@ def test_find_folder_invalid_slug_exits_code_2(tmp_path):
     Oracle: slug '--bad' triggers sys.exit(2) (code==2, not 3 or 0).
     """
     root = tmp_path
-    (root / 'scratch').mkdir()
+    (root / 'working').mkdir()
     try:
         hq._find_folder(root, '--bad')
         raise AssertionError('expected SystemExit')
