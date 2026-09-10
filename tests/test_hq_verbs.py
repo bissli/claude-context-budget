@@ -794,13 +794,12 @@ def test_open_reports_a_moved_span_after_an_unresolved_anchor(
 
 
 def test_adopt_carries_the_legacy_log_into_the_manifest(tmp_path, monkeypatch):
-    """Adopt keeps every original Log line in its manifest row.
+    """Adopt writes a line-count summary to the manifest log field.
 
-    Mutation: the original ## Log excluded from the rewrite and the
-    manifest row's log set to 'adopted' alone, so the legacy history
-    survives only in cycles/.
-    Oracle: both hand-written Log lines appear in the last manifest row's
-    log field.
+    Mutation: the prior log lines inlined into the log field instead of the
+    summary, so the log field grows unbounded and the note field stays '-'.
+    Oracle: log field == 'adopted; prior Log: 2 lines in cycles/c02.md';
+    both hand-written Log lines appear in the note field.
     """
     folder = _new_root(tmp_path, monkeypatch)
     folder.mkdir(parents=True)
@@ -815,10 +814,12 @@ def test_adopt_carries_the_legacy_log_into_the_manifest(tmp_path, monkeypatch):
     assert hq.main(['adopt', _SLUG]) == 0
 
     rows = (folder / 'cycles' / 'manifest.tsv').read_text().splitlines()
-    log_field = dict(zip(hq.MANIFEST_FIELDS, rows[-1].split('\t')))['log']
-    assert log_field.startswith('adopted; prior log: ')
+    last_row = dict(zip(hq.MANIFEST_FIELDS, rows[-1].split('\t')))
+    log_field = last_row['log']
+    note_field = last_row['note']
+    assert log_field == 'adopted; prior Log: 2 lines in cycles/c02.md'
     for ln in log_lines:
-        assert ln in log_field
+        assert ln in note_field
 
 
 def test_adopt_stores_a_key_files_pointer_outside_the_walk(tmp_path, monkeypatch):

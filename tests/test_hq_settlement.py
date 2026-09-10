@@ -299,12 +299,15 @@ def test_conservation_never_passes_an_empty_line_vacuously():
 
 
 def test_a_loose_bullet_closes_the_open_pointer(tmp_path, monkeypatch):
-    """A sub-bullet under a plain-word bullet never joins the pointer above.
+    """A sub-bullet under a plain-word bullet joins its parent, not the pointer.
 
     Mutation: the loose branch leaving the pointer token open, so the next
-    indented line lands on a pointer two bullets up.
-    Oracle: SPEC.md's label is its own text; the sub-bullet sits under
-    ## Unfiled with its parent.
+    indented line appends to SPEC.md's label instead of the loose parent;
+    or the indented line opens a new unfiled entry instead of joining the
+    parent loose bullet.
+    Oracle: SPEC.md's label is 'the spec label text'; the parent and child
+    appear together in a single unfiled bullet; the child does not appear
+    as a standalone unfiled entry.
     """
     folder = _root(tmp_path, monkeypatch)
     folder.mkdir(parents=True)
@@ -319,8 +322,17 @@ def test_a_loose_bullet_closes_the_open_pointer(tmp_path, monkeypatch):
     rows = {r['path']: r for r in hq._read_tsv(folder / 'ledger.tsv', hq.LEDGER_FIELDS)}
     assert rows['SPEC.md']['label'] == 'the spec label text'
     text = (folder / 'HANDOFF.md').read_text()
+    # Parent and child are joined into one unfiled bullet.
     assert '- unfiled: - a loose word bullet' in text
-    assert '- unfiled: - the sub-bullet of the loose word bullet' in text
+    assert 'the sub-bullet of the loose word bullet' in text
+    # The child does not appear as a standalone unfiled entry.
+    standalone = [
+        ln for ln in text.splitlines()
+        if ln.startswith('- unfiled:')
+        and 'sub-bullet of the loose word bullet' in ln
+        and 'a loose word bullet' not in ln
+    ]
+    assert not standalone, 'sub-bullet appeared as its own unfiled entry'
 
 
 def test_bare_range_and_extensionless_pointers_are_pointers(tmp_path, monkeypatch):
