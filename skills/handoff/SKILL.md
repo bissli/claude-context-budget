@@ -387,9 +387,10 @@ hq stamp <slug> notes-old.md --defer
   all count as the number 4; a bare `S4 ...` is a word, not a number. A
   number may carry one letter when a `.`, `:`, or ` - ` follows it:
   `s11b` names `# 11b. Proof`, `s11` does not, and a bare `3D ...` or
-  `2a-b ...` is a word. A heading keyed by a letter-led id, `## F65.
-  Title` or `## Q3: Title`, is named by that id - `F65`, `f65`, or
-  `sF65` - and `F7` never lands on `## 7. Seven`.
+  `2a-b ...` is a word. A heading keyed by a letter-led id of one or
+  two letters, `## F65. Title` or `## Q3: Title`, is named by that id -
+  `F65`, `f65`, or `sF65` - and `F7` never lands on `## 7. Seven`; a
+  longer word such as `Log4j:` is title text.
 - `--successor P` sets `status=superseded read_before=never` unless
   the stamp says otherwise. `--archive` sets `status=archived
   read_before=never`; without `--reason` it prints `hq stamp: --archive

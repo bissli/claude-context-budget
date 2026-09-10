@@ -145,6 +145,38 @@ def test_letter_led_section_id_resolves_by_its_id():
         '## F7. Cache hit ratio holds (n>=2)') == 'cache hit ratio holds (n>=2)'
 
 
+def test_a_digit_bearing_first_word_and_a_dotted_number_keep_the_title_whole():
+    """`Log4j: notes` is a title, and `3.1 Cache warmup` strips to `cache warmup`.
+
+    Mutation: the letter-led id taking any number of letters, so
+    `Log4j:` is stripped as an id and the anchor `Log4j: notes` lands on
+    the earlier `## Notes`; or the optional-letter number branch taking
+    `3.` before the dotted-number fallback, so `3.1 Cache warmup`
+    normalizes to `1 cache warmup` and its title never resolves.
+    Oracle: hand-computed spans - `## Log4j: notes` is lines 3-4 after
+    `## Notes` at 1-2; `## 3.1 Cache warmup` is lines 6-7 and
+    `## 3.2. Retry budget` lines 8-9.
+    """
+    text = (
+        '## Notes\n'
+        'body one\n'
+        '## Log4j: notes\n'
+        'body two\n'
+        '# Spec\n'
+        '## 3.1 Cache warmup\n'
+        'body\n'
+        '## 3.2. Retry budget\n'
+        'body\n'
+    )
+    assert hq.resolve_where(text, ['Log4j: notes']) == ([(3, 4)], [])
+    assert hq.resolve_where(text, ['Notes']) == ([(1, 2)], [])
+    assert hq.resolve_where(text, ['Cache warmup']) == ([(6, 7)], [])
+    assert hq.resolve_where(text, ['Retry budget']) == ([(8, 9)], [])
+    assert hq._norm_heading('## OAuth2: token flow') == 'oauth2: token flow'
+    assert hq._norm_heading('## v2.0 release') == 'v2.0 release'
+    assert hq._norm_heading('## Q3: Open') == 'open'
+
+
 def test_literal_proof_resolves_to_11b_heading_by_text_match():
     """Literal anchor 'Proof' resolves to '# 11b. Proof' via normalized text.
 

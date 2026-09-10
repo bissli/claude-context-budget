@@ -423,10 +423,11 @@ def resolve_where(
       Equality on the whole token is required, so ``s11`` does not resolve
       to ``# 11b. Proof``. A bare ``S3`` word without a dot or colon is not
       a token. A literal heading match is tried first.
-    - A letter-led id, ``<letters><d>[<letter>]`` followed by ``.``, ``:``,
-      or `` - ``, is a token too: ``F65``, ``f65``, and ``sF65`` all resolve
-      ``## F65. Title``. The letters count, so ``F7`` never lands on
-      ``## 7. Seven``.
+    - A letter-led id, one or two letters then ``<d>[<letter>]`` followed
+      by ``.``, ``:``, or `` - ``, is a token too: ``F65``, ``f65``, and
+      ``sF65`` all resolve ``## F65. Title``. The letters count, so ``F7``
+      never lands on ``## 7. Seven``, and a longer word such as ``Log4j:``
+      is title text.
     - The literal match is equality on the normalized text, never
       containment, so ``Retry`` does not land on ``## Retry budget``.
     - An unresolved anchor prints ``?`` in its span slot during rendering.
@@ -438,7 +439,7 @@ def resolve_where(
             level = len(line) - len(line.lstrip('#'))
             token_m = re.match(
                 r'^#+\s*(?:(\d+[a-z])(?:[.:]|\s+-(?=\s))|(\d+)[.:]?'
-                r'|([a-z]+)(\d+[a-z]?)(?:[.:]|\s+-(?=\s)))(?=\s|$)',
+                r'|([a-z]{1,2})(\d+[a-z]?)(?:[.:]|\s+-(?=\s)))(?=\s|$)',
                 line, re.IGNORECASE)
             tokens: set[str] = set()
             if token_m:
@@ -1376,11 +1377,14 @@ def _norm_heading(text: str) -> str:
     Notes
     -----
     - The leading section token is ``<d>``, ``<d>.``, ``<d>:``, ``<d> -``,
-      ``<d><letter>.``, ``<d><letter>:``, ``<d><letter> -``, or a
-      letter-led id ``<letters><d>[<letter>]`` with the same delimiters,
-      so ``## 11b. Proof``, ``## s11b: Proof``, ``## 2a - Basis``, and
-      ``## F65. Title`` all resolve. A bare ``S3`` (no dot or colon) is a
-      word, and stays.
+      a dotted number ``<d>.<d>``, ``<d><letter>.``, ``<d><letter>:``,
+      ``<d><letter> -``, or a letter-led id ``<letters><d>[<letter>]``
+      with the same delimiters, so ``## 11b. Proof``, ``## s11b: Proof``,
+      ``## 2a - Basis``, ``## 3.1 Warmup``, and ``## F65. Title`` all
+      resolve. A bare ``S3`` (no dot or colon) is a word, and stays.
+    - An id takes one or two letters and its dot is not followed by a
+      digit, so ``Log4j:``, ``OAuth2:``, and ``v2.0`` are words a title
+      may start with, never section tokens.
     - The dash delimiter needs whitespace on both sides, so ``2a-b`` in
       ``## 2a-b range`` is not a token and its ``2`` is stripped by the
       plain-digit fallback.
@@ -1390,8 +1394,8 @@ def _norm_heading(text: str) -> str:
     """
     text = re.sub(r'^[#\s]+', '', text)
     text = re.sub(
-        r'^(?:[a-z]+\d+[a-z]?(?:[.:]|\s+-(?=\s))|\d+[a-z]?(?:[.:]|\s+-(?=\s))'
-        r'|\d[\d.]*:?)\s*',
+        r'^(?:[a-z]{1,2}\d+[a-z]?(?:[.:](?!\d)|\s+-(?=\s))'
+        r'|\d+[a-z](?:[.:]|\s+-(?=\s))|\d[\d.]*(?::|\s+-(?=\s))?)\s*',
         '', text, flags=re.IGNORECASE)
     text = re.sub(r'`', '', text)
     return text.strip().lower()
