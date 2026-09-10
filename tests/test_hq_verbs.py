@@ -1,0 +1,2249 @@
+"""Tests for the hq.py verb suite (phase-1 table, design lines 590-624)."""
+
+import datetime as dt
+import hashlib
+import io
+import os
+import pathlib
+import shutil
+import subprocess
+from typing import Any
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+FIXTURES = os.path.join(HERE, 'fixtures', 'handoff')
+
+from scripts import hq
+
+_SLUG = 'test-slug'
+_SESSION = 'session-abc'
+_HOST = 'test-host'
+_NOW = '2026-09-09T12:00:00'
+# 1h59m before _NOW; refused (below two-hour threshold)
+_YOUNG_LOCK_TIME = '2026-09-09T10:01:00'
+# 2h01m before _NOW; taken over (above two-hour threshold)
+_STALE_LOCK_TIME = '2026-09-09T09:59:00'
+
+# Large cursor (~4 kB) used by the payload-flatness test.
+# All section bodies are deterministic strings
+# so the content never drifts.
+_LARGE_CURSOR = (
+    '## Task\n\n'
+    + '\n'.join(
+        f'Task item {i:02d}: complete this objective with strict attention.'
+        for i in range(1, 16))
+    + '\n\n## Now\n\n'
+    + '\n'.join(
+        f'Step {i:02d}: execute sub-task {i:02d} carefully before moving on.'
+        for i in range(1, 12))
+    + '\n\n## Plan\n\n'
+    + '\n'.join(
+        f'{i:02d}. Plan item {i:02d}: finish this phase before the next begins.'
+        for i in range(1, 26))
+    + '\n\n## State\n\n'
+    + '\n'.join(
+        f'State variable {i:02d}: currently nominal with no observed deviation.'
+        for i in range(1, 16))
+    + '\n\n## Environment\n\n'
+    + '\n'.join(
+        f'Environment check {i:02d}: configuration verified and stable.'
+        for i in range(1, 8))
+    + '\n\n## Open questions\n\n'
+    + '\n'.join(
+        f'Question {i:02d}: under investigation; resolution is pending.'
+        for i in range(1, 6))
+    + '\n'
+)
+
+
+def _write_lock(
+    folder: 'os.PathLike[str]',
+    session: str,
+    time_str: str,
+    cycle: int = 1,
+) -> None:
+    """Write a .hq.lock file with the given owner.
+
+    Parameters
+    ----------
+    folder : os.PathLike[str]
+        The handoff folder path.
+    session : str
+        The lock-owning session id.
+    time_str : str
+        ISO timestamp for the lock time field.
+    cycle : int, optional
+        Cycle number stored in the lock, by default 1.
+    """
+    p = pathlib.Path(folder)
+    (p / '.hq.lock').write_text(
+        f'slug={p.name}\n'
+        f'session={session}\n'
+        f'host=other-host\n'
+        f'time={time_str}\n'
+        f'cycle={cycle}\n')
+
+
+def _set_cursor(handoff_path: 'os.PathLike[str]', content: str) -> None:
+    """Replace the cursor body in HANDOFF.md, preserving the preamble.
+
+    Parameters
+    ----------
+    handoff_path : os.PathLike[str]
+        Path to the HANDOFF.md file.
+    content : str
+        New cursor content starting with the first '## ' heading.
+
+    Notes
+    -----
+    - The preamble is everything from the file start to (and including)
+      the newline before the first '## ' heading.
+    - When no '## ' heading exists the content is appended after stripping
+      any trailing whitespace from the preamble.
+    """
+    p = pathlib.Path(handoff_path)
+    text = p.read_text()
+    idx = text.find('\n## ')
+    if idx == -1:
+        p.write_text(text.rstrip() + '\n\n' + content)
+        return
+    p.write_text(text[:idx + 1] + content)
+
+
+def _new_root(
+    tmp_path: 'os.PathLike[str]',
+    monkeypatch: Any,
+    slug: str = _SLUG,
+    cycle: str = '1',
+    now: str = _NOW,
+) -> 'pathlib.Path':
+    """Create an HQ_ROOT and set all required env vars for a single-slug test.
+
+    Parameters
+    ----------
+    tmp_path : os.PathLike[str]
+        Pytest temporary path; HQ_ROOT is placed at tmp_path / 'root'.
+    monkeypatch : Any
+        Active pytest monkeypatch fixture.
+    slug : str, optional
+        Handoff slug, by default _SLUG.
+    cycle : str, optional
+        HQ_CYCLE override as a string, by default '1'.
+    now : str, optional
+        HQ_NOW override (ISO timestamp), by default _NOW.
+
+    Returns
+    -------
+    pathlib.Path
+        The expected folder path root/scratch/<slug>/ (not yet created).
+    """
+    root = pathlib.Path(tmp_path) / 'root'
+    root.mkdir(exist_ok=True)
+    monkeypatch.setenv('HQ_ROOT', str(root))
+    monkeypatch.setenv('HQ_CYCLE', cycle)
+    monkeypatch.setenv('HQ_NOW', now)
+    monkeypatch.setenv('HQ_SESSION', _SESSION)
+    monkeypatch.setenv('HQ_HOST', _HOST)
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
+    monkeypatch.setenv('HQ_GIT', '0')
+    return root / 'scratch' / slug
+
+
+def _thread(
+    tmp_path: 'os.PathLike[str]',
+    cycles: int,
+    artifacts: int,
+    files: int,
+    monkeypatch: Any,
+) -> 'pathlib.Path':
+    """Build a synthesized multi-cycle thread for payload-bound tests.
+
+    Parameters
+    ----------
+    tmp_path : os.PathLike[str]
+        Pytest temporary path; HQ_ROOT is tmp_path / 'root'.
+    cycles : int
+        Total begin/finish cycles to execute.
+    artifacts : int
+        Number of SPEC-NN.md files stamped read_before=always from cycle 1.
+    files : int
+        Total top-level files (first `artifacts` SPEC-NN.md, rest file-NN.md).
+    monkeypatch : Any
+        Active pytest monkeypatch fixture for env-var injection.
+
+    Returns
+    -------
+    pathlib.Path
+        The handoff folder path (root/scratch/thread-slug/).
+
+    Notes
+    -----
+    - Cycle 1 writes _LARGE_CURSOR, stamps the spec files, adds 10 constraints.
+    - Subsequent cycles leave cursor, artifacts, and standing unchanged so the
+      only growth in payload is the log-block rollup line added after cycle 3.
+    """
+    slug = 'thread-slug'
+    root = pathlib.Path(str(tmp_path)) / 'root'
+    root.mkdir(exist_ok=True)
+    folder = root / 'scratch' / slug
+    folder.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv('HQ_ROOT', str(root))
+    monkeypatch.setenv('HQ_SESSION', 'thread-session')
+    monkeypatch.setenv('HQ_HOST', 'test-host')
+    monkeypatch.setenv('HQ_GIT', '0')
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
+
+    for i in range(artifacts):
+        (folder / f'SPEC-{i:02d}.md').write_text(
+            f'# Spec {i:02d}\n\n## Overview {i}\n\nDetails.\n')
+    for i in range(files - artifacts):
+        (folder / f'file-{i:02d}.md').write_text(
+            f'# File {i:02d}\n\nContent line one.\nContent line two.\n')
+
+    base_date = dt.date(2026, 1, 1)
+
+    for cycle in range(1, cycles + 1):
+        now = dt.datetime.combine(
+            base_date + dt.timedelta(days=cycle - 1),
+            dt.time(12, 0, 0))
+        monkeypatch.setenv('HQ_NOW', now.isoformat())
+        monkeypatch.setenv('HQ_CYCLE', str(cycle))
+
+        hq.main(['begin', slug])
+
+        if cycle == 1:
+            _set_cursor(folder / 'HANDOFF.md', _LARGE_CURSOR)
+            for i in range(artifacts):
+                hq.main(
+                    ['stamp', slug, f'SPEC-{i:02d}.md', '--read-before', 'always'])
+            for j in range(10):
+                hq.main([
+                    'note', slug, 'constraint',
+                    '--headline', f'Constraint {j:02d}',
+                    f'Body of constraint {j:02d}.',
+                    ])
+
+        hq.main(['finish', slug, '--log', f'cycle {cycle}'])
+
+    return folder
+
+
+def test_refused_stamp_appends_a_receipt_row(tmp_path, monkeypatch):
+    """R2: a refused stamp still writes a ledger row
+    with reason='refused: ...'. The successor leaves the disk before the
+    second stamp, so R1 refuses it.
+
+    Mutation: R2 dropped; refused stamp exits without writing to ledger.tsv.
+    Oracle: hand-counted ledger rows before and after a refused restamp;
+    the second row has reason starting with 'refused:'.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text(
+        '# Spec\n\n## Overview\n\nContent.\n\n## Other\n\nDetails.\n')
+    (folder / 'NEXT.md').write_text('# Next\n\nContent.\n')
+    hq.main([
+        'stamp', _SLUG, 'SPEC.md', '--read-before', 'always',
+        '--label', 'always stamp label',
+        '--where', 'Overview',
+        '--successor', 'NEXT.md',
+        ])
+
+    ledger = folder / 'ledger.tsv'
+    rows_before = len(ledger.read_text().splitlines()) - 1
+
+    (folder / 'NEXT.md').unlink()
+    ret = hq.main(['stamp', _SLUG, 'SPEC.md', '--read-before', 'edit'])
+    assert ret == 1
+
+    lines = ledger.read_text().splitlines()
+    rows_after = len(lines) - 1
+    assert rows_after == rows_before + 1
+
+    first_fields = lines[1].split('\t')
+    last_fields = lines[-1].split('\t')
+    # Ledger field indices: cycle=0 ts=1 path=2 base=3 kind=4
+    # status=5 read_before=6 successor=7 where=8 sha12=9
+    # lines=10 reason=11 label=12
+    assert last_fields[11].startswith('refused:')
+    assert last_fields[4] == first_fields[4]
+    assert last_fields[5] == first_fields[5]
+    assert last_fields[6] == first_fields[6]
+    assert last_fields[7] == first_fields[7]
+    assert last_fields[8] == first_fields[8]
+    assert last_fields[12] == first_fields[12]
+    assert first_fields[7] == 'NEXT.md'
+    assert first_fields[8] == 'Overview'
+    assert first_fields[12] == 'always stamp label'
+
+
+def test_restamp_of_superseded_spec_keeps_carried_successor(
+        tmp_path, monkeypatch):
+    """A re-stamp passing no --successor is judged on the carried one.
+
+    Mutation: successor_on_disk computed from the --successor flag alone,
+    so R1 refuses to re-label a spec already superseded by a file on disk.
+    Oracle: exit 0 and a third ledger row carrying successor NEXT.md,
+    read_before never, and the new label.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    (folder / 'NEXT.md').write_text('# Next\n\nContent.\n')
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--successor', 'NEXT.md']) == 0
+
+    ret = hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'renamed label'])
+    assert ret == 0
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    assert len(lines) == 3
+    row = dict(zip(hq.LEDGER_FIELDS, lines[2].split('\t')))
+    assert row['status'] == 'superseded'
+    assert row['read_before'] == 'never'
+    assert row['successor'] == 'NEXT.md'
+    assert row['label'] == 'renamed label'
+
+
+def test_relabel_of_archived_spec_keeps_its_reason(tmp_path, monkeypatch):
+    """A re-stamp passing no --reason carries the archive reason forward.
+
+    Mutation: reason reset to '-' on every re-stamp, so R1's archived
+    exemption misses and an archived spec can never be re-labeled.
+    Oracle: exit 0 and a ledger row with status archived, reason obsolete,
+    and the new label.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    assert hq.main([
+        'stamp', _SLUG, 'SPEC.md', '--archive', '--reason', 'obsolete']) == 0
+
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'renamed']) == 0
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
+    assert row['status'] == 'archived'
+    assert row['reason'] == 'obsolete'
+    assert row['label'] == 'renamed'
+
+
+def test_restamp_after_refusal_skips_the_receipt_reason(tmp_path, monkeypatch):
+    """The reason carried forward skips a refusal receipt.
+
+    Mutation: reason carried from the latest row, so 'refused: ...' text
+    lands in the next successful row; or the receipt writing the attempted
+    read_before instead of copying the previous row's.
+    Oracle: after a refused demotion, a plain re-stamp exits 0 with
+    reason '-' and read_before still always.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md'])
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--read-before', 'never']) == 1
+
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'again']) == 0
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
+    assert row['reason'] == '-'
+    assert row['read_before'] == 'always'
+
+
+def test_successor_with_explicit_status_keeps_that_status(
+        tmp_path, monkeypatch):
+    """--successor defaults status to superseded unless the stamp says otherwise.
+
+    Mutation: --successor overwriting an explicit --status, or the
+    matching guard dropped so it overwrites an explicit --read-before.
+    Oracle: 'stamp --successor NEXT.md --status live --read-before always'
+    writes status live and read_before always.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    (folder / 'NEXT.md').write_text('# Next\n')
+    assert hq.main([
+        'stamp', _SLUG, 'SPEC.md', '--successor', 'NEXT.md',
+        '--status', 'live', '--read-before', 'always']) == 0
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
+    assert row['status'] == 'live'
+    assert row['read_before'] == 'always'
+    assert row['successor'] == 'NEXT.md'
+
+
+def test_defer_carries_status_and_successor(tmp_path, monkeypatch):
+    """--defer sets kind, read_before, and reason only; the rest carries.
+
+    Mutation: the deferred row built with status live and successor '-',
+    resurrecting a superseded row.
+    Oracle: a notes file superseded by notes-later.md then deferred keeps
+    status superseded and successor notes-later.md.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'notes-early.md').write_text('# Early\n')
+    (folder / 'notes-later.md').write_text('# Later\n')
+    hq.main(['stamp', _SLUG, 'notes-early.md', '--successor', 'notes-later.md'])
+
+    assert hq.main(['stamp', _SLUG, 'notes-early.md', '--defer']) == 0
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
+    assert row['kind'] == 'other'
+    assert row['read_before'] == 'never'
+    assert row['reason'] == 'deferred'
+    assert row['status'] == 'superseded'
+    assert row['successor'] == 'notes-later.md'
+
+
+def test_directory_or_self_is_not_a_successor(tmp_path, monkeypatch):
+    """R1 accepts a successor only when it is an existing file, not itself.
+
+    Mutation: successor_on_disk using exists(), or comparing the successor
+    to the artifact by spelling instead of resolved path, so a directory,
+    'SPEC.md', './SPEC.md', or the absolute path of SPEC.md demotes a spec
+    with exit 0.
+    Oracle: every stamp exits 1 and the current row stays live and always.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    (folder / 'drafts').mkdir()
+    hq.main(['stamp', _SLUG, 'SPEC.md'])
+
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--successor', 'drafts']) == 1
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--successor', 'SPEC.md']) == 1
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--successor', './SPEC.md']) == 1
+    assert hq.main([
+        'stamp', _SLUG, 'SPEC.md', '--successor', str(folder / 'SPEC.md')]) == 1
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
+    assert row['status'] == 'live'
+    assert row['read_before'] == 'always'
+    assert row['successor'] == '-'
+
+
+def test_refused_stamp_does_not_clear_r3(tmp_path, monkeypatch):
+    """A refusal receipt keeps the previous sha, so finish stays blocked.
+
+    Mutation: the receipt row recording the file's current sha12, so a
+    failed stamp satisfies R3's re-stamp requirement.
+    Oracle: finish returns 1 before and after the refused stamp.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md'])
+    (folder / 'SPEC.md').write_text('# Spec\n\nChanged.\n')
+    assert hq.main(['finish', _SLUG, '--log', 'probe']) == 1
+
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--read-before', 'never']) == 1
+
+    assert hq.main(['finish', _SLUG, '--log', 'probe']) == 1
+
+
+def test_home_prefixed_successor_is_found_on_disk(tmp_path, monkeypatch):
+    """A ~-prefixed successor resolves like an abs artifact path.
+
+    Mutation: the successor joined onto the folder without expanduser, so
+    '~/OUT-NEXT.md' is never found and the supersession is refused.
+    Oracle: exit 0 and a row with status superseded and the ~ successor.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    home = pathlib.Path(tmp_path) / 'home'
+    home.mkdir()
+    monkeypatch.setenv('HOME', str(home))
+    hq.main(['begin', _SLUG])
+    (home / 'OUT-SPEC.md').write_text('# Spec\n\nContent.\n')
+    (home / 'OUT-NEXT.md').write_text('# Next\n')
+
+    ret = hq.main([
+        'stamp', _SLUG, '~/OUT-SPEC.md', '--successor', '~/OUT-NEXT.md'])
+    assert ret == 0
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
+    assert row['status'] == 'superseded'
+    assert row['successor'] == '~/OUT-NEXT.md'
+
+
+def test_stale_reason_does_not_excuse_status_archived(tmp_path, monkeypatch):
+    """A carried reason does not survive a status change into archived.
+
+    Mutation: reason carried forward regardless of a kind, status, or
+    read_before change, so an earlier free-text reason satisfies the
+    archive's reason requirement for a bare --status archived.
+    Oracle: the demoting stamp is a usage error (exit 2, nothing written)
+    and the current row stays live, always, with the earlier reason intact.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--reason', 'wip note']) == 0
+    before = (folder / 'ledger.tsv').read_bytes()
+
+    ret = hq.main([
+        'stamp', _SLUG, 'SPEC.md', '--status', 'archived', '--read-before', 'never'])
+    assert ret == 2
+    assert (folder / 'ledger.tsv').read_bytes() == before
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
+    assert row['status'] == 'live'
+    assert row['read_before'] == 'always'
+    assert row['reason'] == 'wip note'
+
+
+def test_reason_with_receipt_prefix_is_usage(tmp_path, monkeypatch):
+    """A --reason starting with 'refused: ' exits 2 and writes no row.
+
+    Mutation: the reserved prefix accepted, so an archive reason beginning
+    'refused: ' is skipped by the carry and locks the artifact.
+    Oracle: exit 2 and a ledger of header only.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+
+    ret = hq.main([
+        'stamp', _SLUG, 'SPEC.md', '--archive', '--reason', 'refused: by review'])
+    assert ret == 2
+    assert len((folder / 'ledger.tsv').read_text().splitlines()) == 1
+
+
+def test_tab_and_newline_in_free_text_become_spaces(tmp_path, monkeypatch):
+    """No ledger field carries a tab or a newline.
+
+    Mutation: free text written unescaped, so a newline in --label appends
+    a forged row and a tab shifts every later field.
+    Oracle: one data row of thirteen fields with the label 'a b c'.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'a\tb\nc']) == 0
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    assert len(lines) == 2
+    fields = lines[1].split('\t')
+    assert len(fields) == len(hq.LEDGER_FIELDS)
+    assert fields[-1] == 'a b c'
+
+
+def test_batch_reports_a_line_it_cannot_parse(tmp_path, monkeypatch):
+    """A batch line with an unknown flag is reported and the batch exits 2.
+
+    Mutation: batch parsing with parse_known_args, so a mistyped flag is
+    dropped and the line lands as a plain re-stamp with exit 0.
+    Oracle: exit 2, exactly one data row (the well-formed line), and the
+    misspelled line named in the output.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    (folder / 'notes-a.md').write_text('# A\n')
+    monkeypatch.setattr(
+        'sys.stdin', io.StringIO('SPEC.md --successr NEXT.md\nnotes-a.md\n'))
+
+    ret = hq.main(['stamp', _SLUG, '--batch', '-'])
+    assert ret == 2
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    assert len(lines) == 2
+    assert lines[1].split('\t')[2] == 'notes-a.md'
+
+
+def test_deferred_row_reappears_in_the_work_list(tmp_path, monkeypatch, capsys):
+    """Begin lists deferred rows so a deferred file is not forgotten.
+
+    Mutation: the work list built from unstamped, sha-moved, and missing
+    rows only, so a deferred row is never shown again.
+    Oracle: the second begin prints 'deferred x1: notes-a.md'.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'notes-a.md').write_text('# A\n')
+    assert hq.main(['stamp', _SLUG, 'notes-a.md', '--defer']) == 0
+    capsys.readouterr()
+
+    assert hq.main(['begin', _SLUG]) == 0
+
+    out = capsys.readouterr().out
+    assert 'deferred x1: notes-a.md' in out
+
+
+def test_batch_survives_an_unbalanced_quote(tmp_path, monkeypatch):
+    """A batch line shlex cannot split is reported; later lines still run.
+
+    Mutation: the batch loop catching SystemExit only, so shlex's
+    ValueError aborts the whole batch with nothing written.
+    Oracle: exit 2 and one data row, from the well-formed second line.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'notes-a.md').write_text('# A\n')
+    monkeypatch.setattr(
+        'sys.stdin', io.StringIO('notes-a.md --label "oops\nnotes-a.md --label ok\n'))
+
+    ret = hq.main(['stamp', _SLUG, '--batch', '-'])
+    assert ret == 2
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    assert len(lines) == 2
+    assert lines[1].split('\t')[-1] == 'ok'
+
+
+def test_open_accepts_the_blocks_finish_wrote(tmp_path, monkeypatch, capsys):
+    """Open computes the same block sha finish stored, empty blocks included.
+
+    Mutation: block_sha keeping a trailing newline, so the writer's
+    heading-plus-newline and the reader's stripped text hash apart.
+    Oracle: open after a fresh finish prints no 'block sha mismatch'.
+    """
+    _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    assert hq.main(['finish', _SLUG, '--log', 'first']) == 0
+    capsys.readouterr()
+
+    assert hq.main(['open', _SLUG]) == 0
+
+    assert 'block sha mismatch' not in capsys.readouterr().out
+
+
+def _cursor_with(folder, section, body):
+    """Insert one cursor section before ## Log in the folder's HANDOFF.md."""
+    hp = folder / 'HANDOFF.md'
+    text = hp.read_text()
+    hp.write_text(text.replace('## Log', f'## {section}\n\n{body}\n\n## Log'))
+
+
+def test_finish_renders_a_directory_and_undecodable_file_at_always(
+        tmp_path, monkeypatch):
+    """Finish survives an always row that is a directory or not UTF-8.
+
+    Mutation: the read block reading every always row with strict utf-8
+    and no directory guard, so finish dies with a traceback after the
+    Unfiled drain already wrote standing.md.
+    Oracle: exit 0, one standing item, and the directory's line-count form
+    in the read block.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'probes').mkdir()
+    (folder / 'probes' / 'a.md').write_text('# a\n')
+    (folder / 'bad.md').write_bytes(b'# Notes\n\xff\xfe not utf8\n')
+    assert hq.main([
+        'stamp', _SLUG, 'probes', '--read-before', 'always',
+        '--label', 'the probe subtree']) == 0
+    assert hq.main([
+        'stamp', _SLUG, 'bad.md', '--kind', 'notes', '--read-before', 'always']) == 0
+    _cursor_with(
+        folder, 'Unfiled', '- constraint: **Stdlib only** no third-party deps.')
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+
+    standing = (folder / 'standing.md').read_text().splitlines()
+    assert [ln for ln in standing if 'Stdlib only' in ln] == [standing[0]]
+    assert 'probes (1 lines)  the probe subtree' in (folder / 'HANDOFF.md').read_text()
+
+
+def test_subdirectory_row_on_disk_does_not_block_finish(tmp_path, monkeypatch):
+    """A gated row in a subdirectory counts as present when its file exists.
+
+    Mutation: absence judged by membership in the top-level walk instead
+    of by the disk, so a subdirectory row blocks finish for ever.
+    Oracle: exit 0 and the row rendered as a full artifacts line.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'probes').mkdir()
+    (folder / 'probes' / 'run1.md').write_text('# run 1\n')
+    assert hq.main([
+        'stamp', _SLUG, 'probes/run1.md', '--kind', 'notes',
+        '--read-before', 'edit', '--label', 'probe result']) == 0
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+
+    assert 'probes/run1.md  notes  edit  c1  probe result' in (
+        folder / 'HANDOFF.md').read_text()
+
+
+def test_log_line_carries_the_dirty_count(tmp_path, monkeypatch):
+    """The Log line finish writes uses the manifest's repos spelling.
+
+    Mutation: the Log line built as branch@sha with no dirty tail while
+    the manifest row stores branch@sha +N, so the same cycle renders two
+    ways.
+    Oracle: with one modified tracked file, the Log line ends '+1): c1 log'
+    and the header tail names the file. Runs real git in the tmp root.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    root = folder.parent.parent
+    subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
+    (root / 'tracked.txt').write_text('one\n')
+    subprocess.run(['git', 'add', 'tracked.txt'], cwd=root, check=True)
+    subprocess.run([
+        'git', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid',
+        'commit', '-q', '-m', 'init'], cwd=root, check=True)
+    (root / 'tracked.txt').write_text('two\n')
+    monkeypatch.setenv('HQ_GIT', '1')
+    hq.main(['begin', _SLUG])
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1 log']) == 0
+
+    text = (folder / 'HANDOFF.md').read_text()
+    assert '+1): c1 log' in text
+    assert 'dirty: tracked.txt' in text
+
+
+def test_finish_prints_the_token_split(tmp_path, monkeypatch, capsys):
+    """Finish reports the payload estimate per block.
+
+    Mutation: one whole-file token figure, so the agent cannot see which
+    block is growing.
+    Oracle: the success line names cursor, read, artifacts, and standing.
+    """
+    _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    capsys.readouterr()
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+
+    out = capsys.readouterr().out
+    assert '(cursor ' in out
+    assert ', read ' in out
+    assert ', artifacts ' in out
+    assert ', standing ' in out
+
+
+def test_takeover_names_the_unfinished_cycle(tmp_path, monkeypatch, capsys):
+    """Taking over a stale lock says which cycle never finished.
+
+    Mutation: the takeover printing only who was displaced.
+    Oracle: the work list carries 'cycle 1 begun by other-session on
+    other-host at <time>, never finished'.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    stale = (dt.datetime.fromisoformat(_NOW) - dt.timedelta(hours=3)).isoformat()
+    (folder / '.hq.lock').write_text(
+        f'slug={_SLUG}\nsession=other-session\nhost=other-host\n'
+        f'time={stale}\ncycle=1\n')
+    capsys.readouterr()
+
+    assert hq.main(['begin', _SLUG]) == 0
+
+    assert (f'cycle 1 begun by other-session on other-host at {stale}, never finished'
+            in capsys.readouterr().out)
+
+
+def test_begin_after_adopt_announces_the_next_cycle(tmp_path, monkeypatch, capsys):
+    """Begin recomputes its anchors after the adopt it ran.
+
+    Mutation: anchors computed before adopt appended the manifest row, so
+    begin announces and locks cycle 1 on a folder at cycle N; or the
+    hand-edit check comparing HANDOFF.md to the archived original, so
+    every begin after adopt writes a spurious .hand.md copy.
+    Oracle: 'cycle N+1 begun' printed, cycle=N+1 in .hq.lock, and no
+    hand copy, N read from the fixture's own header.
+    """
+    folder = _new_root(tmp_path, monkeypatch, slug='orbit-cache-rewrite')
+    shutil.copytree(os.path.join(FIXTURES, 'orbit-cache-rewrite'), folder)
+    header = (folder / 'HANDOFF.md').read_text().splitlines()[2]
+    fixture_cycle = int(header.split('Cycle: ')[1].split(' ')[0])
+    monkeypatch.delenv('HQ_CYCLE')
+
+    assert hq.main(['begin', 'orbit-cache-rewrite']) == 0
+
+    out = capsys.readouterr().out
+    assert f'cycle {fixture_cycle + 1} begun' in out
+    assert 'changed since last finish' not in out
+    assert f'cycle={fixture_cycle + 1}' in (folder / '.hq.lock').read_text()
+    assert not list((folder / 'cycles').glob('*.hand.md'))
+
+
+def test_open_reports_a_moved_span_after_an_unresolved_anchor(
+        tmp_path, monkeypatch, capsys):
+    """Open compares spans even when the stored list starts with ?.
+
+    Mutation: the stored-span pattern admitting digits only, so a row with
+    one unresolved anchor never gets a moved-span report.
+    Oracle: after two lines are inserted above the resolved heading, open
+    prints 'span moved: SPEC.md'.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\n## Alpha\n\na\n\n## Beta\n\nb\n')
+    assert hq.main([
+        'stamp', _SLUG, 'SPEC.md', '--where', 'Missing;Beta',
+        '--read-before', 'always']) == 0
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+    assert 'SPEC.md:?,' in (folder / 'HANDOFF.md').read_text()
+    (folder / 'SPEC.md').write_text(
+        '# Spec\n\n## Alpha\n\na\nmore\nmore\n\n## Beta\n\nb\n')
+    capsys.readouterr()
+
+    assert hq.main(['open', _SLUG]) == 0
+
+    assert 'span moved: SPEC.md' in capsys.readouterr().out
+
+
+def test_adopt_carries_the_legacy_log_into_the_manifest(tmp_path, monkeypatch):
+    """Adopt keeps every original Log line in its manifest row.
+
+    Mutation: the original ## Log excluded from the rewrite and the
+    manifest row's log set to 'adopted' alone, so the legacy history
+    survives only in cycles/.
+    Oracle: both hand-written Log lines appear in the last manifest row's
+    log field.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    folder.mkdir(parents=True)
+    log_lines = [
+        '- 2026-08-30 (cycle 1): cache layout drafted.',
+        '- 2026-08-31 (cycle 2): generator wired to the layout.',
+    ]
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {_SLUG}\n\nWritten: 2026-08-31 | Cycle: 2\n\n'
+        '## Task\nx\n\n## Now\ny\n\n## Log\n' + '\n'.join(log_lines) + '\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = (folder / 'cycles' / 'manifest.tsv').read_text().splitlines()
+    log_field = dict(zip(hq.MANIFEST_FIELDS, rows[-1].split('\t')))['log']
+    assert log_field.startswith('adopted; prior log: ')
+    for ln in log_lines:
+        assert ln in log_field
+
+
+def test_adopt_stores_a_key_files_pointer_outside_the_walk(tmp_path, monkeypatch):
+    """A Key files pointer at a subdirectory or abs path gets its own row.
+
+    Mutation: pointers the top-level walk cannot match only printed, so
+    the label and the read grade are dropped.
+    Oracle: ledger rows for probes/run1.md (base folder) and ~/OUT-NOTE.md
+    (base abs), each carrying its pointer text as label.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    home = pathlib.Path(tmp_path) / 'home'
+    home.mkdir()
+    monkeypatch.setenv('HOME', str(home))
+    folder.mkdir(parents=True)
+    (folder / 'probes').mkdir()
+    (folder / 'probes' / 'run1.md').write_text('# run 1\n')
+    (home / 'OUT-NOTE.md').write_text('# note\n')
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {_SLUG}\n\nWritten: 2026-09-01 | Cycle: 2\n\n'
+        '## Task\nx\n\n## Now\ny\n\n## Plan\n\n## State\n\n'
+        '## Key files\n- `probes/run1.md` the probe result\n'
+        '- `~/OUT-NOTE.md` an outside note\n\n## Log\n- 2026-09-01 (cycle 1): began.\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = [dict(zip(hq.LEDGER_FIELDS, ln.split('\t')))
+            for ln in (folder / 'ledger.tsv').read_text().splitlines()[1:]]
+    by_path = {r['path']: r for r in rows}
+    assert by_path['probes/run1.md']['base'] == 'folder'
+    assert by_path['probes/run1.md']['label'] == 'the probe result'
+    assert by_path['~/OUT-NOTE.md']['base'] == 'abs'
+    assert by_path['~/OUT-NOTE.md']['label'] == 'an outside note'
+
+
+def test_adopt_refuses_an_adopted_folder(tmp_path, monkeypatch):
+    """Adopt runs once; a second run exits 1 and changes nothing.
+
+    Mutation: no guard, so a second adopt appends a bare row per file
+    that outranks the seeded labels and grades.
+    Oracle: exit 1 and a byte-identical ledger.
+    """
+    folder = _new_root(tmp_path, monkeypatch, slug='orbit-cache-rewrite')
+    shutil.copytree(os.path.join(FIXTURES, 'orbit-cache-rewrite'), folder)
+    assert hq.main(['adopt', 'orbit-cache-rewrite']) == 0
+    ledger_before = (folder / 'ledger.tsv').read_bytes()
+
+    assert hq.main(['adopt', 'orbit-cache-rewrite']) == 1
+
+    assert (folder / 'ledger.tsv').read_bytes() == ledger_before
+
+
+def test_adopt_rebuilds_the_header_without_git(tmp_path, monkeypatch):
+    """Adopt writes a fresh header even when no git anchor exists.
+
+    Mutation: the legacy header copied verbatim without git, so a stale
+    branch and sha are read back as this write's anchors.
+    Oracle: the header line is exactly 'Written: <now> | Cycle: 3'.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    folder.mkdir(parents=True)
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {_SLUG}\n\n'
+        'Written: 2026-01-01 | Cycle: 3 | main @ abc1234 | dirty: x.py\n\n'
+        '## Task\nx\n\n## Now\ny\n\n## Log\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    lines = (folder / 'HANDOFF.md').read_text().splitlines()
+    assert lines[2] == f'Written: {_NOW[:10]} | Cycle: 3'
+
+
+def test_finish_ranks_collisions_by_folder_wide_rarity(tmp_path, monkeypatch, capsys):
+    """The collision advisory counts a term over every top-level file.
+
+    Mutation: rarity counted over spec files only, so every spec term ties
+    and the rarest hit can be the one the three-hit cap drops.
+    Oracle: Delta (in one file) is reported before Alpha (in four).
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\n## Alpha section\n\n## Delta section\n')
+    for name in ('notes-a.md', 'notes-b.md', 'notes-c.md'):
+        (folder / name).write_text('# n\n\nAbout the Alpha path.\n')
+    hp = folder / 'HANDOFF.md'
+    hp.write_text(hp.read_text().replace(
+        '## Now\n', '## Now\nWire Alpha and Delta into the run.\n'))
+    capsys.readouterr()
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+
+    hits = [ln for ln in capsys.readouterr().out.splitlines() if 'collides:' in ln]
+    assert len(hits) == 2
+    assert 'Delta <- SPEC.md:5 ' in hits[0]
+    assert 'Alpha <- SPEC.md:3 ' in hits[1]
+
+
+def test_when_prints_the_omission_after_the_rows(tmp_path, monkeypatch, capsys):
+    """When shows the newest 30 rows, then one line counting the rest.
+
+    Mutation: the omission line printed first, as a header.
+    Oracle: with 35 rows the last output line is '5 older rows omitted'.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'notes-a.md').write_text('# n\n')
+    for _ in range(35):
+        assert hq.main(['stamp', _SLUG, 'notes-a.md']) == 0
+    capsys.readouterr()
+
+    assert hq.main(['when', _SLUG, 'notes-a.md']) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 31
+    assert lines[-1] == '5 older rows omitted'
+
+
+def test_artifacts_verb_prints_live_rows_only(tmp_path, monkeypatch, capsys):
+    """Artifacts lists live rows and unstamped entries, nothing else.
+
+    Mutation: non-live rows printed in an abbreviated form.
+    Oracle: after SPEC.md is archived, no output line names it.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md'])
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--archive', '--reason', 'old']) == 0
+    capsys.readouterr()
+
+    assert hq.main(['artifacts', _SLUG]) == 0
+
+    assert 'SPEC.md' not in capsys.readouterr().out
+
+
+def _conforming(folder, cycle, body):
+    """Write a conforming HANDOFF.md whose sections follow the header."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {folder.name}\n\nWritten: 2026-09-01 | Cycle: {cycle}\n\n{body}')
+
+
+def test_adopt_seeds_numbered_and_plain_decision_lines(tmp_path, monkeypatch):
+    """Adopt takes every Decisions line as an item, not dash bullets alone.
+
+    Mutation: only '- ' lines start an item, so a numbered or plain
+    Decisions section reaches neither standing.md nor Unfiled.
+    Oracle: two standing items with the headlines 'Chose alpha' and
+    'Capped at fifty.', the second built from a plain line.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    _conforming(folder, 2, '## Task\nx\n\n## Decisions\n'
+                '1. **Chose alpha** Because beta needs a rewrite.\n'
+                'Capped at fifty. Memory bound.\n\n## Log\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    items, _ = hq._parse_standing((folder / 'standing.md').read_text())
+    assert [i['headline'] for i in items] == ['Chose alpha', 'Capped at fifty.']
+    assert items[1]['body'] == 'Memory bound.'
+
+
+def test_adopt_concatenates_a_repeated_heading(tmp_path, monkeypatch):
+    """Two sections with the same heading both reach the cursor.
+
+    Mutation: sections keyed by heading text with the last body winning.
+    Oracle: the adopted Task carries both paragraphs.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    _conforming(folder, 3, '## Task\nParagraph A, the original scope.\n\n'
+                '## Now\ny\n\n## Task\nParagraph B, the revised scope.\n\n## Log\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    text = (folder / 'HANDOFF.md').read_text()
+    assert 'Paragraph A, the original scope.' in text
+    assert 'Paragraph B, the revised scope.' in text
+
+
+def test_r3_fires_for_a_gated_row_in_a_subdirectory(tmp_path, monkeypatch, capsys):
+    """A subdirectory row's sha is checked like a top-level row's.
+
+    Mutation: the sha map built from the top-level walk only, so check_r3
+    never sees a subdirectory row and finish passes an edited gated file.
+    Oracle: finish exits 1 naming sub/DESIGN.md after its body changes.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'sub').mkdir()
+    (folder / 'sub' / 'DESIGN.md').write_text('# Design\n\noriginal body\n')
+    assert hq.main(['stamp', _SLUG, 'sub/DESIGN.md', '--label', 'sub spec']) == 0
+    (folder / 'sub' / 'DESIGN.md').write_text('# Design\n\nedited body\n')
+    capsys.readouterr()
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 1
+
+    assert 'R3: sub/DESIGN.md' in capsys.readouterr().out
+
+
+def test_finish_recreates_a_pruned_cycles_directory(tmp_path, monkeypatch):
+    """Finish makes cycles/ before its write pass.
+
+    Mutation: no directory guard, so standing.md and HANDOFF.md are written
+    and then the archive write raises, leaving the lock held for ever.
+    Oracle: exit 0 and cycles/c01.md present.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    shutil.rmtree(folder / 'cycles')
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+
+    assert (folder / 'cycles' / 'c01.md').exists()
+
+
+def test_missing_row_whose_file_returns_reads_live(tmp_path, monkeypatch):
+    """A row stored missing renders live once its file is on disk.
+
+    Mutation: reconciliation adding missing marks but never clearing one.
+    Oracle: after later.md is created, the artifacts block counts it under
+    its kind and carries no missing count.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    _conforming(folder, 3, '## Task\nx\n\n## Key files\n'
+                '- `later.md` Notes on the thing, written next cycle\n\n## Log\n')
+    assert hq.main(['adopt', _SLUG]) == 0
+    rows = (folder / 'ledger.tsv').read_text().splitlines()
+    assert dict(zip(hq.LEDGER_FIELDS, rows[-1].split('\t')))['status'] == 'missing'
+    (folder / 'later.md').write_text('# Later\n\nnow it exists\n')
+    monkeypatch.setenv('HQ_CYCLE', '4')
+    hq.main(['begin', _SLUG])
+
+    assert hq.main(['finish', _SLUG, '--log', 'made later.md']) == 0
+
+    block = (folder / 'HANDOFF.md').read_text().split('<!-- hq:artifacts', 1)[1]
+    block = block.split('<!-- /hq:artifacts -->', 1)[0]
+    assert 'missing' not in block
+    assert 'other x1' in block
+
+
+def test_adopt_never_renders_an_absent_pointer_in_full(tmp_path, monkeypatch):
+    """A Key files pointer to a file not on disk is counted, never listed.
+
+    Mutation: the rendered rows taken straight from the ledger, so the R1
+    lift to live/always puts a nonexistent spec in the read block.
+    Oracle: no read line names SPEC-GONE.md and the artifacts block counts
+    one missing row.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    _conforming(folder, 3, '## Task\nx\n\n## Key files\n'
+                '- `sub/SPEC-GONE.md` Read now: a spec that is not on disk\n\n## Log\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    text = (folder / 'HANDOFF.md').read_text()
+    read_block = text.split('<!-- hq:read', 1)[1].split('<!-- /hq:read -->', 1)[0]
+    assert 'SPEC-GONE' not in read_block
+    assert 'missing 1' in text
+
+
+def test_artifacts_verb_hides_a_folder_row_whose_file_is_gone(
+        tmp_path, monkeypatch, capsys):
+    """Artifacts checks folder rows against the disk like abs rows.
+
+    Mutation: only abs rows disk-checked, so a deleted top-level file still
+    prints a full line.
+    Oracle: after notes-a.md is deleted, no output line names it.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'notes-a.md').write_text('# A\n')
+    hq.main(['stamp', _SLUG, 'notes-a.md', '--read-before', 'mention', '--label', 'n'])
+    (folder / 'notes-a.md').unlink()
+    capsys.readouterr()
+
+    assert hq.main(['artifacts', _SLUG]) == 0
+
+    assert 'notes-a.md' not in capsys.readouterr().out
+
+
+def test_worklist_does_not_report_a_present_subdirectory_row(
+        tmp_path, monkeypatch, capsys):
+    """Begin judges a folder row's presence by the disk.
+
+    Mutation: presence judged by the top-level sha map, so a subdirectory
+    row is reported 'missing live' on every begin.
+    Oracle: the second begin prints no 'missing live' line.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'sub').mkdir()
+    (folder / 'sub' / 'DESIGN.md').write_text('# Design\n')
+    hq.main(['stamp', _SLUG, 'sub/DESIGN.md', '--label', 'sub spec'])
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+    monkeypatch.setenv('HQ_CYCLE', '2')
+    capsys.readouterr()
+
+    assert hq.main(['begin', _SLUG]) == 0
+
+    assert 'missing live' not in capsys.readouterr().out
+
+
+def test_adopt_keeps_text_before_the_first_heading(tmp_path, monkeypatch):
+    """A line between the header and the first section lands in Unfiled.
+
+    Mutation: the section scan collecting lines only after a heading, so a
+    preamble is dropped without a trace.
+    Oracle: the adopted cursor holds '- unfiled: Status: blocked on the
+    adapter.'
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    _conforming(folder, 3, 'Status: blocked on the adapter.\n\n## Task\nx\n\n## Log\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    assert '- unfiled: Status: blocked on the adapter.' in (
+        folder / 'HANDOFF.md').read_text()
+
+
+def test_key_files_continuation_with_one_space_joins_the_label(
+        tmp_path, monkeypatch):
+    """Any indented line under a pointer continues its free text.
+
+    Mutation: the continuation test requiring exactly two leading spaces.
+    Oracle: the row's label ends with the one-space continuation.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    (folder.parent / 'x').mkdir(parents=True, exist_ok=True)
+    _conforming(folder, 3, '## Task\nx\n\n## Key files\n'
+                '- `notes-a.md` first half of the label\n second half\n\n## Log\n')
+    (folder / 'notes-a.md').write_text('# A\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = [dict(zip(hq.LEDGER_FIELDS, ln.split('\t')))
+            for ln in (folder / 'ledger.tsv').read_text().splitlines()[1:]]
+    assert {r['path']: r['label'] for r in rows}['notes-a.md'] == (
+        'first half of the label second half')
+
+
+def test_adopt_headline_ends_at_a_sentence_not_a_dot(tmp_path, monkeypatch):
+    """A plain item's headline is its first sentence, dots inside words kept.
+
+    Mutation: the headline cut at the first period anywhere, so
+    'loader.py' splits mid-name, and ! or ? never end a sentence.
+    Oracle: hand-computed headlines and bodies for two items.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    _conforming(folder, 2, '## Task\nx\n\n## Decisions\n'
+                '- Keep loader.py as the one source of truth. It reran clean.\n'
+                '- Never trust mtime! It lies on network mounts.\n\n## Log\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    items, _ = hq._parse_standing((folder / 'standing.md').read_text())
+    assert [(i['headline'], i['body']) for i in items] == [
+        ('Keep loader.py as the one source of truth.', 'It reran clean.'),
+        ('Never trust mtime!', 'It lies on network mounts.'),
+    ]
+
+
+def test_key_files_group_labels_grade_and_loose_lines_go_unfiled(
+        tmp_path, monkeypatch):
+    """Read now: and Reference only: lines grade the bullets below them.
+
+    Mutation: the group labels ignored (a notes file under Read now: seeds
+    never) and a loose line under Key files dropped without a trace.
+    Oracle: notes-a.md always, notes-b.md edit, labels without the group
+    text, and the loose line as an unfiled bullet.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    _conforming(folder, 3, '## Task\nx\n\n## Key files\nRead now:\n'
+                '- `notes-a.md` the live sketch\n\nReference only:\n'
+                '- `notes-b.md` the older sketch\n'
+                'Everything else is scratch.\n\n## Log\n')
+    (folder / 'notes-a.md').write_text('# A\n')
+    (folder / 'notes-b.md').write_text('# B\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in (
+        dict(zip(hq.LEDGER_FIELDS, ln.split('\t')))
+        for ln in (folder / 'ledger.tsv').read_text().splitlines()[1:])}
+    assert rows['notes-a.md']['read_before'] == 'always'
+    assert rows['notes-a.md']['label'] == 'the live sketch'
+    assert rows['notes-b.md']['read_before'] == 'edit'
+    assert '- unfiled: Everything else is scratch.' in (
+        folder / 'HANDOFF.md').read_text()
+
+
+def test_absent_abs_row_is_an_advisory_not_r3(tmp_path, monkeypatch, capsys):
+    """A gated abs row whose file is gone is advised, never an R3 block.
+
+    Mutation: the sha map recording '-' for an absent abs path, which
+    check_r3 reads as a moved sha.
+    Oracle: finish exits 0 and prints the abs-path advisory.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    outside = folder.parent.parent / 'outside.md'
+    outside.write_text('# Outside\n')
+    assert hq.main([
+        'stamp', _SLUG, str(outside), '--read-before', 'always',
+        '--label', 'outside notes']) == 0
+    outside.unlink()
+    capsys.readouterr()
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+
+    out = capsys.readouterr().out
+    assert 'advisory: abs path not on disk' in out
+    assert 'R3:' not in out
+
+
+def test_lifted_missing_row_faces_r3(tmp_path, monkeypatch, capsys):
+    """A row lifted from missing to live is checked by R3 like any other.
+
+    Mutation: check_r3 run on the stored rows before reconciliation, so a
+    lifted row renders as live gated without facing the sha gate.
+    Oracle: finish exits 1 naming notes-x.md after its body changes.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'notes-x.md').write_text('# X\n\nv1\n')
+    assert hq.main([
+        'stamp', _SLUG, 'notes-x.md', '--read-before', 'edit',
+        '--status', 'missing', '--label', 'the notes']) == 0
+    (folder / 'notes-x.md').write_text('# X\n\nv2 changed\n')
+    capsys.readouterr()
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 1
+
+    assert 'R3: notes-x.md' in capsys.readouterr().out
+
+
+def test_finish_rarity_counts_files_containing_the_term(
+        tmp_path, monkeypatch, capsys):
+    """Rarity is the number of top-level files containing the term as text.
+
+    Mutation: rarity counted from extracted terms only, so a plain-text
+    flag in every file scores zero and outranks genuinely rare terms.
+    Oracle: --force, present in five files, is the hit the cap drops;
+    Zephyr, Yankee, Xenon are reported.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    for n in range(5):
+        (folder / f'notes-{n}.md').write_text(
+            '# n\n\nRun the loader with --force to rebuild the cache.\n')
+    for word in ('--force', 'Zephyr', 'Yankee', 'Xenon'):
+        assert hq.main([
+            'note', _SLUG, 'dead-end', '--headline', f'the {word} path failed',
+            'body']) == 0
+    hp = folder / 'HANDOFF.md'
+    hp.write_text(hp.read_text().replace(
+        '## Now\n', '## Now\nRun `--force` on the Zephyr, Yankee and Xenon paths.\n'))
+    capsys.readouterr()
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+
+    hits = [ln for ln in capsys.readouterr().out.splitlines() if 'collides:' in ln]
+    assert len(hits) == 3
+    assert not any('--force' in h for h in hits)
+    assert all(any(w in h for h in hits) for w in ('Zephyr', 'Yankee', 'Xenon'))
+
+
+def test_defer_on_spec_returns_1_with_receipt(tmp_path, monkeypatch):
+    """Stamp SPEC.md --defer returns 1 and writes a refused receipt row.
+
+    Mutation: the inferred-kind guard on the defer path removed, letting
+    kind=other read_before=never bypass R1 for a spec with no audit trail.
+    Oracle: exit 1; ledger row carries reason starting 'refused:' with
+    kind=spec and read_before=always (the prior values) unchanged.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--read-before', 'always'])
+
+    ret = hq.main(['stamp', _SLUG, 'SPEC.md', '--defer'])
+    assert ret == 1
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    last = lines[-1].split('\t')
+    # Ledger field indices: cycle=0 ts=1 path=2 base=3 kind=4
+    # status=5 read_before=6 successor=7 where=8 sha12=9
+    # lines=10 reason=11 label=12
+    assert last[11].startswith('refused:')
+    assert '--defer' in last[11]
+    assert last[4] == 'spec'
+    assert last[6] == 'always'
+
+
+def test_restamp_carries_label_and_where_forward(tmp_path, monkeypatch):
+    """A restamp with no --label or --where carries the previous values.
+
+    Mutation: a re-stamp with no --label blanking the stored label.
+    Oracle: ledger second row has label equal to the first row's label.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text(
+        '# Spec\n\n## Render pass\n\nDetails.\n\n## Other\n\nContent.\n')
+    hq.main([
+        'stamp', _SLUG, 'SPEC.md',
+        '--label', 'original label text',
+        '--where', 'Render pass',
+        ])
+
+    (folder / 'SPEC.md').write_text(
+        '# Spec\n\n## Render pass\n\nUpdated.\n\n## Other\n\nContent.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md'])
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    assert len(lines) == 3
+    first = lines[1].split('\t')
+    second = lines[2].split('\t')
+    # Ledger field indices: cycle=0 ts=1 path=2 base=3 kind=4
+    # status=5 read_before=6 successor=7 where=8 sha12=9
+    # lines=10 reason=11 label=12
+    assert second[12] == first[12]
+    assert second[8] == first[8]
+    assert first[12] == 'original label text'
+
+
+def test_finish_writes_nothing_on_a_blocking_finding(tmp_path, monkeypatch):
+    """R3: a sha-changed always-row blocks finish; no file changes sha.
+
+    Mutation: writes before checks; manifest row appended and files changed
+    before R3 fires.
+    Oracle: sha256 of every file in the folder is identical before and after
+    the blocked finish; manifest has zero data rows.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nOriginal content.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--read-before', 'always'])
+
+    (folder / 'SPEC.md').write_text('# Spec\n\nModified content.\n')
+
+    def _sha_all(root: str) -> dict:
+        result = {}
+        for dirpath, _, filenames in os.walk(root):
+            for fname in filenames:
+                path = os.path.join(dirpath, fname)
+                with open(path, 'rb') as fh:
+                    result[path] = hashlib.sha256(fh.read()).hexdigest()
+        return result
+
+    before = _sha_all(str(folder))
+    ret = hq.main(['finish', _SLUG, '--log', 'should be blocked'])
+    assert ret == 1
+    after = _sha_all(str(folder))
+    assert before == after
+
+    manifest = folder / 'cycles' / 'manifest.tsv'
+    rows = manifest.read_text().splitlines()[1:]
+    assert len(rows) == 0
+
+
+def test_finish_rerun_appends_one_log_line(tmp_path, monkeypatch):
+    """A second finish on the same cycle exits 1 and adds no manifest row.
+
+    Mutation: a re-run duplicating the Log for the same cycle; the lock guard
+    that prevents it removed.
+    Oracle: after begin+finish+finish, manifest has exactly one row; second
+    finish exits 1. After a new begin+finish, manifest has exactly two rows.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    hq.main(['finish', _SLUG, '--log', 'first cycle'])
+
+    # Second finish with no intervening begin:
+    # lock is gone, session mismatch.
+    ret2 = hq.main(['finish', _SLUG, '--log', 'duplicate'])
+    assert ret2 == 1
+
+    rows = (folder / 'cycles' / 'manifest.tsv').read_text().splitlines()[1:]
+    assert len(rows) == 1
+
+    monkeypatch.setenv('HQ_CYCLE', '2')
+    hq.main(['begin', _SLUG])
+    ret3 = hq.main(['finish', _SLUG, '--log', 'second cycle'])
+    assert ret3 == 0
+
+    rows2 = (folder / 'cycles' / 'manifest.tsv').read_text().splitlines()[1:]
+    assert len(rows2) == 2
+
+
+def test_begin_twice_advances_nothing(tmp_path, monkeypatch):
+    """A second begin (no finish) does not archive or advance the cycle.
+
+    Mutation: begin archiving and bumping when the folder already exists.
+    Oracle: cycles/ has no archive after two begins; manifest has zero rows.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    hq.main(['begin', _SLUG])
+
+    cycles_dir = folder / 'cycles'
+    archives = [
+        f for f in cycles_dir.iterdir()
+        if f.name.startswith('c') and f.name.endswith('.md')
+        ]
+    assert len(archives) == 0
+
+    rows = (cycles_dir / 'manifest.tsv').read_text().splitlines()[1:]
+    assert len(rows) == 0
+
+
+def test_begin_takes_over_a_stale_lock_and_names_it(tmp_path, monkeypatch,
+                                                    capsys):
+    """Begin takes over a foreign lock older than two hours and names it.
+
+    Mutation: a lock only its taker can release; stale lock blocks forever.
+    Oracle: return code 0, stdout names 'other-session', lock now owns
+    _SESSION.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    _write_lock(folder, 'other-session', _STALE_LOCK_TIME, cycle=1)
+
+    ret = hq.main(['begin', _SLUG])
+    assert ret == 0
+
+    out = capsys.readouterr().out
+    assert 'other-session' in out
+
+    lock_text = (folder / '.hq.lock').read_text()
+    assert f'session={_SESSION}' in lock_text
+
+
+def test_begin_refuses_a_young_foreign_lock(tmp_path, monkeypatch):
+    """Begin refuses when a foreign lock is younger than two hours.
+
+    Mutation: a lock only its taker can release; age check inverted.
+    Oracle: return code 1; lock still carries 'other-session' after the call.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    _write_lock(folder, 'other-session', _YOUNG_LOCK_TIME, cycle=1)
+
+    ret = hq.main(['begin', _SLUG])
+    assert ret == 1
+
+    lock_text = (folder / '.hq.lock').read_text()
+    assert 'other-session' in lock_text
+
+
+def test_archive_holds_cycle_n_as_finished(tmp_path, monkeypatch):
+    """Finish archives the current cycle in cycles/c<N>.md, not c<N+1>.md.
+
+    Mutation: off-by-one putting cycle 1's text in c02.md.
+    Oracle: cycles/c01.md exists and is byte-identical to HANDOFF.md.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    hq.main(['finish', _SLUG, '--log', 'archive test'])
+
+    archive = folder / 'cycles' / 'c01.md'
+    assert archive.exists(), 'c01.md not found; off-by-one likely'
+    assert not (folder / 'cycles' / 'c02.md').exists()
+    assert archive.read_bytes() == (folder / 'HANDOFF.md').read_bytes()
+
+
+def test_probe_dir_is_one_row(tmp_path, monkeypatch, capsys):
+    """A subdirectory produces exactly one probe-dir row in artifacts.
+
+    Mutation: a directory walked file by file, producing N rows instead of one.
+    Oracle: artifacts output has exactly one line containing 'experiments'.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    exp_dir = folder / 'experiments'
+    exp_dir.mkdir()
+    for i in range(5):
+        (exp_dir / f'run{i:02d}.py').write_text(f'# run {i}\n')
+
+    hq.main(['artifacts', _SLUG])
+    out = capsys.readouterr().out
+    probe_lines = [ln for ln in out.splitlines() if 'experiments' in ln]
+    assert len(probe_lines) == 1
+    assert 'probe-dir' in probe_lines[0]
+
+
+def test_conflicted_copy_is_skipped_and_named(tmp_path, monkeypatch, capsys):
+    """A file whose name contains 'conflicted copy' is skipped and named.
+
+    Mutation: a conflicted copy walked as a spec due to missing skip rule.
+    Oracle: artifacts output contains the filename but not as 'spec'.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    conflict_name = 'SPEC (conflicted copy 2026-09-09).md'
+    (folder / conflict_name).write_text('# Spec\n\nContent.\n')
+
+    hq.main(['artifacts', _SLUG])
+    out = capsys.readouterr().out
+    assert conflict_name in out
+    # The conflicted copy must not be classified as a spec
+    matching = [ln for ln in out.splitlines() if conflict_name in ln]
+    assert all('spec' not in ln for ln in matching)
+
+
+def test_where_resolves_to_the_current_span(tmp_path, monkeypatch):
+    """Stamp --where resolves an anchor to a line span
+    written into the read block.
+
+    Mutation: anchors matched by line number;
+    a missing anchor silently omitted.
+    Oracle: '## Render pass' is line 3 of SPEC.md; next h2 at line 8 gives
+    span 3-7.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text(
+        '# Spec\n'
+        '\n'
+        '## Render pass\n'
+        '\n'
+        'Details about the render pass ordering.\n'
+        'More details on the same topic.\n'
+        '\n'
+        '## Implementation\n'
+        '\n'
+        'Other content.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Render pass'])
+    hq.main(['finish', _SLUG, '--log', 'where test'])
+
+    handoff_text = (folder / 'HANDOFF.md').read_text()
+    assert 'SPEC.md:3-7' in handoff_text
+
+
+def test_read_block_line_shapes(tmp_path, monkeypatch):
+    """Read block pins exact line shapes for the two-anchor and ? span forms.
+
+    Mutation: unresolved anchor silently omitted; two-space column separator
+    collapsed to one; label dropped from the line.
+    Oracle: SPEC.md stamped with 'Render pass;Ghost Section' - 'Render pass'
+    resolves to span 3-7, 'Ghost Section' is absent, so the line is
+    'SPEC.md:3-7,?  -'; NOTES.md stamped with single missing anchor gives
+    'NOTES.md:?  -'.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text(
+        '# Spec\n'
+        '\n'
+        '## Render pass\n'
+        '\n'
+        'Details.\n'
+        'More details.\n'
+        '\n'
+        '## Implementation\n'
+        '\n'
+        'Other content.\n')
+    (folder / 'NOTES.md').write_text('# Notes\n\nBody.\n')
+    hq.main([
+        'stamp', _SLUG, 'SPEC.md', '--read-before', 'always',
+        '--where', 'Render pass;Ghost Section'])
+    hq.main([
+        'stamp', _SLUG, 'NOTES.md', '--read-before', 'always',
+        '--where', 'Missing'])
+    hq.main(['finish', _SLUG, '--log', 'shape test'])
+
+    handoff_text = (folder / 'HANDOFF.md').read_text()
+    text_lines = handoff_text.splitlines()
+    assert 'SPEC.md:3-7,?  -' in text_lines
+    assert 'NOTES.md:?  -' in text_lines
+
+
+def test_untyped_unfiled_bullet_blocks_and_names_the_line(
+        tmp_path, monkeypatch, capsys):
+    """Finish refuses an ## Unfiled section that contains an untyped bullet.
+
+    Mutation: the drain guessing a section for an untyped bullet.
+    Oracle: finish returns 1 and stdout names the offending bullet text.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    _set_cursor(
+        folder / 'HANDOFF.md',
+        '## Task\n\nDo the work.\n\n## Unfiled\n\n- some untyped bullet item\n')
+
+    ret = hq.main(['finish', _SLUG, '--log', 'untyped test'])
+    assert ret == 1
+
+    out = capsys.readouterr().out
+    assert 'some untyped bullet item' in out
+
+
+def test_typed_unfiled_bullets_reach_their_sections(tmp_path, monkeypatch):
+    """Typed bullets under ## Unfiled are drained into their correct sections.
+
+    Mutation: drain swapping decision and constraint sections - items land in
+    the wrong kind slot.
+    Oracle: standing.md d-prefixed line has 'Use single writes' headline;
+    c-prefixed line has 'Max 400 lines' headline (not swapped).
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    _set_cursor(
+        folder / 'HANDOFF.md',
+        '## Task\n\nDo the work.\n\n## Unfiled\n\n'
+        '- decision: **Use single writes** Batch all writes into one call.\n'
+        '- constraint: **Max 400 lines** Cursor must stay under 400 lines.\n')
+
+    ret = hq.main(['finish', _SLUG, '--log', 'typed unfiled test'])
+    assert ret == 0
+
+    standing_text = (folder / 'standing.md').read_text()
+    slines = standing_text.splitlines()
+    d_line = next((ln for ln in slines if ln.startswith('- [d')), None)
+    c_line = next((ln for ln in slines if ln.startswith('- [c')), None)
+    assert d_line is not None
+    assert 'Use single writes' in d_line
+    assert c_line is not None
+    assert 'Max 400 lines' in c_line
+
+
+def test_abs_path_resolved_once_and_absence_is_advisory(tmp_path, monkeypatch):
+    """Stamping an absent absolute path succeeds;
+    absence is advisory, not blocking.
+
+    Mutation: re-resolving the path per cwd; a missing outside file blocking
+    stamp.
+    Oracle: stamp returns 0; ledger row has base=abs and the given path
+    unchanged regardless of cwd.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    abs_path = '/nonexistent/path/to/SPEC.md'
+
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        ret = hq.main(['stamp', _SLUG, abs_path])
+        lines = (folder / 'ledger.tsv').read_text().splitlines()
+    finally:
+        os.chdir(original_cwd)
+
+    assert ret == 0
+    assert len(lines) == 2
+    fields = lines[1].split('\t')
+    assert fields[2] == abs_path
+    assert fields[3] == 'abs'
+
+
+def test_adopt_of_a_non_conforming_handoff_changes_nothing(tmp_path,
+                                                           monkeypatch):
+    """Adopt on a non-conforming HANDOFF.md exits 1 and writes nothing.
+
+    Mutation: the whole file drained into ## Unfiled on non-conforming input.
+    Oracle: ledger.tsv, standing.md, and cycles/ are
+    absent after adopt exits 1.
+    """
+    root = tmp_path / 'root'
+    root.mkdir()
+    src = os.path.join(FIXTURES, 'legacy-import-notes')
+    dst = str(root / 'scratch' / 'legacy-import-notes')
+    shutil.copytree(src, dst)
+
+    monkeypatch.setenv('HQ_ROOT', str(root))
+    monkeypatch.setenv('HQ_SESSION', _SESSION)
+    monkeypatch.setenv('HQ_HOST', _HOST)
+    monkeypatch.setenv('HQ_NOW', _NOW)
+    monkeypatch.setenv('HQ_CYCLE', '1')
+    monkeypatch.setenv('HQ_GIT', '0')
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
+
+    folder = root / 'scratch' / 'legacy-import-notes'
+    ret = hq.main(['adopt', 'legacy-import-notes'])
+    assert ret == 1
+    assert not (folder / 'ledger.tsv').exists()
+    assert not (folder / 'standing.md').exists()
+    assert not (folder / 'cycles').exists()
+
+
+def test_adopt_conservation_excludes_the_archive(tmp_path, monkeypatch):
+    """Adopt seeds ledger rows, standing items, and a
+    byte-identical cycle archive.
+
+    Mutation: the archive copy satisfying the conservation union by itself.
+    Oracle: 3 ledger rows; standing has d/c/x items; cycles/c05.md
+    byte-identical to original HANDOFF.md; free text from the 'Read now'
+    pointer lands in label; 'Reference only' notes row graded edit; a second
+    begin+finish exits 0.
+    """
+    root = tmp_path / 'root'
+    root.mkdir()
+    src = os.path.join(FIXTURES, 'orbit-cache-rewrite')
+    dst = str(root / 'scratch' / 'orbit-cache-rewrite')
+    shutil.copytree(src, dst)
+
+    slug = 'orbit-cache-rewrite'
+    folder = root / 'scratch' / slug
+    original_bytes = (folder / 'HANDOFF.md').read_bytes()
+    original_text = (folder / 'HANDOFF.md').read_text()
+
+    monkeypatch.setenv('HQ_ROOT', str(root))
+    monkeypatch.setenv('HQ_SESSION', _SESSION)
+    monkeypatch.setenv('HQ_HOST', _HOST)
+    monkeypatch.setenv('HQ_NOW', _NOW)
+    monkeypatch.setenv('HQ_CYCLE', '1')
+    monkeypatch.setenv('HQ_GIT', '0')
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
+
+    ret = hq.main(['adopt', slug])
+    assert ret == 0
+
+    ledger_rows = (folder / 'ledger.tsv').read_text().splitlines()[1:]
+    assert len(ledger_rows) == 3
+
+    slines = (folder / 'standing.md').read_text().splitlines()
+    assert any(ln.startswith('- [d') for ln in slines)
+    assert any(ln.startswith('- [c') for ln in slines)
+    assert any(ln.startswith('- [x') for ln in slines)
+
+    assert (folder / 'cycles' / 'c05.md').read_bytes() == original_bytes
+
+    # Step-3: free text from 'Read now' pointer lands in label verbatim.
+    parsed_rows = [r.split('\t') for r in ledger_rows]
+    spec_rows = [r for r in parsed_rows if r[2] == 'SPEC.md']
+    assert spec_rows
+    assert 'cache schema and field contracts' in spec_rows[-1][12]
+
+    # 'Reference only' notes file is graded edit, not never.
+    notes_rows = [r for r in parsed_rows if 'notes-algos' in r[2]]
+    assert notes_rows
+    assert notes_rows[-1][6] == 'edit'
+
+    # Step-5: adopted HANDOFF.md carries the three managed blocks and ## Log.
+    new_text = (folder / 'HANDOFF.md').read_text()
+    assert '<!-- hq:read ' in new_text
+    assert '<!-- hq:artifacts ' in new_text
+    assert '<!-- hq:standing ' in new_text
+    assert '## Log' in new_text
+
+    # Cursor section (before first <!-- hq: marker) contains only the six
+    # step-5 headings; drained sections must not be duplicated there.
+    hq_marker_idx = new_text.find('<!-- hq:')
+    cursor_section = new_text[:hq_marker_idx]
+    for drained in ('## Decisions', '## Constraints', '## Dead ends', '## Key files'):
+        assert drained not in cursor_section, (
+            f'{drained!r} found verbatim in adopted cursor section')
+
+    # Conservation: the adopted cursor plus standing cover the original.
+    standing_text = (folder / 'standing.md').read_text()
+    pairs = [f'{r[2]} {r[12]}' for r in parsed_rows if len(r) > 12]
+    missing = hq.conservation(original_text, cursor_section, standing_text, pairs)
+    assert missing == []
+
+    monkeypatch.setenv('HQ_CYCLE', '6')
+    ret = hq.main(['begin', slug])
+    assert ret == 0
+    ret = hq.main(['finish', slug, '--log', 'second cycle'])
+    assert ret == 0
+
+
+def test_open_writes_nothing(tmp_path, monkeypatch):
+    """Open is read-only; no file changes sha after the call.
+
+    Mutation: open regenerating blocks and rewriting HANDOFF.md.
+    Oracle: sha256 of every file in the folder is identical before and
+    after open.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--read-before', 'always'])
+    hq.main(['finish', _SLUG, '--log', 'setup'])
+
+    def _sha_all(root: str) -> dict:
+        result = {}
+        for dirpath, _, filenames in os.walk(root):
+            for fname in filenames:
+                path = os.path.join(dirpath, fname)
+                with open(path, 'rb') as f:
+                    result[path] = hashlib.sha256(f.read()).hexdigest()
+        return result
+
+    before = _sha_all(str(folder))
+    hq.main(['open', _SLUG])
+    after = _sha_all(str(folder))
+    assert before == after
+
+
+def test_payload_is_flat_across_100_synthesized_cycles(tmp_path, monkeypatch):
+    """payload_tokens at cycle 100 is within 2 percent of cycle 3.
+
+    Mutation: any payload term proportional to cycle count (e.g., full log
+    history).
+    Oracle: manifest.tsv payload_tokens rows 3 and 100; abs diff / row3 <
+    0.02. The log block adds one rollup line after cycle 3 (~50 bytes =
+    ~12 tokens); with a ~5 kB HANDOFF.md the change is under 1 percent.
+    """
+    folder = _thread(tmp_path, 100, 2, 20, monkeypatch)
+
+    manifest_text = (folder / 'cycles' / 'manifest.tsv').read_text()
+    rows = manifest_text.splitlines()
+    header = rows[0].split('\t')
+    payload_idx = header.index('payload_tokens')
+
+    tokens_at_3 = int(rows[3].split('\t')[payload_idx])
+    tokens_at_100 = int(rows[100].split('\t')[payload_idx])
+
+    pct_change = abs(tokens_at_100 - tokens_at_3) / tokens_at_3
+    assert pct_change < 0.02, (
+        f'payload grew {pct_change:.2%}: '
+        f'cycle3={tokens_at_3}, cycle100={tokens_at_100}')
+
+
+def test_when_shows_all_rows_for_path(tmp_path, monkeypatch, capsys):
+    """When shows every ledger row for a path, oldest first.
+
+    Mutation: when showing only the latest row for the path.
+    Oracle: three stamps of SPEC.md produce three rows in when output.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nVersion 1.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'first stamp'])
+    (folder / 'SPEC.md').write_text('# Spec\n\nVersion 2.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'second stamp'])
+    (folder / 'SPEC.md').write_text('# Spec\n\nVersion 3.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'third stamp'])
+
+    hq.main(['when', _SLUG, 'SPEC.md'])
+    out = capsys.readouterr().out
+    spec_lines = [ln for ln in out.splitlines() if 'SPEC.md' in ln]
+    assert len(spec_lines) == 3
+
+
+def test_diff_shows_cursor_changes_between_cycles(tmp_path, monkeypatch,
+                                                  capsys):
+    """Diff shows lines present in one cycle archive but not the other.
+
+    Mutation: diff reporting cycle offsets as line numbers instead of content.
+    Oracle: 'Line A' removed (- prefix) and 'Line B' added (+ prefix) in
+    diff 1 2.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    _set_cursor(folder / 'HANDOFF.md', '## Task\n\nLine A\n')
+    hq.main(['finish', _SLUG, '--log', 'cycle one'])
+
+    monkeypatch.setenv('HQ_CYCLE', '2')
+    hq.main(['begin', _SLUG])
+    _set_cursor(folder / 'HANDOFF.md', '## Task\n\nLine B\n')
+    hq.main(['finish', _SLUG, '--log', 'cycle two'])
+
+    assert hq.main(['diff', _SLUG, '1', '2']) == 0
+    out = capsys.readouterr().out
+    assert any(ln.startswith('- ') and 'Line A' in ln for ln in out.splitlines())
+    assert any(ln.startswith('+ ') and 'Line B' in ln for ln in out.splitlines())
+
+
+def test_artifacts_verb_shows_every_live_row(tmp_path, monkeypatch, capsys):
+    """Artifacts lists every live stamped row with its kind and read_before.
+
+    Mutation: artifacts built from the previous block's text instead of a fresh
+    walk.
+    Oracle: output lines contain SPEC.md with 'always' and notes-impl.md with
+    'edit'.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    (folder / 'notes-impl.md').write_text('# Notes\n\nContent.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--read-before', 'always'])
+    hq.main(['stamp', _SLUG, 'notes-impl.md', '--read-before', 'edit'])
+
+    ret = hq.main(['artifacts', _SLUG])
+    assert ret == 0
+
+    out_lines = capsys.readouterr().out.splitlines()
+    assert any('SPEC.md' in ln and 'always' in ln for ln in out_lines)
+    assert any('notes-impl.md' in ln and 'edit' in ln for ln in out_lines)
+
+
+def test_standing_verb_shows_unsuperseded_items(tmp_path, monkeypatch, capsys):
+    """Standing omits superseded items and shows only live ones.
+
+    Mutation: standing block including superseded items.
+    Oracle: d01's headline absent from output; d02's headline present.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    hq.main(['note', _SLUG, 'decision',
+             '--headline', 'Original approach', 'First decision body.'])
+    hq.main(['note', _SLUG, 'decision',
+             '--headline', 'Revised approach', 'Second decision body.'])
+    hq.main(['supersede', _SLUG, 'd01', 'd02'])
+
+    ret = hq.main(['standing', _SLUG])
+    assert ret == 0
+
+    out = capsys.readouterr().out
+    assert 'Revised approach' in out
+    assert 'Original approach' not in out
+
+
+def test_read_verb_appends_receipt(tmp_path, monkeypatch, capsys):
+    """Read appends one receipt line to HQ_STATE_DIR/hq-reads-<session>.txt.
+
+    Mutation: receipt file not created; receipt entry appended to wrong
+    path; or the receipt written in place of the span, so the caller gets
+    the record and not the content.
+    Oracle: receipt file exists and its last line contains the slug and
+    path; the first printed line is the anchor's own heading.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text(
+        '# Spec\n\n## Design\n\nContent.\n\n## Other\n\nMore.\n')
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Design'])
+    hq.main(['finish', _SLUG, '--log', 'read test'])
+
+    capsys.readouterr()
+    ret = hq.main(['read', _SLUG, 'SPEC.md'])
+    assert ret == 0
+    assert capsys.readouterr().out.splitlines()[0] == '## Design'
+
+    receipt_path = tmp_path / f'hq-reads-{_SESSION}.txt'
+    assert receipt_path.exists()
+    last_line = receipt_path.read_text().splitlines()[-1]
+    assert _SLUG in last_line
+    assert 'SPEC.md' in last_line
+
+
+# --- open-question rulings, 2026-09-09 -----------------------------------
+
+
+def test_dangling_successor_is_an_advisory_in_finish_and_the_work_list(
+        tmp_path, monkeypatch, capsys):
+    """A superseded row whose successor left the disk is named, not silent.
+
+    Mutation: finish and begin checking only live gated rows for presence,
+    so a spec superseded by a file since deleted sits ungated with no line
+    naming it.
+    Oracle: after NEXT.md is deleted, finish exits 0 and prints
+    'advisory: successor missing: SPEC.md -> NEXT.md'; the next begin
+    prints 'successor missing: SPEC.md -> NEXT.md' in its work list.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nOld.\n')
+    (folder / 'NEXT.md').write_text('# Spec\n\nNew.\n')
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--successor', 'NEXT.md']) == 0
+    (folder / 'NEXT.md').unlink()
+    capsys.readouterr()
+
+    assert hq.main(['finish', _SLUG, '--log', 'dangling']) == 0
+    assert 'advisory: successor missing: SPEC.md -> NEXT.md' in capsys.readouterr().out
+
+    hq.main(['begin', _SLUG])
+    assert 'successor missing: SPEC.md -> NEXT.md' in capsys.readouterr().out
+
+
+def test_r1_holds_when_the_stored_kind_is_spec_and_the_heading_moved(
+        tmp_path, monkeypatch):
+    """R1 binds to the stored kind as well as the inferred one.
+
+    Mutation: R1 keyed on the inferred kind alone, so editing a spec's first
+    heading away from '# Spec' lets --read-before never through.
+    Oracle: after the heading edit, 'stamp plan.md --read-before never'
+    exits 1 and the current row stays kind spec, live, always.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'plan.md').write_text('# Spec\n\nContent.\n')
+    assert hq.main(['stamp', _SLUG, 'plan.md']) == 0
+    (folder / 'plan.md').write_text('# Plan\n\nContent.\n')
+
+    assert hq.main(['stamp', _SLUG, 'plan.md', '--read-before', 'never']) == 1
+
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
+    assert row['kind'] == 'spec'
+    assert row['status'] == 'live'
+    assert row['read_before'] == 'always'
+    assert row['reason'].startswith('refused:')
+
+
+def test_archive_without_reason_is_usage_and_writes_no_row(tmp_path, monkeypatch):
+    """--archive with no --reason is a usage error, not a refusal.
+
+    Mutation: exit 1, the refusal code, for a malformed command; or a
+    receipt row appended for it.
+    Oracle: section 16's exit table, where 2 is usage; the ledger bytes
+    are unchanged.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    assert hq.main(['stamp', _SLUG, 'SPEC.md']) == 0
+    ledger_before = (folder / 'ledger.tsv').read_bytes()
+
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--archive']) == 2
+    assert (folder / 'ledger.tsv').read_bytes() == ledger_before
+
+
+def test_successor_whose_own_row_is_not_live_is_refused(tmp_path, monkeypatch):
+    """Two specs may not name each other as successors.
+
+    Mutation: a successor accepted on disk presence alone, so A -> B then
+    B -> A leaves no live spec and nothing gated.
+    Oracle: the second stamp exits 1 with a receipt; B's current row stays
+    live, always, successor '-'; A still points at B.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC-A.md').write_text('# Spec\n\nA.\n')
+    (folder / 'SPEC-B.md').write_text('# Spec\n\nB.\n')
+    assert hq.main(['stamp', _SLUG, 'SPEC-B.md']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC-A.md', '--successor', 'SPEC-B.md']) == 0
+
+    assert hq.main(['stamp', _SLUG, 'SPEC-B.md', '--successor', 'SPEC-A.md']) == 1
+
+    rows = [
+        dict(zip(hq.LEDGER_FIELDS, ln.split('\t')))
+        for ln in (folder / 'ledger.tsv').read_text().splitlines()[1:]
+        ]
+    latest = hq.latest_rows(rows)
+    assert latest['SPEC-B.md']['status'] == 'live'
+    assert latest['SPEC-B.md']['read_before'] == 'always'
+    assert latest['SPEC-B.md']['successor'] == '-'
+    assert latest['SPEC-B.md']['reason'].startswith('refused:')
+    assert latest['SPEC-A.md']['successor'] == 'SPEC-B.md'
+
+
+def test_a_kind_declared_spec_is_gated_from_that_stamp_on(tmp_path, monkeypatch):
+    """--kind spec on a notes-named file seeds always and binds R1.
+
+    Mutation: the gate kind taken from the inferred and previous kinds
+    only, so 'stamp notes-a.md --kind spec' writes a spec row at never
+    and the same stamp with --read-before never passes.
+    Oracle: the first stamp's row is spec/live/always; the demoting stamp
+    exits 1 and the current row stays always.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'notes-a.md').write_text('# Notes\n\nActually the spec.\n')
+
+    assert hq.main(['stamp', _SLUG, 'notes-a.md', '--kind', 'spec']) == 0
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
+    assert (row['kind'], row['status'], row['read_before']) == ('spec', 'live', 'always')
+
+    assert hq.main([
+        'stamp', _SLUG, 'notes-a.md', '--kind', 'spec', '--read-before', 'never']) == 1
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
+    assert row['read_before'] == 'always'
+    assert row['reason'].startswith('refused:')
+
+
+# --- mutation survivors, 2026-09-09 ---------------------------------------
+
+
+def test_work_list_caps_names_and_judges_presence_on_live_rows_only(
+        tmp_path, monkeypatch, capsys):
+    """Seven unstamped files print five names and '... and 2 more', the
+    conflicted copy is not among them, and an archived row whose file is
+    gone is not 'missing live'.
+
+    Mutation: the cap moved to six, the tail arithmetic off by one, the
+    skip kind counted as unstamped, or non-live rows checked for presence.
+    Oracle: hand-computed counts for seven notes files; no 'missing live'
+    line for the archived spec.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    for i in range(7):
+        (folder / f'notes-{i}.md').write_text('# n\n')
+    (folder / 'notes-x (conflicted copy 2026).md').write_text('# n\n')
+    (folder / 'OLD.md').write_text('# Spec\n')
+    assert hq.main(['stamp', _SLUG, 'OLD.md', '--archive', '--reason', 'old']) == 0
+    (folder / 'OLD.md').unlink()
+    capsys.readouterr()
+
+    hq.main(['begin', _SLUG])
+    out = capsys.readouterr().out
+
+    line = next(ln for ln in out.splitlines() if ln.startswith('  unstamped notes x7: '))
+    names, tail = line[len('  unstamped notes x7: '):].split(' ... ')
+    assert len(names.split(', ')) == 5
+    assert tail == 'and 2 more'
+    assert 'conflicted copy' not in names
+    assert '  conflicted copy: notes-x (conflicted copy 2026).md' in out
+    assert 'missing live' not in out
+
+
+def test_acknowledge_passes_a_witness_break_and_records_the_reason(
+        tmp_path, monkeypatch):
+    """Finish --acknowledge writes through a W1 break and notes the reason.
+
+    Mutation: the acknowledge test inverted, so an acknowledged break
+    blocks and an unacknowledged one passes.
+    Oracle: without the flag exit 1; with it exit 0 and the manifest note
+    'acknowledged: formatter'.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n')
+    assert hq.main(['stamp', _SLUG, 'SPEC.md']) == 0
+    assert hq.main(['finish', _SLUG, '--log', 'one']) == 0
+    hq.main(['begin', _SLUG])
+    ledger = folder / 'ledger.tsv'
+    ledger.write_bytes(ledger.read_bytes().replace(b'always', b'alwayz', 1))
+
+    assert hq.main(['finish', _SLUG, '--log', 'two']) == 1
+    assert hq.main(['finish', _SLUG, '--log', 'two', '--acknowledge', 'formatter']) == 0
+
+    rows = hq._read_tsv(folder / 'cycles' / 'manifest.tsv', hq.MANIFEST_FIELDS)
+    note = rows[-1]['note']
+    assert note.startswith('acknowledged W1: ledger prefix changed')
+    assert note.endswith('; formatter')
+
+
+def test_collisions_skip_a_superseded_spec_and_a_present_abs_row_is_silent(
+        tmp_path, monkeypatch, capsys):
+    """A superseded spec's headings do not collide, and an abs row whose
+    file exists draws no advisory.
+
+    Mutation: the live-spec test loosened to kind or status, or the abs
+    advisory keyed on base alone.
+    Oracle: 'Delta' heads only the superseded OLD-SPEC.md while the Now
+    step names Delta, and no collides line prints; the abs file exists,
+    and no 'abs path not on disk' line prints.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'OLD-SPEC.md').write_text('# Spec\n\n## Delta section\n')
+    (folder / 'SPEC.md').write_text('# Spec\n\n## Plain section\n')
+    assert hq.main(['stamp', _SLUG, 'OLD-SPEC.md', '--successor', 'SPEC.md']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC.md']) == 0
+    outside = tmp_path / 'outside-note.md'
+    outside.write_text('# n\n')
+    assert hq.main(['stamp', _SLUG, str(outside)]) == 0
+    hp = folder / 'HANDOFF.md'
+    hp.write_text(hp.read_text().replace('## Now\n', '## Now\nWire Delta into the run.\n'))
+    capsys.readouterr()
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+
+    out = capsys.readouterr().out
+    assert 'collides:' not in out
+    assert 'abs path not on disk' not in out
+
+
+def test_label_dropping_a_backticked_token_alone_is_advised(
+        tmp_path, monkeypatch, capsys):
+    """A same-length re-label that loses a backticked token, but no s<n>
+    reference, draws the dropped advisory naming the token.
+
+    Mutation: the two dropped sets intersected instead of united, so a
+    backtick-only loss is silent.
+    Oracle: the labels differ only by the token `--force`.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n')
+    assert hq.main([
+        'stamp', _SLUG, 'SPEC.md', '--label', 'the `--force` path, s4 spans it']) == 0
+    assert hq.main([
+        'stamp', _SLUG, 'SPEC.md', '--label', 'the force path now, s4 spans it']) == 0
+    capsys.readouterr()
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+
+    assert "advisory: label dropped {'`--force`'}: SPEC.md" in capsys.readouterr().out
+
+
+def test_two_unfiled_items_of_one_kind_get_consecutive_ids(tmp_path, monkeypatch):
+    """Draining two decisions in one finish numbers them d01 and d02.
+
+    Mutation: the running standing text replaced per item instead of
+    extended, so both items take d01.
+    Oracle: hand-computed ids in file order.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    _set_cursor(
+        folder / 'HANDOFF.md',
+        '## Task\n\nDo.\n\n## Unfiled\n'
+        '- decision: **First** one.\n'
+        '- decision: **Second** two.\n')
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+
+    lines = (folder / 'standing.md').read_text().splitlines()
+    assert lines == ['- [d01] (c1) **First** one.', '- [d02] (c1) **Second** two.']
+
+
+def test_first_finish_keeps_one_log_heading(tmp_path, monkeypatch):
+    """The cursor of a fresh file stops before the Log that begin wrote.
+
+    Mutation: the Log heading match broken, so the cursor swallows the
+    begin-written Log and finish writes a second one.
+    Oracle: exactly one '## Log' line after the first finish.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+
+    text = (folder / 'HANDOFF.md').read_text()
+    assert text.count('\n## Log\n') == 1
+
+
+def test_a_kind_declared_draft_is_gated_like_a_spec(tmp_path, monkeypatch):
+    """--kind draft on an unrecognized file seeds always and binds R1.
+
+    Mutation: the draft half of the gate set dropped, so a declared draft
+    lands at never and demotes freely.
+    Oracle: the first stamp's row is draft/live/always; the demoting
+    stamp exits 1.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'plan.txt').write_text('def run(): pass\n')
+
+    assert hq.main(['stamp', _SLUG, 'plan.txt', '--kind', 'draft']) == 0
+    lines = (folder / 'ledger.tsv').read_text().splitlines()
+    row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
+    assert (row['kind'], row['status'], row['read_before']) == ('draft', 'live', 'always')
+    assert hq.main(['stamp', _SLUG, 'plan.txt', '--read-before', 'never']) == 1
