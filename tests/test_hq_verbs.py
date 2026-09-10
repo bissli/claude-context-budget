@@ -1141,6 +1141,36 @@ def test_adopt_keeps_text_before_the_first_heading(tmp_path, monkeypatch):
         folder / 'HANDOFF.md').read_text()
 
 
+def test_adopt_drops_the_continuation_lines_of_a_wrapped_header(
+        tmp_path, monkeypatch, capsys):
+    """Lines that continue a `Written:` header wrapped at 72 columns are not Unfiled.
+
+    Mutation: the preamble filter comparing each line against the matched
+    header line alone, so the two continuation lines become `- unfiled:`
+    bullets that finish refuses as untyped; or conservation reporting them
+    as lines not carried.
+    Oracle: the adopted cursor holds the real preamble line as its only
+    Unfiled bullet, and the summary prints `conservation: every original
+    line carried`.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {_SLUG}\n\n'
+        'Written: 2026-09-01 | Cycle: 3 | master @ 0123abc | dirty:\n'
+        'pyproject.toml modified; alpha/ and beta/ untracked\n'
+        '(pre-existing WIP).\n\n'
+        'Status: blocked on the adapter.\n\n'
+        '## Task\nx\n\n## Log\n- 2026-09-01: started\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    text = (folder / 'HANDOFF.md').read_text()
+    unfiled = [ln for ln in text.splitlines() if ln.startswith('- unfiled:')]
+    assert unfiled == ['- unfiled: Status: blocked on the adapter.']
+    assert 'conservation: every original line carried' in capsys.readouterr().out
+
+
 def test_key_files_continuation_with_one_space_joins_the_label(
         tmp_path, monkeypatch):
     """Any indented line under a pointer continues its free text.

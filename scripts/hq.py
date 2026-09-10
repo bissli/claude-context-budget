@@ -875,6 +875,8 @@ def conservation(
       when at least one content line from its section is in the union,
       so drained sections whose bullets moved to standing are not
       reported as missing.
+    - The ``Written:`` header and the lines that continue it up to the
+      next blank line or heading are the script's, and never reported.
     """
     _standing_prefix = re.compile(r'^- \[[dcx]\d+\] \(c\d+\) ')
     _kf_grade = re.compile(r'^(read now|reference only)\s*:\s*', re.IGNORECASE)
@@ -937,12 +939,21 @@ def conservation(
 
     result = []
     in_key_files = False
+    in_header = False
     for ln in orig_lines:
         if not ln.strip():
+            in_header = False
             continue
+        # The header paragraph runs from the Written: line to the next
+        # blank line or heading; the script rewrites all of it.
         if ln.strip().startswith('Written:'):
+            in_header = True
             continue
         is_heading = ln.lstrip().startswith('#')
+        if is_heading:
+            in_header = False
+        if in_header:
+            continue
         # A heading-form grade label is structure only under Key files;
         # anywhere else a heading adopt drops is a lost line.
         kf_label = in_key_files and bool(_KF_LABEL_PAT.match(ln.lstrip()))
@@ -1929,6 +1940,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             sections_raw.setdefault(cur_h2, []).extend(cur_body)
 
     header_text = parsed.get('header') or ''
+    in_header = False
     for line in text.splitlines():
         if line.startswith('## ') and not (
                 cur_h2 == 'Key files' and _KF_LABEL_PAT.match(line)):
@@ -1937,9 +1949,16 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             cur_body = []
         elif cur_h2 and not line.startswith('<!-- hq:'):
             cur_body.append(line)
-        elif (not cur_h2 and line.strip() and not line.startswith('# ')
-                and line.strip() != header_text.strip()):
-            preamble.append(line.strip())
+        elif not cur_h2:
+            # The header is a paragraph: a `Written:` line wrapped at the
+            # column runs on to the next blank line or heading, and the
+            # script rewrites the whole of it at finish.
+            if line.strip() == header_text.strip():
+                in_header = True
+            elif not line.strip() or line.startswith('#'):
+                in_header = False
+            if line.strip() and not line.startswith('# ') and not in_header:
+                preamble.append(line.strip())
     _flush_section()
 
     # --- Step 3: parse Key files ---
