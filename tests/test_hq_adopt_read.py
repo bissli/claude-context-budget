@@ -276,16 +276,18 @@ def test_adopt_renders_the_log_row_it_appends(tmp_path, monkeypatch):
 
 
 def test_section_anchor_accepts_every_leading_token_form():
-    """`s<d>` resolves against `4`, `4.`, `4:`, and `s4:` headings, not `S4 x`.
+    """`s<d>` resolves against `4`, `4.`, `4:`, `s4.`, and `s4:`, not `S4 x`.
 
     Mutation: the number fallback matching only a bare leading digit, so the
     `s4` adopt seeds never resolves against `## s4: Title` and the read block
-    prints `SPEC.md:?` every cycle; or matching a bare `s<d>` word, so
-    `## S3 bucket layout` answers for section 3.
+    prints `SPEC.md:?` every cycle; the `s<d>` alternative taking a colon
+    alone, so `## S4. Title` is unresolved; or matching a bare `s<d>` word,
+    so `## S3 bucket layout` answers for section 3.
     Oracle: hand-computed spans - each two-line fixture puts the heading on
     line 1 and its body on line 2; the bare-word heading stays unresolved.
     """
-    for heading in ('## 4 Title', '## 4. Title', '## 4: Title', '## s4: Title'):
+    for heading in ('## 4 Title', '## 4. Title', '## 4: Title', '## s4: Title',
+                    '## S4. Title'):
         text = f'{heading}\nBody.\n'
         assert hq.resolve_where(text, ['s4']) == ([(1, 2)], []), heading
     assert hq.resolve_where('## S3 bucket layout\nBody.\n', ['s3']) == ([], ['s3'])

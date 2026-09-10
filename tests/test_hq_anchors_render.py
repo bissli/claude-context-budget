@@ -55,6 +55,30 @@ def test_s11b_resolves_to_letter_suffixed_heading():
     assert spans == [(5, 8)]
 
 
+def test_s0_resolves_a_dotted_s_prefixed_heading():
+    """`s0` resolves `## S0. Warmup checks (before rollout)` like the literal form.
+
+    Mutation: the section index accepting `s<n>:` alone while _norm_heading
+    strips `s<n>.` too, so the literal anchor resolves and the number
+    anchor prints `?`.
+    Oracle: hand-computed - the heading is line 3 and the next same-level
+    heading is line 6, so both anchor forms give the span 3-5.
+    """
+    text = (
+        '# T\n'
+        '\n'
+        '## S0. Warmup checks (before rollout)\n'
+        'body\n'
+        '\n'
+        '## S1. Pool selection\n'
+        'more\n'
+    )
+    assert hq.resolve_where(text, ['s0']) == ([(3, 5)], [])
+    assert hq.resolve_where(
+        text, ['Warmup checks (before rollout)']) == ([(3, 5)], [])
+    assert hq.resolve_where(text, ['s1']) == ([(6, 7)], [])
+
+
 def test_literal_proof_resolves_to_11b_heading_by_text_match():
     """Literal anchor 'Proof' resolves to '# 11b. Proof' via normalized text.
 

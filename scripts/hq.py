@@ -418,10 +418,11 @@ def resolve_where(
       or to the last line of the file when no such heading follows.
     - An anchor ``s<d>`` or ``s<d><letter>`` resolves to the first heading
       whose leading section token matches: ``<d>.``, ``<d>:``,
-      ``<d><letter>.``, ``<d><letter>:``, or ``s<d>[<letter>]:``. Equality
-      on the whole token is required, so ``s11`` does not resolve to
-      ``# 11b. Proof``. A bare ``S3`` word without a dot or colon is not a
-      token. A literal heading match is tried first.
+      ``<d><letter>.``, ``<d><letter>:``, or ``s<d>[<letter>][.:]``, the
+      same token set ``_norm_heading`` strips. Equality on the whole token
+      is required, so ``s11`` does not resolve to ``# 11b. Proof``. A bare
+      ``S3`` word without a dot or colon is not a token. A literal heading
+      match is tried first.
     - The literal match is equality on the normalized text, never
       containment, so ``Retry`` does not land on ``## Retry budget``.
     - An unresolved anchor prints ``?`` in its span slot during rendering.
@@ -432,7 +433,7 @@ def resolve_where(
         if line.startswith('#'):
             level = len(line) - len(line.lstrip('#'))
             number_m = re.match(
-                r'^#+\s*(?:(\d+[a-z])[.:]|(\d+)[.:]?|s(\d+[a-z]?):)(?=\s|$)',
+                r'^#+\s*(?:(\d+[a-z])[.:]|(\d+)[.:]?|s(\d+[a-z]?)[.:])(?=\s|$)',
                 line, re.IGNORECASE)
             number = ''
             if number_m:

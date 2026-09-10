@@ -380,9 +380,9 @@ hq stamp <slug> notes-old.md --defer
   edit, mention, or never; `--status` live, superseded, archived, or
   missing; any other value is a usage error (exit 2). `--where` joins several
   anchors with `;`, each a heading's text without its number, or `s<n>`
-  for the heading numbered `<n>` - `4.`, `4:`, and `s4:` all count as
-  the number 4; a bare `S4 ...` is a word, not a number. A number may
-  carry one letter when a `.` or `:` follows it: `s11b` names
+  for the heading numbered `<n>` - `4.`, `4:`, `s4.`, and `s4:` all
+  count as the number 4; a bare `S4 ...` is a word, not a number. A
+  number may carry one letter when a `.` or `:` follows it: `s11b` names
   `# 11b. Proof`, `s11` does not, and a bare `3D ...` is a word.
 - `--successor P` sets `status=superseded read_before=never` unless
   the stamp says otherwise. `--archive` sets `status=archived
