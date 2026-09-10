@@ -1203,6 +1203,7 @@ def test_a_line_glued_under_the_header_reaches_the_note_not_the_void(
     assert manifest[-1]['note'] == 'header: Status: blocked on the adapter.'
 
 
+
 def test_where_anchor_escapes_a_semicolon_inside_a_heading(
         tmp_path, monkeypatch, capsys):
     """`\\;` in a `--where` anchor names a heading whose text carries `;`.
@@ -1246,15 +1247,22 @@ def test_finish_flags_a_one_line_span_ended_by_a_same_level_heading(
     a one-line span.
     Oracle: the wrapped heading at notes-wrap.md line 3 is the only line
     flagged; `## Solo` in notes-solo.md, one line long but closed by a
-    `#` heading, is not.
+    `#` heading, is not; `## Alpha` in notes-multi.md, three lines long
+    and closed by a `##` heading, is not; `## Last` on the final line of
+    notes-last.md is not, and does not crash finish.
     """
     folder = _new_root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'notes-wrap.md').write_text(
         '# Notes\n\n## Alpha beta gamma\n## delta epsilon\nbody\n## Next\nmore\n')
     (folder / 'notes-solo.md').write_text('# Notes\n\n## Solo\n# Top\nbody\n')
+    (folder / 'notes-multi.md').write_text(
+        '# Notes\n\n## Alpha\nbody one\nbody two\n## Beta\nmore\n')
+    (folder / 'notes-last.md').write_text('# Notes\n\n## Last')
     for name, where in (('notes-wrap.md', 'Alpha beta gamma'),
-                        ('notes-solo.md', 'Solo')):
+                        ('notes-solo.md', 'Solo'),
+                        ('notes-multi.md', 'Alpha'),
+                        ('notes-last.md', 'Last')):
         assert hq.main([
             'stamp', _SLUG, name, '--read-before', 'always',
             '--where', where, '--label', 'n']) == 0
