@@ -2435,8 +2435,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         text, union_cursor, union_standing, seeded_labels + witnessed + legacy_log)
     if not_carried:
         print(f'conservation: {len(not_carried)} original lines not carried')
-        for line in not_carried[:5]:
-            print(f'  not carried: {line.strip()[:72]}')
+        for line in not_carried:
+            print(f'  not carried: {line.strip()}')
     else:
         print('conservation: every original line carried')
     orig_path = folder / 'HANDOFF.orig.md'
@@ -2446,8 +2446,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             union_cursor, union_standing, seeded_labels + witnessed + legacy_log)
         if orig_missing:
             print(f'conservation vs HANDOFF.orig.md: {len(orig_missing)} lines not carried')
-            for line in orig_missing[:5]:
-                print(f'  not carried: {line.strip()[:72]}')
+            for line in orig_missing:
+                print(f'  not carried: {line.strip()}')
         else:
             print('conservation vs HANDOFF.orig.md: every line carried')
     return 0

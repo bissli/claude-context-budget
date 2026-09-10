@@ -949,30 +949,60 @@ def test_adopt_manifest_log_still_adopted_for_basic_run(
 # --- _verb_adopt (not_carried print slice) ---------------------------
 
 
-def test_adopt_not_carried_shows_up_to_five_lines(tmp_path, monkeypatch,
-                                                  capsys):
-    """not_carried lines are truncated to the first 5 in output.
+def test_adopt_prints_every_not_carried_line_in_full(
+        tmp_path, monkeypatch, capsys):
+    """Every not-carried line prints, whole, under the conservation count.
 
-    Mutation: `not_carried[:5]` changed to `[:6]` (mutmut_1030), so a
-    sixth not-carried line appears in output when 6 lines are dropped.
-    Oracle: with a ## Standing section (skipped by adoption) having 5
-    content items, conservation reports 6 not_carried (heading + 5 items).
-    The 6th item (unique marker STANDZ99) must not appear in stdout on
-    clean code but does appear under mutation.
+    Mutation: the print loop capped at five lines, so the sixth and
+    seventh lines the agent must rehome never reach it; or each line cut
+    at 72 characters, so a line whose distinguishing text sits past that
+    column cannot be told from its neighbor.
+    Oracle: hand-counted - a ## Standing section adopt skips with six
+    items gives seven not-carried lines (heading + six), each printed as
+    written, the sixth 73 characters long and ending in `BCD`.
     """
     folder = _root(tmp_path, monkeypatch)
-    standing_items = (
-        '- item1 STANDA01\n'
-        '- item2 STANDA02\n'
-        '- item3 STANDA03\n'
-        '- item4 STANDA04\n'
-        '- item5 STANDZ99\n'
-    )
-    _handoff(folder, extra='\n## Standing\n\n' + standing_items)
-    hq.main(['adopt', _SLUG])
+    long_item = '- ' + 'a' * 68 + 'BCD'
+    items = [f'- item{i} STANDA0{i}' for i in range(1, 6)] + [long_item]
+    _handoff(folder, extra='\n## Standing\n\n' + '\n'.join(items) + '\n')
+    assert hq.main(['adopt', _SLUG]) == 0
     out = capsys.readouterr().out
-    assert 'conservation:' in out
-    assert 'STANDZ99' not in out
+    assert 'conservation: 7 original lines not carried' in out
+    printed = [ln for ln in out.splitlines() if ln.startswith('  not carried: ')]
+    assert printed == ['  not carried: ## Standing'] + [
+        f'  not carried: {item}' for item in items]
+
+
+def test_adopt_prints_every_orig_not_carried_line_in_full(
+        tmp_path, monkeypatch, capsys):
+    """The HANDOFF.orig.md check prints every not-carried line, whole.
+
+    Mutation: the orig print loop capped at five lines or cut at 72
+    characters, so the count and the list disagree.
+    Oracle: hand-counted - HANDOFF.orig.md carries a ## Standing section
+    with six items, so seven lines print, the sixth 73 characters long
+    and ending in `EFG`.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    _handoff(folder)
+    long_item = '- ' + 'b' * 68 + 'EFG'
+    items = [f'- o0{i} ORIGZ0{i}' for i in range(1, 6)] + [long_item]
+    orig_text = (
+        f'# Handoff: {folder.name}\n\n'
+        f'Written: 2026-08-01 | Cycle: 2\n\n'
+        + _CURSOR
+        + '\n## Standing\n\n' + '\n'.join(items) + '\n'
+    )
+    (folder / 'HANDOFF.orig.md').write_text(orig_text, encoding='utf-8')
+    assert hq.main(['adopt', _SLUG]) == 0
+    out = capsys.readouterr().out
+    assert 'conservation vs HANDOFF.orig.md: 7 lines not carried' in out
+    orig_part = out.split('conservation vs HANDOFF.orig.md:', 1)[1]
+    printed = [
+        ln for ln in orig_part.splitlines() if ln.startswith('  not carried: ')]
+    assert printed == ['  not carried: ## Standing'] + [
+        f'  not carried: {item}' for item in items]
+
 
 
 def test_adopt_on_disk_false_prints_missing_notice(tmp_path, monkeypatch,
@@ -1383,29 +1413,6 @@ def test_adopt_pointer_notes_edit_applied(tmp_path, monkeypatch):
     assert rows['sub/notes-bg.md']['read_before'] == 'edit'
 
 
-def test_adopt_not_carried_five_line_limit(tmp_path, monkeypatch, capsys):
-    """not_carried output is limited to 5 lines; the 6th is never shown.
-
-    Mutation: `not_carried[:5]` changed to `not_carried[:6]` (mutmut_1030),
-    so the 6th not-carried line is printed.
-    Oracle: ## Standing with 5 items produces 6 not_carried (heading + 5).
-    The 6th item (STANDLIM99) appears in stdout under mutation but not
-    under clean code (it is at index 5, past the [:5] slice).
-    """
-    folder = _root(tmp_path, monkeypatch)
-    standing_items = (
-        '- s01 STANDLIM01\n'
-        '- s02 STANDLIM02\n'
-        '- s03 STANDLIM03\n'
-        '- s04 STANDLIM04\n'
-        '- s05 STANDLIM99\n'
-    )
-    _handoff(folder, extra='\n## Standing\n\n' + standing_items)
-    assert hq.main(['adopt', _SLUG]) == 0
-    out = capsys.readouterr().out
-    assert 'conservation:' in out
-    assert 'STANDLIM99' not in out
-
 
 def test_adopt_missing_top_level_draft_keeps_kind_and_stays_missing(
         tmp_path, monkeypatch):
@@ -1427,84 +1434,6 @@ def test_adopt_missing_top_level_draft_keeps_kind_and_stays_missing(
         'draft', 'missing', 'never')
 
 
-def test_adopt_not_carried_line_truncated_at_72(tmp_path, monkeypatch, capsys):
-    """not_carried lines are printed truncated at 72 chars, not 73.
-
-    Mutation: `line.strip()[:72]` changed to `[:73]` (mutmut_1032), so a
-    line whose stripped length is exactly 73 chars shows its 73rd character.
-    Oracle: a ## Standing item whose stripped form is exactly 73 chars
-    ends with `BCD`. `[:72]` prints only `BC` (no `BCD`); `[:73]` prints
-    `BCD`. Assert `BCD` not in stdout for clean code.
-    """
-    folder = _root(tmp_path, monkeypatch)
-    # '- ' (2) + 'a'*68 (68) + 'BCD' (3) = 73 chars after strip.
-    long_item = '- ' + 'a' * 68 + 'BCD\n'
-    standing = '- s01 SHORT01\n- s02 SHORT02\n' + long_item
-    _handoff(folder, extra='\n## Standing\n\n' + standing)
-    assert hq.main(['adopt', _SLUG]) == 0
-    out = capsys.readouterr().out
-    assert 'conservation:' in out
-    assert 'BCD' not in out
-
-
-def test_adopt_orig_not_carried_five_line_limit(tmp_path, monkeypatch, capsys):
-    """orig_missing output is limited to 5 lines; the 6th is never shown.
-
-    Mutation: `orig_missing[:5]` changed to `[:6]` (mutmut_1060), so a
-    sixth not-carried line from HANDOFF.orig.md appears in output.
-    Oracle: HANDOFF.orig.md with ## Standing having 5 items produces 6
-    orig_missing (heading + 5 items). The 6th item (ORIGZ99) must not
-    appear in stdout on clean code but does appear under mutation.
-    """
-    folder = _root(tmp_path, monkeypatch)
-    _handoff(folder)
-    orig_items = (
-        '- o01 ORIGZ01\n'
-        '- o02 ORIGZ02\n'
-        '- o03 ORIGZ03\n'
-        '- o04 ORIGZ04\n'
-        '- o05 ORIGZ99\n'
-    )
-    orig_text = (
-        f'# Handoff: {folder.name}\n\n'
-        f'Written: 2026-08-01 | Cycle: 2\n\n'
-        + _CURSOR
-        + '\n## Standing\n\n'
-        + orig_items
-    )
-    (folder / 'HANDOFF.orig.md').write_text(orig_text, encoding='utf-8')
-    assert hq.main(['adopt', _SLUG]) == 0
-    out = capsys.readouterr().out
-    assert 'conservation vs HANDOFF.orig.md:' in out
-    assert 'ORIGZ99' not in out
-
-
-def test_adopt_orig_not_carried_line_truncated_at_72(tmp_path, monkeypatch, capsys):
-    """orig_missing lines are printed truncated at 72 chars, not 73.
-
-    Mutation: `line.strip()[:72]` changed to `[:73]` (mutmut_1062) in the
-    orig_missing printing loop, so a 73-char line shows its 73rd character.
-    Oracle: HANDOFF.orig.md has a ## Standing item whose stripped form is
-    73 chars, ending in `EFG`. `[:72]` prints only `EF` (no `EFG`);
-    `[:73]` prints `EFG`. Assert `EFG` not in stdout for clean code.
-    """
-    folder = _root(tmp_path, monkeypatch)
-    _handoff(folder)
-    # '- ' (2) + 'b'*68 (68) + 'EFG' (3) = 73 chars after strip.
-    long_item = '- ' + 'b' * 68 + 'EFG\n'
-    orig_items = '- o01 SHORTX\n- o02 SHORTY\n' + long_item
-    orig_text = (
-        f'# Handoff: {folder.name}\n\n'
-        f'Written: 2026-08-01 | Cycle: 2\n\n'
-        + _CURSOR
-        + '\n## Standing\n\n'
-        + orig_items
-    )
-    (folder / 'HANDOFF.orig.md').write_text(orig_text, encoding='utf-8')
-    assert hq.main(['adopt', _SLUG]) == 0
-    out = capsys.readouterr().out
-    assert 'conservation vs HANDOFF.orig.md:' in out
-    assert 'EFG' not in out
 
 
 # --- String and none class spot-check (140 string, 93 none) ----------
