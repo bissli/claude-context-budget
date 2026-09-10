@@ -417,6 +417,26 @@ def test_unreadable_pointed_file_leaves_adopt_whole_and_drops_the_anchor(
     assert "  where dropped: notes-locked.md 's2'" in capsys.readouterr().out
 
 
+def test_an_anchor_cited_twice_on_one_bullet_is_seeded_once(
+        tmp_path, monkeypatch):
+    """`s2 ... s2` on one bullet seeds `where=s2`, as two bullets would.
+
+    Mutation: the mined anchors passed through without de-duplication,
+    so the row reads `s2;s2` and the read block renders the same span
+    twice.
+    Oracle: the ledger where field is exactly `s2` and the read block
+    line carries one span.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'notes-x.md').write_text('# N\n\n## 2. A\n\nx\n\n## 3. B\n\ny\n')
+    _handoff(folder, key_files='- `notes-x.md` Read now: s2 covers it, and s2 again\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['notes-x.md']['where'] == 's2'
+    assert 'notes-x.md:3-6  ' in (folder / 'HANDOFF.md').read_text()
+
 
 # --- The adopt Log roll-up ---
 

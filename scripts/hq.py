@@ -2107,7 +2107,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             # cycle.
             tok_where = '-'
             if where_val != '-':
-                candidates = where_val.split(';')
+                candidates = list(dict.fromkeys(where_val.split(';')))
                 unresolved = candidates
                 if path_obj.is_file():
                     try:
