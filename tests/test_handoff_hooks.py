@@ -241,11 +241,14 @@ def test_gate_credits_a_read_receipt(monkeypatch, capsys, tmp_path):
     """Verify an hq.py read receipt clears a path never read in-transcript.
 
     Mutation: matching the receipt line on the path alone, so a receipt
-    from another handoff folder clears this one, or dropping the receipt
-    check, which makes `hq.py read` no answer to the gate it names.
+    from another handoff folder clears this one; matching without the
+    leading space, so a slug that ends with this one's name clears it;
+    or dropping the receipt check, which makes `hq.py read` no answer to
+    the gate it names.
     Oracle: a spy on stdout - the identical payload reports with no
-    receipt, reports with a receipt naming another folder, and is silent
-    with the receipt naming this one.
+    receipt, reports with a receipt naming another folder or a folder
+    whose name ends with this one's, and is silent with the receipt
+    naming this one.
     """
     root, folder = _handoff_root(tmp_path)
     state = tmp_path / 'state'
@@ -263,9 +266,12 @@ def test_gate_credits_a_read_receipt(monkeypatch, capsys, tmp_path):
     (state / 'hq-reads-r2.txt').write_text(f'{_NOW} other-slug SPEC.md\n',
                                            encoding='utf-8')
     assert 'SPEC.md' in run('r2')
-    (state / 'hq-reads-r3.txt').write_text(f'{_NOW} {_SLUG} SPEC.md\n',
+    (state / 'hq-reads-r3.txt').write_text(f'{_NOW} pre-{_SLUG} SPEC.md\n',
                                            encoding='utf-8')
-    assert run('r3') == ''
+    assert 'SPEC.md' in run('r3')
+    (state / 'hq-reads-r4.txt').write_text(f'{_NOW} {_SLUG} SPEC.md\n',
+                                           encoding='utf-8')
+    assert run('r4') == ''
 
 
 def test_gate_arms_only_on_hq_open(monkeypatch, capsys, tmp_path):
@@ -290,6 +296,74 @@ def test_gate_arms_only_on_hq_open(monkeypatch, capsys, tmp_path):
     assert run('a1', seen) == ''
     assert 'SPEC.md' in run('a2', seen + [_bash(f'hq.py open {_SLUG}')])
     assert 'SPEC.md' in run('a3', seen + [_bash('hq.py open demo')])
+
+
+def test_gate_slug_stops_at_shell_punctuation_and_quotes(monkeypatch, capsys,
+                                                         tmp_path):
+    """Verify the slug of `hq.py open` ends where the shell word does.
+
+    Mutation: capturing every non-space character, so `hq.py open
+    demo-slug; echo x` arms the gate on 'demo-slug;', no folder matches,
+    and the session's gated paths are never reported; a class missing
+    the single quote, so a quoted slug never matches; a class missing
+    `.` or `_`, so a dotted slug truncates to a prefix its siblings
+    share; arming on a quoted mention, so a grep for the phrase points
+    the gate at a folder never opened; treating every quoted span as a
+    mention, so an open run through `bash -c` or straddled by two
+    comment apostrophes never arms; reading the mention verb from the
+    whole line, so an earlier `echo` hides a later `bash -c`; a `-m`
+    flag as the mention mark, so docker's `-m 512m` silences a real
+    open while `git commit -am` overwrites the armed slug; a `$(` in an
+    echoed string read as text, so the open it runs never arms;
+    splitting the raw prefix, so a `|` inside an earlier argument hides
+    the grep; a list without `sed`, so a substitution on the phrase
+    arms; or taking the first of two prefix matches.
+    Oracle: the report naming SPEC.md for the open commands hand-listed
+    at each boundary - a trailing `;`, a `|`, an `&&` chain, a double-
+    and a single-quoted slug, `demo.v2_x` beside two siblings sharing
+    each truncation, an open under `bash -lc`, `ssh`, `docker run -m`,
+    an `echo; bash -c` chain, and an echoed `$(`, one between two
+    apostrophes, and one followed by a `-am` mention of another slug;
+    silence for the grep, two-pattern grep, sed, and commit-message
+    mentions and for the prefix `demo.v2`.
+    """
+    root, folder = _handoff_root(tmp_path)
+    _handoff_root(tmp_path, 'demo.v2_x')
+    _handoff_root(tmp_path, 'demo.v2-y')
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
+    spellings = [
+        f'python3 scripts/hq.py open {_SLUG}; echo done',
+        f'python3 scripts/hq.py open {_SLUG}|head -3',
+        f'python3 scripts/hq.py open {_SLUG}&&echo ok',
+        f'python3 scripts/hq.py open "{_SLUG}" 2>&1',
+        f"python3 scripts/hq.py open '{_SLUG}'",
+        'python3 scripts/hq.py open demo.v2_x',
+        f'bash -lc "cd /tmp && python3 scripts/hq.py open {_SLUG}"',
+        f"ssh host 'python3 scripts/hq.py open {_SLUG}'",
+        f'echo hi; bash -c "python3 scripts/hq.py open {_SLUG}"',
+        f"# don't stamp yet\npython3 scripts/hq.py open {_SLUG}\n# it's open",
+        f'python3 scripts/hq.py open {_SLUG}; git commit -am "hq.py open other"',
+        f'docker run --rm -m 512m img bash -c "python3 hq.py open {_SLUG}"',
+        f'echo "$(python3 scripts/hq.py open {_SLUG})"',
+        ]
+    mentions = [
+        f'grep -n "hq.py open {_SLUG}" README.md',
+        f'grep -e "a|b" -e "hq.py open {_SLUG}" README.md',
+        f"sed 's/hq.py open {_SLUG}/x/' README.md",
+        f'git commit -m "note: hq.py open {_SLUG}"',
+        'python3 scripts/hq.py open demo.v2',
+        ]
+
+    def run(session, command):
+        tr = _transcript(tmp_path / f'{session}.jsonl', [_bash(command)])
+        payload = _payload(root, tr, session, 'Edit',
+                           {'file_path': 'src/app.py'})
+        return _run(monkeypatch, capsys, handoff_gate, payload)
+
+    for n, command in enumerate(spellings):
+        assert 'SPEC.md' in run(f's{n}', command), command
+    for n, command in enumerate(mentions):
+        assert run(f'm{n}', command) == '', command
 
 
 def test_gate_exempts_hq_commands_and_folder_writes(monkeypatch, capsys,

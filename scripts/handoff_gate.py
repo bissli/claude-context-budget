@@ -55,7 +55,26 @@ _NULL_REDIRECT = re.compile(r'(?:\d|&)?>\s*/dev/null')
 _INPLACE = re.compile(r'\bsed\s+-[a-zA-Z]*i|\bsed\s+--in-place')
 _WRITE_VERB = re.compile(r'\btee\s|\bgit\s+add\b|\bgit\s+commit\b')
 _READ_VERB = re.compile(r'\b(?:cat|head|tail|less)\s|\bsed\s+-n\b')
-_OPEN_VERB = re.compile(r'hq\.py\s+open\s+(\S+)')
+# A slug is one path component of letters, digits, '.', '_', and
+# '-', so the class ends the capture at shell punctuation and a
+# closing quote: `open demo; echo` arms on `demo`, not `demo;`.
+_OPEN_VERB = re.compile(r'hq\.py\s+open\s+["\']?([A-Za-z0-9._-]+)')
+# Notes:
+# - A quoted span is a mention of the open, not the command, only when
+#   the word owning the quote searches, edits, prints, or records text;
+#   a quote an executor owns - `bash -c`, `ssh`, `docker run` - runs
+#   it, and an unlisted owner arms, the benign side of the guess. The
+#   owner is a command word, never a flag: a `-m` belongs to docker
+#   and ssh as much as to git.
+# - A `$(` inside the span runs whatever follows it, whoever owns the
+#   quote.
+# - The owner is read from the span's own shell segment, past the last
+#   `;`, `|`, `&`, or newline, with earlier quoted spans blanked first,
+#   so an echo earlier on the line says nothing about a later `bash
+#   -c`, and a `|` inside an earlier argument does not cut the segment.
+_MENTION_VERB = re.compile(
+    r'\b(?:grep|rg|ag|ack|sed|awk|perl|echo|printf|git\s+commit)\b')
+_SEGMENT_SPLIT = re.compile(r'[;|&\n]')
 _TOKEN_SPLIT = re.compile(r'[\s\'"]+')
 
 
@@ -142,6 +161,10 @@ def scan_transcript(text: str) -> tuple[str, list[str], list[str]]:
     - A line that is not JSON, not an assistant record, or holds no
       tool_use block is skipped; a transcript truncated mid-write costs
       at most its last line.
+    - An ``hq.py open`` quoted under a word that searches, edits, prints,
+      or records text - a grep or sed on the phrase, a commit message -
+      is a mention and arms nothing; quoted under an executor such as
+      ``bash -c``, or inside a ``$(``, it is the command and arms.
     """
     slug = ''
     reads: list[str] = []
@@ -168,9 +191,15 @@ def scan_transcript(text: str) -> tuple[str, list[str], list[str]]:
                     reads.append(str(target))
             elif block.get('name') == 'Bash':
                 command = str(fields.get('command') or '')
-                opened = _OPEN_VERB.search(command)
-                if opened:
-                    slug = opened.group(1)
+                mention_spans = [
+                    m.span() for m in _QUOTED.finditer(command)
+                    if '$(' not in m.group(0)
+                    and _MENTION_VERB.search(_SEGMENT_SPLIT.split(
+                        _QUOTED.sub(' ', command[:m.start()]))[-1])
+                    ]
+                for opened in _OPEN_VERB.finditer(command):
+                    if not any(a <= opened.start() < b for a, b in mention_spans):
+                        slug = opened.group(1)
                 if _READ_VERB.search(command):
                     commands.append(command)
     return slug, reads, commands
