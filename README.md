@@ -17,7 +17,7 @@ room, that the conversation has grown expensive enough to hand off.
 ```
 
 The first command registers this repo as a plugin source (a
-"marketplace"); the second installs the warning hook and the `/handoff`
+"marketplace"); the second installs the hooks and the `/handoff`
 command from it. It needs `python3` on `PATH` and nothing else. The
 status line takes one manual step, described
 [below](#status-line-optional-one-manual-step).
@@ -163,7 +163,7 @@ compresses only the conversation, the part that was already smallest,
 and its summary plus preserved tail land the restart near 123K. A
 handoff file is 2-5K, exact rather than summarized, and starts a
 session that carries nothing else. Compact still earns its place
-mid-task, when the preserved tail - the messages you were part-way
+mid-task, when the preserved tail - the messages a session was part-way
 through - is worth paying for.
 
 Using it:
@@ -172,6 +172,8 @@ Using it:
 /handoff                       writes or updates the handoff, checks it
   (kill the session, start fresh)
 /handoff auth-token-refresh    reads that handoff back, resumes its plan
+/handoff list                  every handoff here, with plan progress
+/handoff check auth-token-refresh    re-reviews one in place
 ```
 
 (`auth-token-refresh` stands for whatever folder name the writing
@@ -182,17 +184,39 @@ session chose.)
   writes; one that only looked something up reads a handoff back
   instead. Where either the verb or the target is ambiguous, it lists
   the candidates and stops rather than guessing.
-- Run again a session later, it updates the same file in place: state
-  rewritten, plan ticked off, decisions and dead ends accumulated, the
-  prior version kept as `HANDOFF.prev.md`.
+- The folder outlives any one file. `scratch/<task-name>/` holds the
+  hand-written cursor - task, next step, plan, state, open questions -
+  in `HANDOFF.md`; an append-only ledger of the thread's artifacts in
+  `ledger.tsv` (which spec, draft, or notes file matters, and whether
+  it must be read before the next edit); the settled decisions,
+  constraints, and dead ends in `standing.md`, append-only; and every
+  finished cycle verbatim under `cycles/`. A small script, `hq.py`,
+  writes the ledger, renders the generated blocks of `HANDOFF.md` from
+  it, and refuses the two edits that lose work over many cycles:
+  lowering a spec's read obligation without naming its successor, and
+  rewriting a recorded line in place.
+- Run again a session later, it updates the same folder: the cursor
+  rewritten, the plan ticked off, decisions and dead ends appended,
+  the previous cycle archived. The read-time payload stays flat - a
+  hundred cycles in, the file is the size it was at cycle three -
+  because what is no longer live is counted, not printed.
 - Each write ends with a reviewer pass that must reconstruct the task
-  from the file alone; reading checks that the commits and line
-  references the file recorded still match the repo, then executes the
-  file's next step without re-litigating settled decisions.
-- `/handoff list` shows what exists with plan progress beside each;
-  `/handoff check` re-reviews one in place.
+  from the file alone. Reading starts with `hq.py open`, which reports
+  drift - a moved commit, a gated file edited since its stamp, a
+  heading an anchor no longer finds - then reads the spans the ledger
+  gates and executes the file's next step without re-litigating
+  settled decisions.
+- Two advisory hooks back it. On the first write after a handoff is
+  opened, a PreToolUse hook names each gated file the session has not
+  read, once per session. At the end of a turn, a Stop hook says so when
+  `HANDOFF.md` was written by hand since its last recorded cycle.
+  Neither blocks; `HQ_GATE=0` in the environment turns the first off.
+- `/handoff when`, `diff`, `artifacts`, and `standing` query the
+  ledger: one path's history, the cursor lines that changed between
+  two cycles, every live artifact, every standing item.
 
-Add `scratch/` to your gitignore if handoffs should stay untracked.
+`scratch/` belongs in the project's gitignore when handoffs should stay
+untracked.
 
 ## What you see
 
@@ -359,8 +383,9 @@ works.
 That updates the plugin source. The plugin itself runs from a copy
 taken at install time under `~/.claude/plugins/cache/`, so the clone is
 the source and the copy is what executes. There is no migration either
-way: the state under `~/.claude/cache/context-budget/` is rewritten
-every turn, and handoff files are plain markdown.
+way: the state under `~/.claude/cache/context-budget/` is per session
+and disposable, and handoff folders are plain markdown and tab-separated
+text.
 
 ## Uninstall
 
@@ -371,18 +396,23 @@ every turn, and handoff files are plain markdown.
 
 Two things outlive it: the `statusLine` block above (remove it from
 settings.json) and the cache directory
-(`rm -rf ~/.claude/cache/context-budget`). Handoffs under `scratch/` are
-yours, not the plugin's.
+(`rm -rf ~/.claude/cache/context-budget`). Handoffs under `scratch/`
+belong to the project, not the plugin.
 
 ## Development
 
 ```
-python3 -m pytest tests/ -q
+python3 -m pytest -q
+poetry run mutmut run
 ```
 
-State lives in `~/.claude/cache/context-budget/<session>.json` and is
-safe to delete; the next turn rewrites it. The README's charts are
-generated by `python3 docs/charts.py`.
+The suite runs under python3.11 and python3; mutmut mutates `hq.py` and
+the two handoff hooks against the tests `pyproject.toml` selects, with
+results under `mutants/`. State lives under
+`~/.claude/cache/context-budget/`: `<session>.json` for the gauge,
+`<session>.handoff.json` for the two handoff hooks, and
+`hq-reads-<session>.txt` for read receipts; all of it is safe to delete.
+The README's charts are generated by `python3 docs/charts.py`.
 
 ## License
 
