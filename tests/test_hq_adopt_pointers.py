@@ -5,6 +5,7 @@ HANDOFF rule.
 
 import pathlib
 
+import pytest
 from scripts import hq
 
 _SLUG = 'ptr-test'
@@ -21,7 +22,9 @@ _CURSOR = (
 )
 
 
-def _root(tmp_path, monkeypatch, slug=_SLUG):
+def _root(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, slug: str = _SLUG,
+) -> pathlib.Path:
     """Create HQ_ROOT and set required env vars.
     """
     root = pathlib.Path(tmp_path) / 'root'
@@ -38,7 +41,9 @@ def _root(tmp_path, monkeypatch, slug=_SLUG):
     return folder
 
 
-def _handoff(folder, key_files='', cycle=3, extra=''):
+def _handoff(
+    folder: pathlib.Path, key_files: str = '', cycle: int = 3, extra: str = '',
+) -> str:
     """Write a conforming HANDOFF.md with an optional Key files section.
     """
     text = (
@@ -53,13 +58,13 @@ def _handoff(folder, key_files='', cycle=3, extra=''):
     return text
 
 
-def _ledger(folder):
+def _ledger(folder: pathlib.Path) -> list[dict]:
     """Return ledger rows as a list of dicts.
     """
     return hq._read_tsv(folder / 'ledger.tsv', hq.LEDGER_FIELDS)
 
 
-def _manifest(folder):
+def _manifest(folder: pathlib.Path) -> list[dict]:
     """Return manifest rows as a list of dicts.
     """
     return hq._read_tsv(

@@ -53,6 +53,15 @@ MANIFEST_FIELDS = [
 _LEDGER_HEADER = '\t'.join(LEDGER_FIELDS)
 _MANIFEST_HEADER = '\t'.join(MANIFEST_FIELDS)
 _SKIP_NAMES = {'HANDOFF.md', 'ledger.tsv', 'standing.md', 'cycles', '.hq.lock'}
+# Notes:
+# - A grading label under Key files may be written as its own heading;
+#   there it is structure and stays in the section rather than opening
+#   one, for the adopt parser and for conservation alike.
+# - A label may carry a clause, `Read now, under x/ unless noted:`, and
+#   is structure when the whole line ends with a colon.
+_KF_LABEL_PAT = re.compile(
+    r'^\s*(?:[-*+]\s+|#+\s*)?(read now|reference only)\b(?:[^\n]*:)?\s*$',
+    re.IGNORECASE)
 _SNAPSHOT_PATS = ['*.pre-*', '*.prev.*', '*.orig.*', '*.bak']
 _SPEC_PATS = ['SPEC*', 'DESIGN*', 'PROPOSAL*', '*-DECLARATION*']
 _DRAFT_EXTS = {'.py', '.sql', '.js', '.ts', '.ps1'}
@@ -301,6 +310,11 @@ def check_r3(rows: list[Row], sha_by_path: dict[str, str]) -> list[Row]:
     list[Row]
         Live rows with ``read_before`` in {always, edit} where the file's
         current sha differs from the stored ``sha12``.
+
+    Notes
+    -----
+    - A current sha of ``-`` means the file could not be hashed - a
+      directory, or a file the process cannot read - and is not a move.
     """
     live = latest_rows(rows)
     result = []
@@ -308,7 +322,7 @@ def check_r3(rows: list[Row], sha_by_path: dict[str, str]) -> list[Row]:
         if row['status'] != 'live' or row['read_before'] not in _GATE_RB:
             continue
         current = sha_by_path.get(path, '')
-        if current and row['sha12'] not in {'-', current}:
+        if current and current != '-' and row['sha12'] not in {'-', current}:
             result.append(row)
     return result
 
@@ -877,6 +891,7 @@ def conservation(
         s = _standing_prefix.sub('- ', s)
         s = re.sub(r'^#+\s*', '', s)
         s = re.sub(r'^[-*+]\s+', '', s)
+        s = re.sub(r'^\d+[.)]\s+', '', s)
         s = re.sub(r'^unfiled:\s+', '', s)
         s = s.replace('**', '').replace('`', '')
         # Notes:
@@ -902,7 +917,9 @@ def conservation(
     section_content: dict[str, list[str]] = {}
     current_heading: str | None = None
     for raw in orig_lines:
-        if raw.lstrip().startswith('#'):
+        if raw.lstrip().startswith('#') and not (
+                current_heading == 'Key files'
+                and _KF_LABEL_PAT.match(raw)):
             current_heading = _normalize(raw)
             section_content.setdefault(current_heading, [])
         elif current_heading is not None and raw.strip():
@@ -914,11 +931,18 @@ def conservation(
         return any(c and c in union_text for c in section_content.get(norm_heading, []))
 
     result = []
+    in_key_files = False
     for ln in orig_lines:
         if not ln.strip():
             continue
         if ln.strip().startswith('Written:'):
             continue
+        is_heading = ln.lstrip().startswith('#')
+        # A heading-form grade label is structure only under Key files;
+        # anywhere else a heading adopt drops is a lost line.
+        kf_label = in_key_files and bool(_KF_LABEL_PAT.match(ln.lstrip()))
+        if is_heading and not kf_label:
+            in_key_files = _normalize(ln) == 'Key files'
         norm = _normalize(ln)
         if not norm:
             # Only a bare grade label normalizes to nothing and is
@@ -930,7 +954,7 @@ def conservation(
             continue
         if norm in union_text:
             continue
-        if ln.lstrip().startswith('#') and _heading_covered(norm):
+        if is_heading and (kf_label or _heading_covered(norm)):
             continue
         result.append(ln)
     return result
@@ -1015,7 +1039,10 @@ def _resolve_root(argv: argparse.Namespace) -> pathlib.Path:
     """
     root = getattr(argv, 'root', None) or os.environ.get('HQ_ROOT')
     if root:
-        root_path = pathlib.Path(root)
+        try:
+            root_path = pathlib.Path(root).expanduser()
+        except RuntimeError:
+            root_path = pathlib.Path(root)
         if root_path.exists() and not root_path.is_dir():
             print(f'hq: root is not a directory: {root_path}')
             sys.exit(2)
@@ -1199,7 +1226,7 @@ def _find_folder(
     - Nothing here writes: a read-only verb on a mistyped root leaves
       the disk as it found it, and ``begin`` creates the folder itself.
     """
-    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', slug):
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', slug) or '..' in slug:
         print(f'hq: invalid slug {slug!r}')
         sys.exit(2)
     scratch = root / 'scratch'
@@ -1278,13 +1305,17 @@ def _walk_folder(folder: pathlib.Path) -> list[tuple[str, str]]:
 
 
 def _read_lock(folder: pathlib.Path) -> dict[str, str]:
-    """Read .hq.lock as a key=value dict; return {} when absent.
+    """Read .hq.lock as a key=value dict; return {} when absent or unreadable.
     """
     lock_path = folder / '.hq.lock'
     if not lock_path.exists():
         return {}
+    try:
+        text = lock_path.read_text(encoding='utf-8')
+    except OSError:
+        return {}
     result: dict[str, str] = {}
-    for line in lock_path.read_text(encoding='utf-8').splitlines():
+    for line in text.splitlines():
         if '=' in line:
             k, _, v = line.partition('=')
             result[k.strip()] = v.strip()
@@ -1888,17 +1919,10 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         if cur_h2:
             sections_raw.setdefault(cur_h2, []).extend(cur_body)
 
-    # A grading label may be written as its own heading; under Key files
-    # it is structure and stays in that section rather than opening one.
-    # A label may carry a clause like `Read now, under x/ unless noted:`
-    # and is structure when the whole line ends with a colon.
-    kf_label_pat = re.compile(
-        r'^\s*(?:[-*+]\s+|#+\s*)?(read now|reference only)\b(?:[^\n]*:)?\s*$',
-        re.IGNORECASE)
     header_text = parsed.get('header') or ''
     for line in text.splitlines():
         if line.startswith('## ') and not (
-                cur_h2 == 'Key files' and kf_label_pat.match(line)):
+                cur_h2 == 'Key files' and _KF_LABEL_PAT.match(line)):
             _flush_section()
             cur_h2 = line[3:].strip()
             cur_body = []
@@ -2045,7 +2069,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         return (folder / clean).exists() or (folder.parent.parent / clean).exists()
 
     for line in sections_raw.get('Key files', []):
-        gm = kf_label_pat.match(line)
+        gm = _KF_LABEL_PAT.match(line)
         bm = re.match(r'^\s*[-*+]\s+(`[^`]+`|\S+)\s*(.*)', line)
         if gm:
             _flush_kf_pointer(kf_path_token, kf_free_text, kf_group, kf_raw_text)
@@ -2370,6 +2394,82 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     return 0
 
 
+def _lock_age(lock: dict[str, str], now: str) -> float | None:
+    """Return a lock's age in seconds, or None when its time does not parse.
+
+    Parameters
+    ----------
+    lock : dict[str, str]
+        The parsed lock fields; ``time`` is the ISO timestamp it was
+        written at.
+    now : str
+        The current ISO timestamp.
+
+    Returns
+    -------
+    float | None
+        Seconds from the lock's time to ``now``; None for a lock with no
+        parseable time, which is how an unreadable lock arrives.
+
+    Notes
+    -----
+    - Both times are compared as naive local time; an aware value is
+      converted first, since a lock written on the other synced host
+      may carry an offset.
+    """
+    now_dt = datetime.datetime.fromisoformat(now)
+    if now_dt.tzinfo is not None:
+        now_dt = now_dt.astimezone().replace(tzinfo=None)
+    try:
+        lock_time = datetime.datetime.fromisoformat(lock.get('time', ''))
+    except ValueError:
+        return None
+    if lock_time.tzinfo is not None:
+        lock_time = lock_time.astimezone().replace(tzinfo=None)
+    return (now_dt - lock_time).total_seconds()
+
+
+def _lock_refusal(folder: pathlib.Path, anch: dict, force: bool) -> str:
+    """Return the line that refuses begin for a foreign lock, or ''.
+
+    Parameters
+    ----------
+    folder : pathlib.Path
+        Handoff folder the lock sits in.
+    anch : dict
+        Anchors for this invocation; supplies session and time.
+    force : bool
+        True when ``--force`` was given; every lock then passes.
+
+    Returns
+    -------
+    str
+        The refusal line to print, or '' when begin may proceed.
+
+    Notes
+    -----
+    - An absent lock, this session's own lock, and a foreign lock older
+      than two hours pass.
+    - A lock that cannot be read or parsed refuses, so a takeover of it
+      is always explicit.
+    """
+    lock_path = folder / '.hq.lock'
+    if force or not lock_path.exists():
+        return ''
+    lock = _read_lock(folder)
+    if lock.get('session') == anch['session']:
+        return ''
+    age = _lock_age(lock, anch['now'])
+    if age is None:
+        return 'hq begin: lock file unreadable; use --force to take over'
+    if age < _TWO_HOURS:
+        return (
+            f'hq begin: lock held by {lock.get("session")} on'
+            f' {lock.get("host")} since {lock.get("time")};'
+            ' use --force to take over')
+    return ''
+
+
 def _take_lock(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int:
     """Acquire .hq.lock, refusing a young or unreadable foreign lock.
 
@@ -2395,9 +2495,8 @@ def _take_lock(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     - A lock this session already holds is rewritten, carrying its
       ``takeover`` forward, so a second begin still reaches finish with
       the takeover recorded.
-    - Both times are compared as naive local time; an aware value is
-      converted first, since a lock written on the other synced host
-      may carry an offset.
+    - A lock taken over but not writable is replaced whole, so a lock
+      whose permissions were lost cannot hold the folder forever.
     """
     lock_path = folder / '.hq.lock'
     session = anch['session']
@@ -2410,35 +2509,17 @@ def _take_lock(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         created = False
     takeover_from = ''
     if not created:
+        refusal = _lock_refusal(folder, anch, force)
+        if refusal:
+            print(refusal)
+            return 1
         lock = _read_lock(folder)
         if lock.get('session') == session:
             takeover_from = lock.get('takeover', '')
         else:
-            now_dt = datetime.datetime.fromisoformat(anch['now'])
-            if now_dt.tzinfo is not None:
-                now_dt = now_dt.astimezone().replace(tzinfo=None)
-            try:
-                lock_time = datetime.datetime.fromisoformat(lock.get('time', ''))
-                if lock_time.tzinfo is not None:
-                    lock_time = lock_time.astimezone().replace(tzinfo=None)
-                age = (now_dt - lock_time).total_seconds()
-            except ValueError:
-                age = None
-            if not lock.get('session') or age is None:
-                if not force:
-                    print('hq begin: lock file unreadable; use --force to take over')
-                    return 1
-                takeover_from = lock.get('session') or 'unknown'
-                print(f'hq begin: took over from {takeover_from}')
-            else:
-                if age < _TWO_HOURS and not force:
-                    print(
-                        f'hq begin: lock held by {lock.get("session")} on'
-                        f' {lock.get("host")} since {lock.get("time")};'
-                        ' use --force to take over')
-                    return 1
-                takeover_from = lock['session']
-                print(f'hq begin: took over from {takeover_from}')
+            takeover_from = lock.get('session') or 'unknown'
+            print(f'hq begin: took over from {takeover_from}')
+            if _lock_age(lock, anch['now']) is not None:
                 print(
                     f'cycle {lock.get("cycle")} begun by {takeover_from}'
                     f' on {lock.get("host")} at {lock.get("time")},'
@@ -2457,7 +2538,11 @@ def _take_lock(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         with os.fdopen(fd, 'w', encoding='utf-8') as fh:
             fh.write(content)
     else:
-        lock_path.write_text(content, encoding='utf-8')
+        try:
+            lock_path.write_text(content, encoding='utf-8')
+        except PermissionError:
+            lock_path.unlink()
+            lock_path.write_text(content, encoding='utf-8')
 
     # A hand edit since the last finish or adopt: HANDOFF.md no longer
     # hashes to what that write recorded in its manifest row. The row,
@@ -2584,6 +2669,10 @@ def _verb_begin(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             _MANIFEST_HEADER + '\n', encoding='utf-8')
         print(f'hq begin: created {folder}')
     elif (folder / 'HANDOFF.md').exists() and not (folder / 'ledger.tsv').exists():
+        refusal = _lock_refusal(folder, anch, getattr(argv, 'force', False))
+        if refusal:
+            print(refusal)
+            return 1
         rc = _verb_adopt(folder, anch, argv)
         if rc != 0:
             return rc
@@ -2628,6 +2717,9 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
     stored_path, path_obj, base = _stored_path(folder, path)
     prev = live.get(stored_path, {})
     is_dir = path_obj.is_dir()
+    if not is_dir and path_obj.exists() and not path_obj.is_file():
+        print(f'hq stamp: {path} is not a regular file or directory')
+        return 2
     first_heading = ''
     if not is_dir and path_obj.exists():
         try:
@@ -3489,7 +3581,8 @@ def _verb_diff(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         n_cut = len(out) - 60
         out = out[:60]
         out.append(f'... {n_cut} lines omitted')
-    print('\n'.join(out))
+    if out:
+        print('\n'.join(out))
     return 0
 
 
@@ -3699,27 +3792,33 @@ def main(argv: list[str]) -> int:
         return 2
     if is_note_body:
         args.body = ' '.join([getattr(args, 'body', None) or ''] + leftover).strip()
-    root = _resolve_root(args)
-    slug = getattr(args, 'slug', '')
-    verb = args.verb
-    is_begin = verb == 'begin'
-    folder = _find_folder(root, slug, missing_ok=is_begin)
-    anch = anchors(folder, args)
-    dispatch = {
-        'adopt': _verb_adopt,
-        'begin': _verb_begin,
-        'stamp': _verb_stamp,
-        'note': _verb_note,
-        'supersede': _verb_supersede,
-        'finish': _verb_finish,
-        'open': _verb_open,
-        'read': _verb_read,
-        'when': _verb_when,
-        'diff': _verb_diff,
-        'artifacts': _verb_artifacts,
-        'standing': _verb_standing,
-        }
-    return dispatch[verb](folder, anch, args)
+    try:
+        root = _resolve_root(args)
+        slug = getattr(args, 'slug', '')
+        verb = args.verb
+        is_begin = verb == 'begin'
+        folder = _find_folder(root, slug, missing_ok=is_begin)
+        anch = anchors(folder, args)
+        dispatch = {
+            'adopt': _verb_adopt,
+            'begin': _verb_begin,
+            'stamp': _verb_stamp,
+            'note': _verb_note,
+            'supersede': _verb_supersede,
+            'finish': _verb_finish,
+            'open': _verb_open,
+            'read': _verb_read,
+            'when': _verb_when,
+            'diff': _verb_diff,
+            'artifacts': _verb_artifacts,
+            'standing': _verb_standing,
+            }
+        return dispatch[verb](folder, anch, args)
+    except OSError as exc:
+        path = exc.filename or '?'
+        reason = exc.strerror or type(exc).__name__
+        print(f'hq: cannot access {path}: {reason}')
+        return 1
 
 
 if __name__ == '__main__':

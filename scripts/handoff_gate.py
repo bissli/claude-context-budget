@@ -86,6 +86,27 @@ def bash_writes(command: str) -> bool:
     """
     if 'hq.py' in command:
         return False
+    text = _QUOTED.sub(' ', _strip_heredocs(command))
+    text = _FD_REDIRECT.sub(' ', text)
+    text = _NULL_REDIRECT.sub(' ', text)
+    if '>' in text:
+        return True
+    return bool(_INPLACE.search(text) or _WRITE_VERB.search(text))
+
+
+def _strip_heredocs(command: str) -> str:
+    """Return the command with every heredoc body removed.
+
+    Parameters
+    ----------
+    command : str
+        The command line as sent in ``tool_input.command``.
+
+    Returns
+    -------
+    str
+        The command's own lines, each heredoc body dropped.
+    """
     kept: list[str] = []
     delimiter = ''
     for line in command.splitlines():
@@ -97,12 +118,7 @@ def bash_writes(command: str) -> bool:
         opener = _HEREDOC.search(line)
         if opener:
             delimiter = opener.group(1)
-    text = _QUOTED.sub(' ', '\n'.join(kept))
-    text = _FD_REDIRECT.sub(' ', text)
-    text = _NULL_REDIRECT.sub(' ', text)
-    if '>' in text:
-        return True
-    return bool(_INPLACE.search(text) or _WRITE_VERB.search(text))
+    return '\n'.join(kept)
 
 
 def scan_transcript(text: str) -> tuple[str, list[str], list[str]]:
@@ -261,8 +277,25 @@ def gate(payload: dict[str, Any]) -> int:
                 if entry.is_dir() and entry.name.startswith(slug)
                 ]
             folder = matches[0] if len(matches) == 1 else None
+    # Notes:
+    # - A write inside the folder is the handoff's own bookkeeping, so
+    #   the folder is exempt as a write target and never as a read
+    #   source: the prefix must follow a redirect, an in-place edit, or
+    #   a write verb.
+    # - A quoted target keeps its text while a quoted operator loses
+    #   its angle brackets, so `> "scratch/x/f"` counts as a write into
+    #   the folder and `grep '>' scratch/x/f > out` does not.
     if folder is not None and f'scratch/{folder.name}/' in command:
-        folder = None
+        text = _QUOTED.sub(
+            lambda m: re.sub(r'[<>]', ' ', m.group(0)[1:-1]),
+            _strip_heredocs(command))
+        text = _NULL_REDIRECT.sub(' ', _FD_REDIRECT.sub(' ', text))
+        prefix = f'scratch/{folder.name}/'
+        operator_ends = [m.end() for m in re.finditer(r'>>?', text)]
+        operator_ends += [m.end() for m in _INPLACE.finditer(text)]
+        operator_ends += [m.end() for m in _WRITE_VERB.finditer(text)]
+        if any(prefix in text[end:] for end in operator_ends):
+            folder = None
 
     message = ''
     reported = False

@@ -1,0 +1,128 @@
+"""Conservation on numbered standing items and heading-form Key files
+labels.
+"""
+
+import pathlib
+
+import pytest
+from scripts import hq
+
+_SLUG = 'cons-test'
+_NOW = '2026-09-10T09:00:00'
+_SESSION = 'session-cons'
+_HOST = 'test-host'
+
+_CURSOR = (
+    '## Task\n\nDo the task.\n\n'
+    '## Now\n\nNext step.\n\n'
+    '## Plan\n\nPlan line.\n\n'
+    '## State\n\nState line.\n\n'
+    '## Environment\n\nEnv line.\n\n'
+    '## Open questions\n\nNone.\n'
+)
+
+
+def _setup(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, slug: str = _SLUG,
+) -> pathlib.Path:
+    """Create HQ_ROOT and set env vars; return the handoff folder path.
+    """
+    root = pathlib.Path(tmp_path) / 'root'
+    root.mkdir(exist_ok=True)
+    monkeypatch.setenv('HQ_ROOT', str(root))
+    monkeypatch.setenv('HQ_NOW', _NOW)
+    monkeypatch.setenv('HQ_SESSION', _SESSION)
+    monkeypatch.setenv('HQ_HOST', _HOST)
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
+    monkeypatch.setenv('HQ_GIT', '0')
+    monkeypatch.delenv('HQ_CYCLE', raising=False)
+    folder = root / 'scratch' / slug
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _write_handoff(
+    folder: pathlib.Path, extra_sections: str = '', cycle: int = 3,
+) -> None:
+    """Write a conforming HANDOFF.md with the cursor and extra sections.
+    """
+    text = (
+        f'# Handoff: {folder.name}\n\n'
+        f'Written: 2026-09-01 | Cycle: {cycle}\n\n'
+        + _CURSOR
+        + extra_sections
+    )
+    (folder / 'HANDOFF.md').write_text(text, encoding='utf-8')
+
+
+def test_conservation_numbered_decisions_carried(tmp_path, monkeypatch, capsys):
+    r"""A numbered Decisions item is reported carried after adopt.
+
+    Mutation: _normalize missing the r'^\\d+[.)]\\s+' substitution, leaving
+    '1. Choose Postgres...' unstripped while standing.md has 'Choose
+    Postgres...' - the two never match.
+    Oracle: 'conservation: every original line carried' in stdout after adopt
+    on a HANDOFF.md whose Decisions section holds a numbered bold item.
+    """
+    folder = _setup(tmp_path, monkeypatch)
+    _write_handoff(
+        folder,
+        extra_sections=(
+            '\n## Decisions\n\n'
+            '1. **Choose Postgres** The database.\n\n'
+            '## Constraints\n\n'
+            '1. Must run on Linux.\n\n'
+            '## Dead ends\n\n'
+            '2. NoSQL was too slow.\n'
+        ),
+    )
+    rc = hq.main(['adopt', _SLUG])
+    out, _ = capsys.readouterr()
+    assert rc == 0
+    assert 'conservation: every original line carried' in out
+
+
+def test_conservation_kf_label_heading_carried(tmp_path, monkeypatch, capsys):
+    """A heading-form grade label under Key files is reported carried.
+
+    Mutation: section_content builder missing the kf_label guard, so a
+    '## Read now:' heading opens a new section and Key files gets no content
+    lines - _heading_covered returns False, reporting the heading as missing.
+    Oracle: 'conservation: every original line carried' in stdout after adopt
+    on a HANDOFF.md with '## Read now:' inside the Key files section.
+    """
+    folder = _setup(tmp_path, monkeypatch)
+    _write_handoff(
+        folder,
+        extra_sections=(
+            '\n## Key files\n\n'
+            '## Read now:\n'
+            '- some-file.py core implementation\n\n'
+            '## Read now, under src/ unless noted:\n'
+            '- other-file.py secondary module\n'
+        ),
+    )
+    rc = hq.main(['adopt', _SLUG])
+    out, _ = capsys.readouterr()
+    assert rc == 0
+    assert 'conservation: every original line carried' in out
+
+
+def test_conservation_reports_a_label_heading_outside_key_files(
+        tmp_path, monkeypatch, capsys):
+    """A heading shaped like a grade label outside Key files is reported lost.
+
+    Mutation: the label suppression applied to every heading, so an empty
+    'Reference only, ...:' section that adopt drops passes conservation.
+    Oracle: 'conservation: 1 original lines not carried' with that heading
+    named under 'not carried:'.
+    """
+    folder = _setup(tmp_path, monkeypatch)
+    _write_handoff(
+        folder,
+        extra_sections='\n## Reference only, until the audit clears the ledger:\n')
+    rc = hq.main(['adopt', _SLUG])
+    out, _ = capsys.readouterr()
+    assert rc == 0
+    assert 'conservation: 1 original lines not carried' in out
+    assert 'not carried: ## Reference only, until the audit clears' in out

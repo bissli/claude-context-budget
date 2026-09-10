@@ -82,6 +82,8 @@ def report(payload: dict[str, Any]) -> int:
         if not rows:
             continue
         current = hq._sha12_path(handoff)
+        if current == '-':
+            continue
         if current == rows[-1]['handoff_sha']:
             continue
         drifted.append((folder.name, current, rows[-1]['cycle']))
