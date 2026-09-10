@@ -3481,19 +3481,20 @@ def _verb_read(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     - The spans print before the receipt is written, so a state directory
       the receipt cannot reach costs the caller the exit code, never
       the content it asked for.
+    - The path keys as ``stamp`` stores it and the file opens where that
+      token resolves, so a ``~`` row is found by its expansion and a
+      folder row by any spelling; the receipt carries the stored path,
+      which is what the gate matches.
     - A ``/`` in the session id becomes ``_``: the id names one receipt
       file, not a path under the state directory.
     """
     path = getattr(argv, 'path', '')
+    stored_path, file_path, _ = _stored_path(folder, path)
     rows = _read_tsv(folder / 'ledger.tsv', LEDGER_FIELDS)
-    row = latest_rows(rows).get(path)
+    row = latest_rows(rows).get(stored_path)
     if not row:
         print(f'hq read: {path} not in ledger')
         return 1
-    if row['base'] == 'abs':
-        file_path = pathlib.Path(path).expanduser()
-    else:
-        file_path = folder / path
     if not file_path.exists():
         print(f'hq read: {path} not on disk')
         return 1
@@ -3514,7 +3515,7 @@ def _verb_read(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         state_path.mkdir(parents=True, exist_ok=True)
         receipt_path = state_path / f'hq-reads-{session_name}.txt'
         with receipt_path.open('a', encoding='utf-8') as fh:
-            fh.write(f'{anch["now"]} {folder.name} {path}\n')
+            fh.write(f'{anch["now"]} {folder.name} {stored_path}\n')
     except OSError as exc:
         print(f'hq read: receipt not written: {exc}')
         return 1
@@ -3537,10 +3538,17 @@ def _verb_when(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     -------
     int
         0 always; prints up to 30 rows, oldest first.
+
+    Notes
+    -----
+    - The path keys as ``stamp`` stores it, so every spelling of one
+      file - ``~``, its expansion, a dotted folder path - shows one
+      history.
     """
     path = getattr(argv, 'path', '')
+    stored_path = _stored_path(folder, path)[0]
     rows = _read_tsv(folder / 'ledger.tsv', LEDGER_FIELDS)
-    matching = [r for r in rows if r['path'] == path]
+    matching = [r for r in rows if r['path'] == stored_path]
     omitted = len(matching) - 30
     for row in matching[-30:]:
         print('\t'.join([row['path'], row['cycle'], row['status'], row['read_before'],

@@ -765,10 +765,12 @@ Resume: kill this session, start a fresh one, run
      numbers are stale; the printed spans are current.
 3. Read `HANDOFF.md`. Then, for each line of the `## Read first`
    block, run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py read <slug>
-   <path>`: it prints the resolved span (or the whole file when the
-   row has no anchor) and records the read. A `? unresolved: <anchor>`
-   line follows the spans that did resolve, one per anchor that did
-   not; when nothing else printed, read that file whole. `hq read:
+   <path>`, the path in any spelling `stamp` accepts - the block's `~`
+   form or its expansion: it prints the resolved span (or the whole
+   file when the row has no anchor) and records the read. A
+   `? unresolved: <anchor>` line follows the spans that did resolve,
+   one per anchor that did not; when nothing else printed, read that
+   file whole. `hq read:
    <path> not in ledger` means the path was
    never stamped - read it whole by hand; `hq read: <path> not on
    disk` means it is gone; `hq read: receipt not written: <error>`

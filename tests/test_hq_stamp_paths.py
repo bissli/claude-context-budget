@@ -397,3 +397,42 @@ def test_an_absolute_token_inside_the_folder_is_stored_relative(
     rows = _rows(folder)
     assert [(r['path'], r['base']) for r in rows] == [
         ('sub/DESIGN.md', 'folder')] * 2
+
+
+def test_read_and_when_find_a_row_by_any_spelling_of_its_path(
+        tmp_path, monkeypatch, capsys):
+    """Read and when key on the stored path, and the receipt carries it.
+
+    Mutation: the lookup, the disk path, or the receipt taking the
+    argument as typed, so an unquoted ``~`` the shell expanded prints
+    ``not in ledger``, ``sub/../SPEC.md`` with no ``sub/`` prints ``not
+    on disk``, and a receipt under the expanded path never credits the
+    read to the gate.
+    Oracle: the row stamped as ``~/repo/auth.py``; the receipt file
+    hand-written as ``<now> <slug> ~/repo/auth.py`` then ``... SPEC.md``.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    home = pathlib.Path(tmp_path) / 'home'
+    (home / 'repo').mkdir(parents=True)
+    monkeypatch.setenv('HOME', str(home))
+    (home / 'repo' / 'auth.py').write_text('x = 1\n')
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
+    assert hq.main(['stamp', _SLUG, '~/repo/auth.py']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC.md']) == 0
+    expanded = str(home / 'repo' / 'auth.py')
+    capsys.readouterr()
+
+    assert hq.main(['read', _SLUG, expanded]) == 0
+    assert capsys.readouterr().out == 'x = 1\n'
+    assert hq.main(['read', _SLUG, 'sub/../SPEC.md']) == 0
+    assert capsys.readouterr().out == '# Spec\n\nContent.\n'
+    assert hq.main(['when', _SLUG, expanded]) == 0
+    when_lines = capsys.readouterr().out.splitlines()
+    assert [ln.split('\t')[0] for ln in when_lines] == ['~/repo/auth.py']
+
+    receipts = (pathlib.Path(tmp_path) / f'hq-reads-{_SESSION}.txt')
+    assert receipts.read_text().splitlines() == [
+        f'{_NOW} {_SLUG} ~/repo/auth.py',
+        f'{_NOW} {_SLUG} SPEC.md',
+        ]
