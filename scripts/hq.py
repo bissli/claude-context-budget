@@ -890,15 +890,14 @@ def conservation(
     - Whitespace runs collapse on both sides, so a line re-spaced in the
       union still passes.
     - ``labels`` may carry any extra union text; adoption passes the
-      legacy Log lines it moved into the manifest row and, for the
-      ``HANDOFF.orig.md`` line, the text of every live notes row and
-      every row graded ``edit``.
+      legacy Log lines and the wrapped header's tail it moved into the
+      manifest row and, for the ``HANDOFF.orig.md`` line, the text of
+      every live notes row and every row graded ``edit``.
     - A heading is covered when its normalized text is in the union OR
       when at least one content line from its section is in the union,
       so drained sections whose bullets moved to standing are not
       reported as missing.
-    - The ``Written:`` header and the lines that continue it up to the
-      next blank line or heading are the script's, and never reported.
+    - The ``Written:`` header line is the script's, and never reported.
     """
     _standing_prefix = re.compile(r'^- \[[dcx]\d+\] \(c\d+\) ')
     _kf_grade = re.compile(r'^(read now|reference only)\s*:\s*', re.IGNORECASE)
@@ -961,21 +960,12 @@ def conservation(
 
     result = []
     in_key_files = False
-    in_header = False
     for ln in orig_lines:
         if not ln.strip():
-            in_header = False
             continue
-        # The header paragraph runs from the Written: line to the next
-        # blank line or heading; the script rewrites all of it.
         if ln.strip().startswith('Written:'):
-            in_header = True
             continue
         is_heading = ln.lstrip().startswith('#')
-        if is_heading:
-            in_header = False
-        if in_header:
-            continue
         # A heading-form grade label is structure only under Key files;
         # anywhere else a heading adopt drops is a lost line.
         kf_label = in_key_files and bool(_KF_LABEL_PAT.match(ln.lstrip()))
@@ -1982,6 +1972,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     # --- Collect sections (single pass) ---
     sections_raw: dict[str, list[str]] = {}
     preamble: list[str] = []
+    header_tail: list[str] = []
     cur_h2 = ''
     cur_body: list[str] = []
 
@@ -2003,12 +1994,15 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             cur_body.append(line)
         elif not cur_h2:
             # The header is a paragraph: a `Written:` line wrapped at the
-            # column runs on to the next blank line or heading, and the
-            # script rewrites the whole of it at finish.
+            # column runs on to the next blank line or heading. The
+            # script rewrites the header at finish, so the tail rides in
+            # the manifest note rather than the cursor.
             if line.strip() == header_text.strip():
                 in_header = True
             elif not line.strip() or line.startswith('#'):
                 in_header = False
+            elif in_header:
+                header_tail.append(line.strip())
             if line.strip() and not line.startswith('# ') and not in_header:
                 preamble.append(line.strip())
     _flush_section()
@@ -2419,13 +2413,15 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         else:
             legacy_items.append(ln.strip())
     adopt_log = 'adopted'
-    adopt_note = '-'
     if legacy_log:
         adopt_log = (
             f'adopted; prior Log: {len(legacy_log)} lines'
             f' in cycles/c{cycle:02d}.md'
         )
-        adopt_note = ' | '.join(legacy_items)
+    note_items = legacy_items
+    if header_tail:
+        note_items = [f'header: {" ".join(header_tail)}'] + legacy_items
+    adopt_note = ' | '.join(note_items) or '-'
     # The row adopt appends belongs in the Log it renders, the same way
     # finish renders its own row; the file would otherwise carry an
     # empty ## Log the cycle it was adopted.
@@ -2499,7 +2495,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     witnessed = witnessed_pairs(
         seeded_records, {path: row['label'] for path, row in fresh_live.items()})
     not_carried = conservation(
-        text, union_cursor, union_standing, seeded_labels + witnessed + legacy_log)
+        text, union_cursor, union_standing,
+        seeded_labels + witnessed + legacy_log + header_tail)
     if not_carried:
         print(f'conservation: {len(not_carried)} original lines not carried')
         for line in not_carried:
@@ -2529,7 +2526,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         orig_missing = conservation(
             orig_path.read_text(encoding='utf-8-sig', errors='replace'),
             union_cursor, union_standing,
-            seeded_labels + witnessed + legacy_log + sibling_texts)
+            seeded_labels + witnessed + legacy_log + header_tail + sibling_texts)
         if orig_missing:
             print(f'conservation vs HANDOFF.orig.md: {len(orig_missing)} lines not carried')
             for line in orig_missing:

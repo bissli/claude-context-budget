@@ -257,7 +257,10 @@ How to read the generated blocks:
   first line reads `adopted`, or `adopted; prior Log: N lines in
   cycles/cNN.md` when the file had a Log; the archived file holds those
   lines, and the manifest row's `note` field carries them, each wrapped
-  item joined back onto one line, separated by ` | `.
+  item joined back onto one line, separated by ` | `. A `Written:`
+  header wrapped over several lines - the lines under it up to the next
+  blank line or heading - puts that tail first, as one `header: <text>`
+  item, since `finish` rewrites the header from the git state.
 
 Rules:
 
@@ -699,13 +702,14 @@ Converge the form, destroy no content, in this order:
    original lines not carried` with one `not carried: <line>` line under
    it per missing line, each printed whole - text of the file `adopt`
    read that reached neither the cursor, nor `standing.md`, nor a
-   label. Where `HANDOFF.orig.md` exists a second line measures the hand
-   rewrite against it, counting a line rehomed into a live notes sibling
-   or any row graded `edit` as carried: `conservation vs HANDOFF.orig.md:
-   N lines not carried` (or `conservation vs HANDOFF.orig.md: every line
-   carried`), with the same `not carried:` lines under it. Rehome each
-   not-carried line - a typed `## Unfiled` bullet, a cursor section, or
-   a stamped sibling - and settle each label with a `stamp` in step 3.
+   label, nor the manifest row's `note`. Where `HANDOFF.orig.md` exists
+   a second line measures the hand rewrite against it, counting a line
+   rehomed into a live notes sibling or any row graded `edit` as
+   carried: `conservation vs HANDOFF.orig.md: N lines not carried` (or
+   `conservation vs HANDOFF.orig.md: every line carried`), with the same
+   `not carried:` lines under it. Rehome each not-carried line - a typed
+   `## Unfiled` bullet, a cursor section, or a stamped sibling - and
+   settle each label with a `stamp` in step 3.
 
 `hq adopt <slug>` on an adopted folder prints `hq adopt: already
 adopted; ledger.tsv exists`, and on an empty one `hq adopt: no

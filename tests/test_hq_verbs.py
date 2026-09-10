@@ -1141,17 +1141,19 @@ def test_adopt_keeps_text_before_the_first_heading(tmp_path, monkeypatch):
         folder / 'HANDOFF.md').read_text()
 
 
-def test_adopt_drops_the_continuation_lines_of_a_wrapped_header(
+def test_adopt_carries_the_continuation_lines_of_a_wrapped_header_in_the_note(
         tmp_path, monkeypatch, capsys):
-    """Lines that continue a `Written:` header wrapped at 72 columns are not Unfiled.
+    """Lines continuing a wrapped `Written:` header ride in the manifest note.
 
     Mutation: the preamble filter comparing each line against the matched
     header line alone, so the two continuation lines become `- unfiled:`
-    bullets that finish refuses as untyped; or conservation reporting them
-    as lines not carried.
+    bullets that finish refuses as untyped; the lines dropped instead of
+    carried, so the note lacks them; or conservation counting them
+    against the union, so they print as not carried.
     Oracle: the adopted cursor holds the real preamble line as its only
-    Unfiled bullet, and the summary prints `conservation: every original
-    line carried`.
+    Unfiled bullet, the manifest note reads `header: <both lines joined>
+    | <the Log item>`, and the summary prints `conservation: every
+    original line carried`.
     """
     folder = _new_root(tmp_path, monkeypatch)
     folder.mkdir(parents=True, exist_ok=True)
@@ -1169,6 +1171,36 @@ def test_adopt_drops_the_continuation_lines_of_a_wrapped_header(
     unfiled = [ln for ln in text.splitlines() if ln.startswith('- unfiled:')]
     assert unfiled == ['- unfiled: Status: blocked on the adapter.']
     assert 'conservation: every original line carried' in capsys.readouterr().out
+    manifest = hq._read_tsv(folder / 'cycles' / 'manifest.tsv', hq.MANIFEST_FIELDS)
+    assert manifest[-1]['note'] == (
+        'header: pyproject.toml modified; alpha/ and beta/ untracked'
+        ' (pre-existing WIP). | - 2026-09-01: started')
+
+
+def test_a_line_glued_under_the_header_reaches_the_note_not_the_void(
+        tmp_path, monkeypatch, capsys):
+    """A line directly under the header, no blank between, is header text the note keeps.
+
+    Mutation: the header paragraph's continuation dropped on the floor,
+    so the line is absent from the cursor, the note, and the not-carried
+    list alike.
+    Oracle: no Unfiled bullet, the manifest note reads `header: Status:
+    blocked on the adapter.`, and conservation reports every line carried.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {_SLUG}\n\n'
+        'Written: 2026-09-01 | Cycle: 3\n'
+        'Status: blocked on the adapter.\n\n'
+        '## Task\nx\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    assert '- unfiled:' not in (folder / 'HANDOFF.md').read_text()
+    assert 'conservation: every original line carried' in capsys.readouterr().out
+    manifest = hq._read_tsv(folder / 'cycles' / 'manifest.tsv', hq.MANIFEST_FIELDS)
+    assert manifest[-1]['note'] == 'header: Status: blocked on the adapter.'
 
 
 def test_where_anchor_escapes_a_semicolon_inside_a_heading(
