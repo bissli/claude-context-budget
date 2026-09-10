@@ -232,8 +232,9 @@ How to read the generated blocks:
   no heading - read the whole file, then re-stamp with a `--where` that
   resolves: for `## s4: Field-to-path mapping`, `s4`, `s4: Field-to-path
   mapping`, or `Field-to-path mapping`; for `## 4. Cache warmup`, `s4` or
-  `Cache warmup`. Re-run `hq.py open` after the re-stamp; a `?` that
-  survives means the anchor is still wrong.
+  `Cache warmup`; for `# 11b. Proof`, `s11b`, `11b. Proof`, or `Proof`.
+  Re-run `hq.py open` after the re-stamp; a `?` that survives means the
+  anchor is still wrong.
 - `Artifacts`: one full line, `path  kind  read_before  cNN  label`,
   per live row with `read_before` in {always, edit, mention}, and
   `path  spec?  unstamped` for a file on disk with no row. Rows with
@@ -249,7 +250,11 @@ How to read the generated blocks:
   counts the superseded items and `... n more  - hq.py standing <slug>`
   names the cut past 80 lines. `hq.py standing <slug>` prints every
   item in full.
-- `Log`: `+1` counts dirty paths at that finish.
+- `Log`: `+1` counts dirty paths at that finish. An adopted folder's
+  first line reads `adopted`, or `adopted; prior Log: N lines in
+  cycles/cNN.md` when the file had a Log; the archived file holds those
+  lines, and the manifest row's `note` field carries them joined with
+  ` / `.
 
 Rules:
 
@@ -275,7 +280,10 @@ Rules:
 - An item recorded with `note` or under `## Unfiled` is not repeated
   in State: the Standing block carries it.
 - Under 120 hand-written cursor lines fits most sessions; 200 is the
-  ceiling. The generated blocks do not count - the script bounds them.
+  ceiling. `finish` counts the cursor it writes back, `## Task` through
+  the last cursor section, blank lines included and `## Unfiled` already
+  drained, and prints the count. The generated blocks do not count - the
+  script bounds them.
 
 ### The artifact ledger
 
@@ -294,7 +302,8 @@ Kind inference, first match wins:
 | contains `conflicted copy`; a tab or newline in   | skip      | -           |
 | the name; not a regular file or directory         |           |             |
 | `*.pre-*`, `*.prev.*`, `*.orig.*`, `*.bak`        | snapshot  | never       |
-| `HANDOFF*.md`                                     | snapshot  | never       |
+| `HANDOFF*.md` at the folder's top level (nested   | snapshot  | never       |
+| or outside: other)                                |           |             |
 | name contains `cycle<digits>`                     | snapshot  | never       |
 | a directory                                       | probe-dir | never       |
 | `SPEC*`, `DESIGN*`, `PROPOSAL*`, `*-DECLARATION*` | spec      | always      |
@@ -370,7 +379,9 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp <slug> notes-old.md --defer
   missing; any other value is a usage error (exit 2). `--where` joins several
   anchors with `;`, each a heading's text without its number, or `s<n>`
   for the heading numbered `<n>` - `4.`, `4:`, and `s4:` all count as
-  the number 4; a bare `S4 ...` is a word, not a number.
+  the number 4; a bare `S4 ...` is a word, not a number. A number may
+  carry one letter when a `.` or `:` follows it: `s11b` names
+  `# 11b. Proof`, `s11` does not, and a bare `3D ...` is a word.
 - `--successor P` sets `status=superseded read_before=never` unless
   the stamp says otherwise. `--archive` sets `status=archived
   read_before=never`; without `--reason` it prints `hq stamp: --archive
@@ -593,9 +604,9 @@ Run these steps in order:
    end or a spec heading - check that the Now step does not retry a
    rejected idea.
 
-Past 160 cursor lines, one opus-tier agent (Agent tool, model `opus`)
-rewrites the cursor for precision and returns it; apply it before
-`finish`.
+Past 160 cursor lines, as `finish` counts them, one opus-tier agent
+(Agent tool, model `opus`) rewrites the cursor for precision and returns
+it; apply it before `finish`.
 
 One whole cycle on the example thread, in order:
 
@@ -633,7 +644,12 @@ Converge the form, destroy no content, in this order:
    line and a `Reference only:` line - a clause after the label is fine,
    `Read now, under x/ unless noted:` - with a path first on each bullet
    and its text on the same line or an indented line below (`adopt`
-   grades them into the ledger and the read block); `##
+   grades them into the ledger and the read block; several paths on one
+   bullet, comma-separated, each take a row sharing the bullet's text;
+   two bullets naming one path merge into one row, labels joined with
+   `; `, or a space after a label that ends a sentence, and anchors with
+   `;`; a bullet whose first token is not a path
+   lands whole under `## Unfiled`, its indented lines joined); `##
    Decisions`, `## Constraints`, and `## Dead ends` (moved whole into
    `standing.md`, one item per bullet or unindented line); and `## Log`
    (carried in the manifest row). Map every other foreign section to
@@ -747,9 +763,11 @@ Resume: kill this session, start a fresh one, run
    disk` means it is gone; `hq read: receipt not written: <error>`
    (exit 1, after the spans) means the read happened but the state
    directory refused the receipt - the gate will not credit it. Then
-   read every todo file the Plan points at. A target with no
-   conforming header names its own reading order or read-first
-   pointers - follow those instead. Read nothing else.
+   read every todo file the Plan points at. A conforming target with
+   no `ledger.tsv` has no generated blocks yet: follow its `## Key
+   files` `Read now:` pointers by hand; the first write adopts it. A
+   target with no conforming header names its own reading order or
+   read-first pointers - follow those instead. Read nothing else.
 4. Drift check: the header says dirty - run `git status --porcelain`
    and note what is still uncommitted. No sha in the header (written
    outside a repo) or no conforming header - skip the git steps. A
