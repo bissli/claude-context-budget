@@ -163,3 +163,36 @@ def test_every_line_the_script_prints_is_named_in_the_skill():
         if piece not in text
         and not any(piece.startswith(u) for u in _UNDOCUMENTED_PRINTS)]
     assert missing == []
+
+
+def test_every_refusal_string_in_the_script_is_named_in_the_skill():
+    """Each refusal text hq.py builds appears in the skill's text.
+
+    Mutation: a refusal reworded in code, or its text dropped from the
+    skill, including the three R1 texts whose static prefix is under
+    eight characters.
+    Oracle: the skill text, whitespace-normalized; for an f-string that
+    opens with `refused: ` or `R1: `, its longest static piece.
+    """
+    tree = ast.parse((SCRIPTS / 'hq.py').read_text())
+    skill_text = ' '.join(SKILL.read_text().split())
+    prefixes = ('refused: ', 'R1: ')
+    pieces = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            parts = [node.value]
+        elif isinstance(node, ast.JoinedStr):
+            parts = [
+                v.value for v in node.values
+                if isinstance(v, ast.Constant) and isinstance(v.value, str)]
+        else:
+            continue
+        if not parts or not parts[0].startswith(prefixes):
+            continue
+        normalized = [' '.join(part.split()) for part in parts]
+        normalized = [part for part in normalized if len(part) >= 8]
+        if normalized:
+            pieces.append((node.lineno, max(normalized, key=len)))
+    assert len(pieces) >= 5, pieces
+    missing = [(line, piece) for line, piece in pieces if piece not in skill_text]
+    assert missing == []

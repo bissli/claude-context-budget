@@ -104,13 +104,11 @@ is always `HANDOFF.md`, never named by the caller.
 | `/handoff standing <slug> [--all]` | all standing items in full; --all adds |
 |                                    | superseded ones                        |
 
-`write` and `read` are still accepted as the first word and override
-the inference; `--no-check` may sit anywhere and skips the reviewer
-pass. A first argument that matches `write`, `read`, `list`, `check`,
-`when`, `diff`, `artifacts`, or `standing` is that word, not a slug.
-`list` takes an optional count; `check`, `write`, and `read` an optional
-slug; `when` a slug and a path; `diff` a slug and two cycle numbers,
-which may be equal; `artifacts` and `standing` a slug.
+`write` and `read` are still accepted as the first word, each with an
+optional slug after it, and override the inference; `--no-check` may
+sit anywhere and skips the reviewer pass. A first argument that matches
+`write`, `read`, `list`, `check`, `when`, `diff`, `artifacts`, or
+`standing` is that word, not a slug.
 
 Guess neither the verb nor the target. Where either is ambiguous,
 say so, list the candidates, and stop - touch nothing.
@@ -558,19 +556,25 @@ Run these steps in order:
    One `hq.py supersede <slug> <old-id> <new-id>` when a ruling
    reverses an earlier one.
 3. One `hq.py stamp` per artifact created, re-read, or moved, or one
-   `--batch`. A refusal (`hq stamp: refused: R1 ...`, exit 1) means
-   the row stays as it was; supply the successor or the archive
-   reason, or leave the row gated - unless its file is missing, which
-   blocks `finish` until the row is re-pointed, superseded, or
-   archived.
+   `--batch`. A refusal (exit 1) means the row stays as it was. The
+   texts: `hq stamp: refused: R1: <kind> read_before must stay always
+   without --successor or --archive`, `... R1: <kind> status must stay
+   live without --successor or --archive`, `... R1: <kind> kind must
+   stay spec or draft without --successor or --archive`, `hq stamp:
+   refused: R1: successor <path> is <status>, not live`, and `hq stamp:
+   refused: --defer not allowed for inferred <kind>`. Supply the
+   successor or the archive reason, or leave the row gated - unless its
+   file is missing, which blocks `finish` until the row is re-pointed,
+   superseded, or archived.
 4. Rewrite the cursor from `## Task` down: Task, Now, Plan, State,
    Environment, Open questions, above the first `<!-- hq:` marker,
    carrying forward every line this session did not settle. Leave the
    header line and everything below the marker alone. Anything
    settled with no `note` call goes under `## Unfiled`.
-5. Run the skeptic seat (Reviewer pass, below). Each surviving finding
-   becomes a `note`, a `stamp`, or a cursor edit in this cycle; return
-   to step 2 for it, then continue.
+5. Run the Reviewer pass (below): the skeptic seat, and past 160
+   cursor lines the rewrite seat. Each surviving finding becomes a
+   `note`, a `stamp`, or a cursor edit in this cycle; return to step 2
+   for it, then continue.
 6. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py finish <slug> --log
    "<one line for the Log>"`. It checks, in order, and exits 1 having
    written nothing on the first class that fires:
@@ -611,10 +615,6 @@ Run these steps in order:
    for a dead-end headline: a term in the Now step also names a dead
    end or a spec heading - check that the Now step does not retry a
    rejected idea.
-
-Past 160 cursor lines, as `finish` counts them, one opus-tier agent
-(Agent tool, model `opus`) rewrites the cursor for precision and returns
-it; apply it before `finish`.
 
 One whole cycle on the example thread, in order:
 
@@ -701,21 +701,24 @@ judgment lines listed in step 4.
 
 ### Reviewer pass
 
-With the file on disk, spawn the skeptic seat (Agent tool, type
-`general-purpose`, model `sonnet` - or the reviewer tier the host's own
-agent rules name, when they name one) before `finish`. It returns one
-numbered item per finding, `<n>. <finding>`; re-check each in the
-write session, apply what survives, and stop - never loop. A question
-it raises for the user goes under `## Open questions`; do not stop for
-it.
+With the file on disk, spawn the seats below before `finish`. The
+skeptic returns one numbered item per finding, `<n>. <finding>`;
+re-check each in the write session, apply what survives, and stop -
+never loop. A question it raises for the user goes under `## Open
+questions`; do not stop for it.
 
-- Skeptic (always, before `finish`): from the file alone, fill five
-  slots - the task, the next action, why it is next, how to verify
-  it, what to ask the user; an empty slot is a finding. For each
+- Skeptic (always; Agent tool, type `general-purpose`, model `sonnet` -
+  or the reviewer tier the host's own agent rules name, when they name
+  one): from the file alone, fill five slots - the task, the next
+  action, why it is next, how to verify it, what to ask the user; an
+  empty slot is a finding. For each
   line of the read block, open the resolved span and report any point
   where the Now step contradicts it. For each todo file the Plan
   points at, verify that the Now step agrees with the corresponding
   live item in that file.
+- Rewrite (past 160 cursor lines, as `finish` counts them): one
+  opus-tier agent (Agent tool, model `opus`) rewrites the cursor for
+  precision and returns it; apply it before `finish`.
 
 ### Report
 
