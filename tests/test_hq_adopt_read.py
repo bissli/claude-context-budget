@@ -744,6 +744,37 @@ def test_adopt_reports_original_lines_the_rewrite_dropped(
     assert 'conservation: every original line carried' in capsys.readouterr().out
 
 
+def test_orig_conservation_counts_content_rehomed_into_a_stamped_sibling(
+        tmp_path, monkeypatch, capsys):
+    """A line moved whole into a notes sibling counts as carried for HANDOFF.orig.md.
+
+    Mutation: the orig union built from the cursor, standing.md, and the
+    labels alone, so every line the agent rehomed into a sibling as the
+    skill instructs prints as not carried; or the substring test run on
+    raw whitespace, so a line re-spaced in the sibling fails.
+    Oracle: HANDOFF.orig.md holds two ## Summary lines the rewrite moved
+    to notes-summary.md (one with a doubled space there) and one line
+    nobody kept; the orig line reports exactly that one.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'notes-summary.md').write_text(
+        '# Summary\n\nThe pipeline  drops empty rows.\n'
+        'Retries are capped at three.\n')
+    _handoff(folder, key_files=(
+        '- `notes-summary.md` Reference only: rehomed summary\n'))
+    (folder / 'HANDOFF.orig.md').write_text(
+        f'# Handoff: {_SLUG}\n\n'
+        'Written: 2026-08-01 | Cycle: 2\n\n'
+        '## Summary\n\n'
+        'The pipeline drops empty rows.\n'
+        'Retries are capped at three.\n'
+        'The cache is warmed at start.\n')
+    assert hq.main(['adopt', _SLUG]) == 0
+    out = capsys.readouterr().out
+    assert 'conservation vs HANDOFF.orig.md: 1 lines not carried' in out
+    assert '  not carried: The cache is warmed at start.' in out
+
+
 # --- addendum B: slug lines on stdout ---------------------------------
 
 

@@ -690,11 +690,12 @@ Converge the form, destroy no content, in this order:
    it per missing line, each printed whole - text of the file `adopt`
    read that reached neither the cursor, nor `standing.md`, nor a
    label. Where `HANDOFF.orig.md` exists a second line measures the hand
-   rewrite against it: `conservation vs HANDOFF.orig.md: N lines not
-   carried` (or `conservation vs HANDOFF.orig.md: every line carried`),
-   with the same `not carried:` lines under it. Rehome each not-carried
-   line - a typed `## Unfiled` bullet, a cursor section, or a stamped
-   sibling - and settle each label with a `stamp` in step 3.
+   rewrite against it, counting a line rehomed into a live notes sibling
+   or any row graded `edit` as carried: `conservation vs HANDOFF.orig.md:
+   N lines not carried` (or `conservation vs HANDOFF.orig.md: every line
+   carried`), with the same `not carried:` lines under it. Rehome each
+   not-carried line - a typed `## Unfiled` bullet, a cursor section, or
+   a stamped sibling - and settle each label with a `stamp` in step 3.
 
 `hq adopt <slug>` on an adopted folder prints `hq adopt: already
 adopted; ledger.tsv exists`, and on an empty one `hq adopt: no

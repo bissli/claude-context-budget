@@ -869,8 +869,12 @@ def conservation(
     -----
     - Union membership uses substring containment, so a wrapped bullet
       stored as one line in standing.md still passes.
+    - Whitespace runs collapse on both sides, so a line re-spaced in the
+      union still passes.
     - ``labels`` may carry any extra union text; adoption passes the
-      legacy Log lines it moved into the manifest row.
+      legacy Log lines it moved into the manifest row and, for the
+      ``HANDOFF.orig.md`` line, the text of every live notes row and
+      every row graded ``edit``.
     - A heading is covered when its normalized text is in the union OR
       when at least one content line from its section is in the union,
       so drained sections whose bullets moved to standing are not
@@ -886,7 +890,7 @@ def conservation(
     def _normalize(line: str) -> str:
         """Return a normalized form for union membership comparison.
         """
-        s = line.strip()
+        s = ' '.join(line.split())
         if _kf_label_only.match(s):
             return ''
         # Notes:
@@ -2441,9 +2445,24 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         print('conservation: every original line carried')
     orig_path = folder / 'HANDOFF.orig.md'
     if orig_path.is_file():
+        # The skill rehomes what fits nowhere into a sibling stamped
+        # notes or edit, so the hand rewrite is measured against those
+        # files as well.
+        sibling_texts: list[str] = []
+        for row in fresh_live.values():
+            if row['status'] != 'live' or (
+                    row['kind'] != 'notes' and row['read_before'] != 'edit'):
+                continue
+            sibling = (
+                pathlib.Path(row['path']).expanduser() if row['base'] == 'abs'
+                else folder / row['path'])
+            if sibling.is_file():
+                sibling_texts.append(
+                    sibling.read_text(encoding='utf-8', errors='replace'))
         orig_missing = conservation(
             orig_path.read_text(encoding='utf-8-sig', errors='replace'),
-            union_cursor, union_standing, seeded_labels + witnessed + legacy_log)
+            union_cursor, union_standing,
+            seeded_labels + witnessed + legacy_log + sibling_texts)
         if orig_missing:
             print(f'conservation vs HANDOFF.orig.md: {len(orig_missing)} lines not carried')
             for line in orig_missing:
