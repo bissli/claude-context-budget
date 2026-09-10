@@ -56,6 +56,7 @@ _LEDGER_HEADER = '\t'.join(LEDGER_FIELDS)
 _MANIFEST_HEADER = '\t'.join(MANIFEST_FIELDS)
 _SKIP_NAMES = {'HANDOFF.md', 'ledger.tsv', 'standing.md', 'cycles', '.hq.lock'}
 HANDOFF_DIRNAME = 'working'
+_HEADER_PAT = re.compile(r'Written:\s*.+?\s*\|\s*Cycle:\s*(\d+)')
 # Notes:
 # - A grading label under Key files may be written as its own heading;
 #   there it is structure and stays in the section rather than opening
@@ -897,7 +898,8 @@ def conservation(
       when at least one content line from its section is in the union,
       so drained sections whose bullets moved to standing are not
       reported as missing.
-    - The ``Written:`` header line is the script's, and never reported.
+    - The header line, wherever ``Written: ... | Cycle: N`` sits on it,
+      is the script's, and never reported.
     """
     _standing_prefix = re.compile(r'^- \[[dcx]\d+\] \(c\d+\) ')
     _kf_grade = re.compile(r'^(read now|reference only)\s*:\s*', re.IGNORECASE)
@@ -963,7 +965,7 @@ def conservation(
     for ln in orig_lines:
         if not ln.strip():
             continue
-        if ln.strip().startswith('Written:'):
+        if _HEADER_PAT.search(ln):
             continue
         is_heading = ln.lstrip().startswith('#')
         # A heading-form grade label is structure only under Key files;
@@ -1005,9 +1007,8 @@ def split_handoff(text: str) -> dict:
     """
     result: dict = {'header': '', 'slug': '', 'cycle': None,
                     'cursor': '', 'blocks': {}, 'log': ''}
-    header_pat = re.compile(r'Written:\s*.+?\s*\|\s*Cycle:\s*(\d+)')
     for line in text.splitlines():
-        m = header_pat.search(line)
+        m = _HEADER_PAT.search(line)
         if m:
             result['header'] = line.strip()
             result['cycle'] = int(m.group(1))

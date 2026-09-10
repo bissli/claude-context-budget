@@ -1203,6 +1203,27 @@ def test_a_line_glued_under_the_header_reaches_the_note_not_the_void(
     assert manifest[-1]['note'] == 'header: Status: blocked on the adapter.'
 
 
+def test_conservation_knows_a_bold_header_by_its_pattern(
+        tmp_path, monkeypatch, capsys):
+    """A `**Written: ... | Cycle: N**` header line is the script's, not lost text.
+
+    Mutation: conservation recognizing the header by a `Written:` prefix
+    while split_handoff accepts the pattern anywhere on the line, so a
+    bold or quoted header adopt accepts prints as not carried.
+    Oracle: adopt exits 0 on the bold header and the summary prints
+    `conservation: every original line carried`.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {_SLUG}\n\n'
+        '**Written: 2026-09-01 | Cycle: 3 | master @ 0123abc | clean**\n\n'
+        '## Task\nx\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    assert 'conservation: every original line carried' in capsys.readouterr().out
+
 
 def test_where_anchor_escapes_a_semicolon_inside_a_heading(
         tmp_path, monkeypatch, capsys):
