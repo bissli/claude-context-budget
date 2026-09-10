@@ -612,6 +612,11 @@ Run these steps in order:
    xN: <names>`, `advisory: conflicted copy: <name>`, `advisory:
    unstampable name: <name>`, `advisory: abs path not on disk: <path>`,
    `advisory: successor missing: <path> -> <successor>`, `advisory:
+   one-line span at <path>:<n>; a wrapped heading?` (the anchored
+   heading at line n is followed by a heading of the same level, the
+   shape of a heading wrapped onto a second `##` line, which Markdown
+   reads as a new heading; anchor the last wrapped line, or join the
+   heading where the file may be edited), `advisory:
    label shorter than predecessor: <path>` (check the new label kept
    every backticked token and `s<n>` reference the old one carried;
    otherwise ignore it), `advisory: label dropped {...}: <path>` (one

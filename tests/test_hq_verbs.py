@@ -1203,6 +1203,39 @@ def test_where_anchor_escapes_a_semicolon_inside_a_heading(
         '## F7. Cache hit ratio holds (n>=2; n=1 excluded)', 'body']
 
 
+def test_finish_flags_a_one_line_span_ended_by_a_same_level_heading(
+        tmp_path, monkeypatch, capsys):
+    """finish prints an advisory for a one-line span that a same-level heading ends.
+
+    Mutation: the span-length test dropped, so every anchored row is
+    flagged; the next-line level compared loosely, so a one-line section
+    closed by a higher-level heading is flagged too; or the advisory
+    missing, so a heading wrapped onto a second `##` line silently yields
+    a one-line span.
+    Oracle: the wrapped heading at notes-wrap.md line 3 is the only line
+    flagged; `## Solo` in notes-solo.md, one line long but closed by a
+    `#` heading, is not.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'notes-wrap.md').write_text(
+        '# Notes\n\n## Alpha beta gamma\n## delta epsilon\nbody\n## Next\nmore\n')
+    (folder / 'notes-solo.md').write_text('# Notes\n\n## Solo\n# Top\nbody\n')
+    for name, where in (('notes-wrap.md', 'Alpha beta gamma'),
+                        ('notes-solo.md', 'Solo')):
+        assert hq.main([
+            'stamp', _SLUG, name, '--read-before', 'always',
+            '--where', where, '--label', 'n']) == 0
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {_SLUG}\n\nWritten: 2026-09-01 | Cycle: 1\n\n## Task\nx\n')
+    capsys.readouterr()
+    assert hq.main(['finish', _SLUG, '--log', 'one']) == 0
+    flagged = [ln for ln in capsys.readouterr().out.splitlines()
+               if 'one-line span' in ln]
+    assert flagged == [
+        'advisory: one-line span at notes-wrap.md:3; a wrapped heading?']
+
+
 def test_key_files_continuation_with_one_space_joins_the_label(
         tmp_path, monkeypatch):
     """Any indented line under a pointer continues its free text.

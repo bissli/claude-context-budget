@@ -3379,6 +3379,29 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
             print(f'advisory: abs path not on disk: {p_key}')
     for p_key, successor in dangling_successors(folder, live):
         print(f'advisory: successor missing: {p_key} -> {successor}')
+    # --- Advisory: one-line spans ---
+    # Markdown reads each `##` line as a heading, so a heading wrapped
+    # onto a second marker line ends its own span after one line.
+    for p_key, row in live.items():
+        if (row['status'] != 'live' or row['read_before'] != 'always'
+                or row['where'] == '-'):
+            continue
+        target = (
+            pathlib.Path(p_key).expanduser() if row['base'] == 'abs'
+            else folder / p_key)
+        if not target.is_file():
+            continue
+        span_text = target.read_text(encoding='utf-8', errors='replace')
+        span_lines = span_text.splitlines()
+        spans, _ = resolve_where(span_text, _split_where(row['where']))
+        for start, end in spans:
+            if start != end or end >= len(span_lines):
+                continue
+            heading_line, next_line = span_lines[start - 1], span_lines[end]
+            level = len(heading_line) - len(heading_line.lstrip('#'))
+            if (next_line.startswith('#')
+                    and len(next_line) - len(next_line.lstrip('#')) == level):
+                print(f'advisory: one-line span at {p_key}:{start}; a wrapped heading?')
     # --- Advisory: label regression ---
     path_all_rows: dict[str, list[Row]] = {}
     for r in rows:
