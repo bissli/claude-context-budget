@@ -1402,7 +1402,7 @@ def _norm_heading(text: str) -> str:
 
 
 def _split_where(where: str) -> list[str]:
-    """Split a ledger ``where`` field into its anchors.
+    r"""Split a ledger ``where`` field into its anchors.
 
     Parameters
     ----------
@@ -2110,9 +2110,12 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
                 candidates = where_val.split(';')
                 unresolved = candidates
                 if path_obj.is_file():
-                    _, unresolved = resolve_where(
-                        path_obj.read_text(encoding='utf-8', errors='replace'),
-                        candidates)
+                    try:
+                        pointed_text = path_obj.read_text(
+                            encoding='utf-8', errors='replace')
+                    except OSError:
+                        pointed_text = ''
+                    _, unresolved = resolve_where(pointed_text, candidates)
                 tok_where = ';'.join(
                     a for a in candidates if a not in unresolved) or '-'
                 for anchor in unresolved:
@@ -2516,9 +2519,13 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             sibling = (
                 pathlib.Path(row['path']).expanduser() if row['base'] == 'abs'
                 else folder / row['path'])
-            if sibling.is_file():
+            if not sibling.is_file():
+                continue
+            try:
                 sibling_texts.append(
                     sibling.read_text(encoding='utf-8', errors='replace'))
+            except OSError:
+                continue
         orig_missing = conservation(
             orig_path.read_text(encoding='utf-8-sig', errors='replace'),
             union_cursor, union_standing,
@@ -3407,7 +3414,10 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
             else folder / p_key)
         if not target.is_file():
             continue
-        span_text = target.read_text(encoding='utf-8', errors='replace')
+        try:
+            span_text = target.read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            continue
         span_lines = span_text.splitlines()
         spans, _ = resolve_where(span_text, _split_where(row['where']))
         for start, end in spans:

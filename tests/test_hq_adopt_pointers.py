@@ -387,6 +387,37 @@ def test_bare_continuation_token_resolves_beside_the_first_path(
     assert rows['sub/b.py']['label'] == 'the pair'
 
 
+def test_unreadable_pointed_file_leaves_adopt_whole_and_drops_the_anchor(
+        tmp_path, monkeypatch, capsys):
+    """A pointed file adopt cannot read costs its anchor, never the adoption.
+
+    Mutation: the anchor filter's read_text unguarded, so a permission
+    error aborts adopt after ledger.tsv and the archive are written and
+    the folder can never be adopted again.
+    Oracle: a stub raising PermissionError for notes-locked.md alone;
+    adopt exits 0, the row is seeded with where `-`, and the summary
+    prints `where dropped: notes-locked.md 's2'`.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'notes-locked.md').write_text('# N\n\n## 2. A\n\nx\n')
+    _handoff(folder, key_files='- `notes-locked.md` see s2\n')
+    real_read_text = pathlib.Path.read_text
+
+    def _locked(self, *args, **kwargs):
+        if self.name == 'notes-locked.md':
+            raise PermissionError(13, 'Permission denied', str(self))
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, 'read_text', _locked)
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['notes-locked.md']['where'] == '-'
+    assert "  where dropped: notes-locked.md 's2'" in capsys.readouterr().out
+
+
+
 # --- The adopt Log roll-up ---
 
 
