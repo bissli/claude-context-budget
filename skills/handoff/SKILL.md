@@ -259,9 +259,16 @@ How to read the generated blocks:
   lines, and the manifest row's `note` field carries them, each wrapped
   item joined back onto one line, separated by ` | `. The note opens
   with the adopt-time provenance, `adopted <date> by <session>` plus
-  ` at <branch>@<sha>` under git; the row's other columns describe
-  `cycles/cNN.md` - its `Written:` date, its `branch @ sha`, its cursor
-  lines, its digest - and `rewrite_sha` names the HANDOFF.md adopt
+  ` at <branch>@<sha>` under git. The row's `written`, `repos`,
+  `cursor_lines`, `payload_tokens`, and `handoff_sha` describe
+  `cycles/cNN.md`: its `Written:` date, its `branch @ sha`, the lines
+  from its first `## ` heading to `## Log` or the first `<!-- hq:`
+  marker (the slice `hq diff` compares), its length over four, and its
+  digest. The
+  Log line for that cycle carries the same date and sha, so it names
+  the archived write, not the header of the file that renders it.
+  `session` is `-`, the ledger and standing columns measure those files
+  as adopt left them, and `rewrite_sha` names the HANDOFF.md adopt
   wrote. A `Written:` header wrapped over several lines - the lines
   under it up to the next blank line or heading - follows the
   provenance as one `header: <text>` item, since `finish` rewrites the

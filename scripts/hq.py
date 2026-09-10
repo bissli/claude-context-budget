@@ -398,12 +398,14 @@ def live_sha(row: dict) -> str:
 
     Notes
     -----
-    - ``handoff_sha`` names ``cycles/c<N>.md``. finish writes one text to
-      that archive and to HANDOFF.md, so its row leaves ``rewrite_sha``
-      as ``-``; adopt archives the file it read and rewrites HANDOFF.md,
-      so its row names the rewrite here.
-    - A row written before the column existed reads as ``-`` and falls
-      back, which is right: only finish wrote rows then.
+    - finish writes one text to HANDOFF.md and to ``cycles/c<N>.md``, so
+      its row leaves ``rewrite_sha`` as ``-`` and ``handoff_sha`` names
+      both files.
+    - adopt archives the file it read and rewrites HANDOFF.md, so its row
+      names the archive in ``handoff_sha`` and the rewrite here.
+    - A row with no ``rewrite_sha`` column reads ``-`` and falls back.
+      That holds for an adopt row from before the column too: its
+      ``handoff_sha`` names the rewrite, not the archive.
     """
     rewrite = row.get('rewrite_sha', '-')
     return rewrite if rewrite not in {'', '-'} else row.get('handoff_sha', '')
@@ -2429,7 +2431,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     # - The row indexes cycles/c<N>.md, so its date, repos, sizes, and
     #   handoff_sha are read off that file, not the rewrite made today.
     # - The archive is read back rather than reusing `text`: a c<N>.md
-    #   already on disk is kept, and the row must describe what is there.
+    #   already on disk is kept, and the row must describe that file.
     # - The header carries no session, so that column stays `-` and the
     #   adopting session rides in the note with the adopt date and sha.
     archive_text = archive.read_text(encoding='utf-8-sig', errors='replace')
