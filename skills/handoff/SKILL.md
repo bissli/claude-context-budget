@@ -233,9 +233,10 @@ How to read the generated blocks:
   no heading - read the whole file, then re-stamp with a `--where` that
   resolves: for `## s4: Field-to-path mapping`, `s4`, `s4: Field-to-path
   mapping`, or `Field-to-path mapping`; for `## 4. Cache warmup`, `s4` or
-  `Cache warmup`; for `# 11b. Proof`, `s11b`, `11b. Proof`, or `Proof`.
-  Re-run `hq open` after the re-stamp; a `?` that survives means the
-  anchor is still wrong.
+  `Cache warmup`; for `# 11b. Proof`, `s11b`, `11b. Proof`, or `Proof`;
+  for `#### 2a - Basis`, `s2a`, `2a - Basis`, or `Basis`. Re-run `hq
+  open` after the re-stamp; a `?` that survives means the anchor is
+  still wrong.
 - `Artifacts`: one full line, `path  kind  read_before  cNN  label`,
   per live row with `read_before` in {always, edit, mention}, and
   `path  spec?  unstamped` for a file on disk with no row. Rows with
@@ -380,10 +381,11 @@ hq stamp <slug> notes-old.md --defer
   edit, mention, or never; `--status` live, superseded, archived, or
   missing; any other value is a usage error (exit 2). `--where` joins several
   anchors with `;`, each a heading's text without its number, or `s<n>`
-  for the heading numbered `<n>` - `4.`, `4:`, `s4.`, and `s4:` all
-  count as the number 4; a bare `S4 ...` is a word, not a number. A
-  number may carry one letter when a `.` or `:` follows it: `s11b` names
-  `# 11b. Proof`, `s11` does not, and a bare `3D ...` is a word.
+  for the heading numbered `<n>` - `4.`, `4:`, `4 -`, `s4.`, and `s4:`
+  all count as the number 4; a bare `S4 ...` is a word, not a number. A
+  number may carry one letter when a `.`, `:`, or ` - ` follows it:
+  `s11b` names `# 11b. Proof`, `s11` does not, and a bare `3D ...` or
+  `2a-b ...` is a word.
 - `--successor P` sets `status=superseded read_before=never` unless
   the stamp says otherwise. `--archive` sets `status=archived
   read_before=never`; without `--reason` it prints `hq stamp: --archive

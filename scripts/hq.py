@@ -417,12 +417,12 @@ def resolve_where(
       heading of the same or higher level (same or fewer ``#`` characters),
       or to the last line of the file when no such heading follows.
     - An anchor ``s<d>`` or ``s<d><letter>`` resolves to the first heading
-      whose leading section token matches: ``<d>.``, ``<d>:``,
-      ``<d><letter>.``, ``<d><letter>:``, or ``s<d>[<letter>][.:]``, the
-      same token set ``_norm_heading`` strips. Equality on the whole token
-      is required, so ``s11`` does not resolve to ``# 11b. Proof``. A bare
-      ``S3`` word without a dot or colon is not a token. A literal heading
-      match is tried first.
+      whose leading section token matches: ``<d>.``, ``<d>:``, ``<d> -``,
+      ``<d><letter>.``, ``<d><letter>:``, ``<d><letter> -``, or
+      ``s<d>[<letter>][.:]``, the same token set ``_norm_heading`` strips.
+      Equality on the whole token is required, so ``s11`` does not resolve
+      to ``# 11b. Proof``. A bare ``S3`` word without a dot or colon is not
+      a token. A literal heading match is tried first.
     - The literal match is equality on the normalized text, never
       containment, so ``Retry`` does not land on ``## Retry budget``.
     - An unresolved anchor prints ``?`` in its span slot during rendering.
@@ -433,7 +433,8 @@ def resolve_where(
         if line.startswith('#'):
             level = len(line) - len(line.lstrip('#'))
             number_m = re.match(
-                r'^#+\s*(?:(\d+[a-z])[.:]|(\d+)[.:]?|s(\d+[a-z]?)[.:])(?=\s|$)',
+                r'^#+\s*(?:(\d+[a-z])(?:[.:]|\s+-(?=\s))|(\d+)[.:]?|s(\d+[a-z]?)[.:])'
+                r'(?=\s|$)',
                 line, re.IGNORECASE)
             number = ''
             if number_m:
@@ -1342,17 +1343,21 @@ def _norm_heading(text: str) -> str:
 
     Notes
     -----
-    - The leading section token is ``<d>``, ``<d>.``, ``<d>:``,
-      ``<d><letter>.``, ``<d><letter>:``, or ``s<d>[<letter>][.:]``,
-      so ``## 11b. Proof`` and ``## s11b: Proof`` both resolve. A bare
-      ``S3`` (no dot or colon) is a word, and stays.
-    - A letter suffix is recognized only when a ``.`` or ``:`` follows it;
-      ``3D`` in ``## 3D printing`` has no such delimiter and its ``3`` is
-      stripped by the plain-digit fallback.
+    - The leading section token is ``<d>``, ``<d>.``, ``<d>:``, ``<d> -``,
+      ``<d><letter>.``, ``<d><letter>:``, ``<d><letter> -``, or
+      ``s<d>[<letter>][.:]``, so ``## 11b. Proof``, ``## s11b: Proof``, and
+      ``## 2a - Basis`` all resolve. A bare ``S3`` (no dot or colon) is a
+      word, and stays.
+    - The dash delimiter needs whitespace on both sides, so ``2a-b`` in
+      ``## 2a-b range`` is not a token and its ``2`` is stripped by the
+      plain-digit fallback.
+    - A letter suffix is recognized only when a ``.``, ``:``, or `` - ``
+      follows it; ``3D`` in ``## 3D printing`` has no such delimiter and
+      its ``3`` is stripped by the plain-digit fallback.
     """
     text = re.sub(r'^[#\s]+', '', text)
     text = re.sub(
-        r'^(?:s\d+[a-z]?[.:]|\d+[a-z][.:]|\d[\d.]*:?)\s*',
+        r'^(?:s\d+[a-z]?[.:]|\d+[a-z]?(?:[.:]|\s+-(?=\s))|\d[\d.]*:?)\s*',
         '', text, flags=re.IGNORECASE)
     text = re.sub(r'`', '', text)
     return text.strip().lower()

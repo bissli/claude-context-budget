@@ -79,6 +79,41 @@ def test_s0_resolves_a_dotted_s_prefixed_heading():
     assert hq.resolve_where(text, ['s1']) == ([(6, 7)], [])
 
 
+def test_dash_separated_number_is_a_section_token():
+    """`N - Title` and `Na - Title` headings resolve by title and by `s<n>`.
+
+    Mutation: `.` and `:` the only delimiters after a section number in
+    _norm_heading and the resolve_where index, so the title anchor keeps
+    `- ` or `a - ` and `s2a` never reads `2a` as a number.
+    Oracle: hand-computed spans on the fixture - `### 2 - ...` is line 3
+    and runs to line 8, `#### 2a - ...` is lines 5-6; `3D printing`,
+    `S4 notes`, and `2a-b range` keep their current normalized forms.
+    """
+    text = (
+        '# Retry design - open items\n'
+        '\n'
+        '### 2 - The retry window\n'
+        'body\n'
+        '#### 2a - The backoff basis\n'
+        'body\n'
+        '#### 2c - Cache path\n'
+        'body\n'
+        '### 3 - Next\n'
+        'body\n'
+    )
+    assert hq.resolve_where(
+        text, ['The backoff basis']) == ([(5, 6)], [])
+    assert hq.resolve_where(text, ['s2a']) == ([(5, 6)], [])
+    assert hq.resolve_where(
+        text, ['The retry window']) == ([(3, 8)], [])
+    assert hq.resolve_where(text, ['s2']) == ([(3, 8)], [])
+    assert hq._norm_heading('## 3D printing') == 'd printing'
+    assert hq._norm_heading('## S4 notes') == 's4 notes'
+    assert hq._norm_heading('## 2a-b range') == 'a-b range'
+    assert hq._norm_heading('# 11b. Proof') == 'proof'
+    assert hq._norm_heading('## s11b: Proof') == 'proof'
+
+
 def test_literal_proof_resolves_to_11b_heading_by_text_match():
     """Literal anchor 'Proof' resolves to '# 11b. Proof' via normalized text.
 
