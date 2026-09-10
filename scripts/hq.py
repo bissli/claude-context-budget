@@ -9,9 +9,11 @@ not history.
 
 Invoke as::
 
-    python3 scripts/hq.py <verb> <slug> [args] [options]
+    hq <verb> <slug> [args] [options]
 
-or call ``main(argv)`` in-process. Exit 0 on success, 1 on a refusal or a
+``bin/hq`` is a wrapper the plugin puts on the agent's PATH; it runs
+``python3 scripts/hq.py`` with the same arguments. Or call ``main(argv)``
+in-process. Exit 0 on success, 1 on a refusal or a
 blocking finding, 2 on bad usage or an unresolvable slug.
 
 Notes
@@ -532,7 +534,7 @@ def render_artifacts(
         Latest ledger row per path, with the caller's ``missing`` marks
         already applied; the renderer never consults the disk.
     slug : str
-        Handoff slug for the hq.py command in count lines.
+        Handoff slug for the hq command in count lines.
 
     Returns
     -------
@@ -585,12 +587,12 @@ def render_artifacts(
     out = list(capped)
     if kind_never:
         parts = '  '.join(f'{k} x{v}' for k, v in sorted(kind_never.items()))
-        out.append(f'{parts}  - hq.py artifacts {slug}')
+        out.append(f'{parts}  - hq artifacts {slug}')
     if non_live:
         ordered = [k for k in ('superseded', 'archived', 'missing') if k in non_live]
         ordered += sorted(k for k in non_live if k not in ordered)
         parts = '  '.join(f'{k} {non_live[k]}' for k in ordered)
-        out.append(f'{parts}  - hq.py when {slug} <path>')
+        out.append(f'{parts}  - hq when {slug} <path>')
     return '\n'.join(out)
 
 
@@ -639,7 +641,7 @@ def render_standing(
     superseded_ids : set[str]
         Item ids targeted by a supersession line.
     slug : str
-        Handoff slug for the hq.py command in overflow lines.
+        Handoff slug for the hq command in overflow lines.
 
     Returns
     -------
@@ -664,11 +666,11 @@ def render_standing(
             if include_body:
                 line = _join_headline_body(line, item.get('body', ''))
             out.append(line.rstrip())
-    tail = [f'superseded {sup_count}  - hq.py standing {slug}'] if sup_count else []
+    tail = [f'superseded {sup_count}  - hq standing {slug}'] if sup_count else []
     if len(out) + len(tail) > 80:
         keep = 80 - len(tail) - 1
         n_more = len(out) - keep
-        out = out[:keep] + [f'... {n_more} more  - hq.py standing {slug}']
+        out = out[:keep] + [f'... {n_more} more  - hq standing {slug}']
     return '\n'.join(out + tail)
 
 
@@ -2617,7 +2619,7 @@ def _print_worklist(folder: pathlib.Path, anch: dict) -> None:
         elif not (folder / path).exists():
             missing_live.append(path)
     for path in missing_live[:5]:
-        print(f'  missing live: {path} - hq.py when {folder.name} {path}')
+        print(f'  missing live: {path} - hq when {folder.name} {path}')
     if len(missing_live) > 5:
         print(f'  ... and {len(missing_live) - 5} more')
     dangling = dangling_successors(folder, live)
@@ -3759,7 +3761,7 @@ def _verb_list(root: pathlib.Path, argv: argparse.Namespace) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     """Return the top-level argument parser for all thirteen verbs.
     """
-    p = argparse.ArgumentParser(prog='hq.py', description='Handoff ledger manager')
+    p = argparse.ArgumentParser(prog='hq', description='Handoff ledger manager')
     p.add_argument('--root', help='project root (HQ_ROOT)')
     p.add_argument('--cycle', help='override cycle number (HQ_CYCLE)')
     p.add_argument('--now', help='override timestamp (HQ_NOW)')

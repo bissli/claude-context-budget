@@ -205,7 +205,59 @@ def test_gate_fires_on_a_heredoc_and_a_redirect_write(monkeypatch, capsys,
     assert text == (
         f'handoff gate: {_SLUG}: 1 gated path(s) not read this session'
         f' - SPEC.md ({_SPEC_SPAN}); read each or run:'
-        f' hq.py read {_SLUG} SPEC.md')
+        f' hq read {_SLUG} SPEC.md')
+
+
+def test_gate_arms_on_the_bare_hq_command(monkeypatch, capsys, tmp_path):
+    """Verify `hq open <slug>`, the PATH form, arms the gate as hq.py does.
+
+    Mutation: _OPEN_VERB requiring the `.py` suffix, so a session that
+    opens through bin/hq is never armed and the write goes unreported.
+    Oracle: the message the python3 form produces on the same fixture -
+    SPEC.md at its hand-computed span, pointing at `hq read`.
+    """
+    root, folder = _handoff_root(tmp_path)
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
+    tr = _transcript(tmp_path / 't.jsonl', [_bash(f'hq open {_SLUG}')])
+    payload = _payload(root, tr, 'S1', 'Bash', {'command': 'cat > x.py'})
+    out = _run(monkeypatch, capsys, handoff_gate, payload)
+    assert _context(out) == (
+        f'handoff gate: {_SLUG}: 1 gated path(s) not read this session'
+        f' - SPEC.md ({_SPEC_SPAN}); read each or run:'
+        f' hq read {_SLUG} SPEC.md')
+
+
+def test_gate_exempts_a_segment_whose_command_word_is_hq():
+    """Verify only a segment running `hq` or `hq.py` escapes the write test.
+
+    Mutation: the exemption testing for the literal 'hq.py', which gates
+    a `stamp` run through bin/hq; requiring whitespace after the word,
+    which gates the quoted-path form hooks.json uses; or matching the
+    word anywhere, which exempts a commit message or a heredoc body that
+    merely mentions hq.
+    Oracle: hand-classified commands on each side of the command-word
+    rule, the quoted, assigned, chained, and heredoc forms included.
+    """
+    exempt = [
+        'hq stamp demo-slug SPEC.md > out.txt',
+        'HQ_ROOT=/tmp/x hq begin demo-slug | tee log',
+        'cd /tmp/x && hq begin demo-slug > log',
+        'bin/hq note demo-slug decision "x" > /tmp/o',
+        'python3 scripts/hq.py stamp demo-slug SPEC.md > out.txt',
+        'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/hq.py" stamp demo-slug a.md > o',
+        'bash -c "hq open demo-slug > f"',
+        ]
+    gated = [
+        'echo x > hq-notes.md',
+        'echo chq > f',
+        'echo x > working/hq.md',
+        'echo x > hq',
+        'my-hq stamp demo-slug SPEC.md > out.txt',
+        'git commit -m "add hq wrapper"',
+        "cat > notes.md <<'EOF'\nhq begin demo-slug\nEOF",
+        ]
+    assert [c for c in exempt if handoff_gate.bash_writes(c)] == []
+    assert [c for c in gated if not handoff_gate.bash_writes(c)] == []
 
 
 def test_gate_counts_only_read_shaped_evidence(monkeypatch, capsys, tmp_path):
@@ -602,7 +654,7 @@ def test_stop_reports_when_handoff_sha_differs_from_manifest(monkeypatch,
     out = _run(monkeypatch, capsys, handoff_stop, _stop_payload(root, 'P1'))
     assert json.loads(out) == {'systemMessage': (
         f'handoff: working/{_SLUG}/HANDOFF.md was written by hand since'
-        f' cycle 2 finished; run hq.py begin {_SLUG}, then hq.py finish'
+        f' cycle 2 finished; run hq begin {_SLUG}, then hq finish'
         f' {_SLUG} --log "...", or the next open reports LEDGER BEHIND')}
 
 

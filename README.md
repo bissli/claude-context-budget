@@ -191,7 +191,8 @@ session chose.)
   it must be read before the next edit); the settled decisions,
   constraints, and dead ends in `standing.md`, append-only; and every
   finished cycle verbatim under `cycles/`. A small script, `hq.py`,
-  writes the ledger, renders the generated blocks of `HANDOFF.md` from
+  which the plugin puts on the agent's PATH as `hq` while it is
+  enabled, writes the ledger, renders the generated blocks of `HANDOFF.md` from
   it, and refuses the two edits that lose work over many cycles:
   lowering a spec's read obligation without naming its successor, and
   rewriting a recorded line in place.
@@ -201,7 +202,7 @@ session chose.)
   hundred cycles in, the file is the size it was at cycle three -
   because what is no longer live is counted, not printed.
 - Each write ends with a reviewer pass that must reconstruct the task
-  from the file alone. Reading starts with `hq.py open`, which reports
+  from the file alone. Reading starts with `hq open`, which reports
   drift - a moved commit, a gated file edited since its stamp, a
   heading an anchor no longer finds - then reads the spans the ledger
   gates and executes the file's next step without re-litigating

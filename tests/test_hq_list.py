@@ -235,7 +235,7 @@ def test_list_no_handoff_prints_message_and_returns_0(tmp_path, monkeypatch, cap
 
 
 def test_begin_missing_live_shows_hq_when_hint(tmp_path, monkeypatch, capsys):
-    """Begin prints '  missing live: <path> - hq.py when <slug> <path>'.
+    """Begin prints '  missing live: <path> - hq when <slug> <path>'.
 
     Mutation: the suffix dropped from the print statement.
     Oracle: the exact line for a stamped file deleted before begin.
@@ -258,7 +258,7 @@ def test_begin_missing_live_shows_hq_when_hint(tmp_path, monkeypatch, capsys):
     missing_lines = [ln for ln in out2.splitlines()
                      if ln.startswith('  missing live: ')]
     assert len(missing_lines) == 1
-    assert missing_lines[0] == f'  missing live: gone.md - hq.py when {_SLUG} gone.md'
+    assert missing_lines[0] == f'  missing live: gone.md - hq when {_SLUG} gone.md'
 
 
 def test_list_breaks_mtime_ties_by_slug(tmp_path, monkeypatch, capsys):

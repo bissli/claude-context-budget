@@ -4,7 +4,7 @@
 Every finished cycle records the digest of the HANDOFF.md it finished
 on. An agent that writes the file directly - the habit the skill exists
 to replace - leaves that digest behind, and nothing says so until the
-next ``hq.py open`` prints LEDGER BEHIND, often a session later.
+next ``hq open`` prints LEDGER BEHIND, often a session later.
 
 This hook compares the file against the last recorded digest at the end
 of every turn and names the cycle the folder is now behind.
@@ -115,7 +115,7 @@ def report(payload: dict[str, Any]) -> int:
         pass
     clauses = '; '.join(
         f'{name}/{slug}/HANDOFF.md was written by hand since cycle {cycle} '
-        f'finished; run hq.py begin {slug}, then hq.py finish {slug} '
+        f'finished; run hq begin {slug}, then hq finish {slug} '
         f'--log "...", or the next open reports LEDGER BEHIND'
         for slug, _, cycle in fresh)
     json.dump({'systemMessage': f'handoff: {clauses}'}, sys.stdout)

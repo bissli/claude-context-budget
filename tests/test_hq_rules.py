@@ -614,7 +614,7 @@ def test_artifacts_block_collapses_never_rows_and_caps_at_40():
         if '  notes  ' in line and '  never  ' in line
     ]
     assert full_never == []
-    assert 'notes x42  - hq.py artifacts slug' in result_never
+    assert 'notes x42  - hq artifacts slug' in result_never
 
     always_walk = [(f'SPEC-{i:02d}.md', 'spec') for i in range(41)]
     always_rows = {
@@ -631,7 +631,7 @@ def test_artifacts_block_collapses_never_rows_and_caps_at_40():
         if '  spec  ' in line and '  always  ' in line
     ]
     assert len(full_always) == 40
-    assert result_always.splitlines()[-1] == 'spec x1  - hq.py artifacts slug'
+    assert result_always.splitlines()[-1] == 'spec x1  - hq artifacts slug'
 
 
 # --- render_standing --------------------------------------------------
@@ -658,7 +658,7 @@ def test_standing_block_omits_superseded_and_caps_at_80():
     assert 'Superseded decision' not in result
     assert '[d02]' not in result
     assert 'superseded 1' in result
-    assert 'hq.py standing test-slug' in result
+    assert 'hq standing test-slug' in result
     assert '[c01]' in result
     assert '[d01]' in result
 
@@ -671,7 +671,7 @@ def test_standing_block_omits_superseded_and_caps_at_80():
     content_lines = [line for line in result2.splitlines() if line.strip()]
     assert len(content_lines) == 80
     assert '4 more' in result2
-    assert 'hq.py standing slug2' in result2
+    assert 'hq standing slug2' in result2
 
 
 # --- render_log -------------------------------------------------------
@@ -833,7 +833,7 @@ def test_non_live_count_line_has_a_fixed_order():
         'c.md': _ledger_row(path='c.md', status='superseded'),
     }
     result = hq.render_artifacts([], rows, 'slug')
-    assert 'superseded 1  archived 1  missing 1  - hq.py when slug <path>' in result
+    assert 'superseded 1  archived 1  missing 1  - hq when slug <path>' in result
 
 
 def test_standing_cap_keeps_the_superseded_line():
@@ -851,7 +851,7 @@ def test_standing_cap_keeps_the_superseded_line():
     ]
     result = hq.render_standing(items, {'c86'}, 'slug').splitlines()
     assert len(result) <= 80
-    assert result[-1] == 'superseded 1  - hq.py standing slug'
+    assert result[-1] == 'superseded 1  - hq standing slug'
     assert result[-2].startswith('... ')
     assert 'more' in result[-2]
 
@@ -998,4 +998,4 @@ def test_render_standing_bodies_headings_and_the_eighty_line_boundary():
     more = many + [{'id': 'c80', 'prefix': 'c', 'cycle': '1', 'headline': 'r80', 'body': 'b'}]
     lines = hq.render_standing(more, set(), 'slug').splitlines()
     assert len(lines) == 80
-    assert lines[-1] == '... 2 more  - hq.py standing slug'
+    assert lines[-1] == '... 2 more  - hq standing slug'

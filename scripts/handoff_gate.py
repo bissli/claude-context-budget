@@ -7,7 +7,7 @@ changes anything - the spec it is building to, the decision it must not
 undo. Nothing enforces that today: the agent opens the handoff, reads
 the cursor, and edits the repo without ever opening the spec.
 
-This hook watches for the first write after an ``hq.py open`` and, when
+This hook watches for the first write after an ``hq open`` and, when
 a gated path has not been read this session, hands the model one line
 naming the path and the lines to read.
 
@@ -22,7 +22,7 @@ Notes
   unreadable ledger, or any unexpected exception exits 0 in silence. A
   broken gate must never stop a tool call.
 - Evidence of a read is the Read tool, a read verb in a Bash command, or
-  an ``hq.py read`` receipt. A path named to ``ls``, ``wc``, or ``grep``
+  an ``hq read`` receipt. A path named to ``ls``, ``wc``, or ``grep``
   was listed or searched, not read.
 """
 
@@ -58,7 +58,18 @@ _READ_VERB = re.compile(r'\b(?:cat|head|tail|less)\s|\bsed\s+-n\b')
 # A slug is one path component of letters, digits, '.', '_', and
 # '-', so the class ends the capture at shell punctuation and a
 # closing quote: `open demo; echo` arms on `demo`, not `demo;`.
-_OPEN_VERB = re.compile(r'hq\.py\s+open\s+["\']?([A-Za-z0-9._-]+)')
+_OPEN_VERB = re.compile(
+    r'(?<![\w.-])hq(?:\.py)?\s+open\s+["\']?([A-Za-z0-9._-]+)')
+# Notes:
+# - The command word of a shell segment is hq or hq.py, bare or as a
+#   path, after any variable assignments and an optional python3: the
+#   segment runs the handoff tooling. A quote may open the segment
+#   (`bash -c "hq ..."`) or wrap the path.
+# - The word elsewhere - a commit message, a redirect target, an echo
+#   - is a mention, and the write it sits in still counts.
+_HQ_COMMAND = re.compile(
+    r'(?:^|[;|&(`"\'\n]\s*)(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*'
+    r'(?:python3?\s+)?["\']?(?:\S*/)?hq(?:\.py)?["\']?(?=\s|$)')
 # Notes:
 # - A quoted span is a mention of the open, not the command, only when
 #   the word owning the quote searches, edits, prints, or records text;
@@ -100,12 +111,14 @@ def bash_writes(command: str) -> bool:
       ``>`` in the remainder is the whole test.
     - ``&> file`` writes and ``&>/dev/null`` does not, which is why the
       /dev/null forms are stripped by name rather than by operator.
-    - A command running hq.py is the handoff tooling itself and never
-      counts, whatever it redirects.
+    - A segment whose command word is ``hq`` or ``hq.py`` runs the
+      handoff tooling itself and never counts, whatever it redirects;
+      the word elsewhere on the line is a mention and exempts nothing.
     """
-    if 'hq.py' in command:
+    text = _strip_heredocs(command)
+    if _HQ_COMMAND.search(text):
         return False
-    text = _QUOTED.sub(' ', _strip_heredocs(command))
+    text = _QUOTED.sub(' ', text)
     text = _FD_REDIRECT.sub(' ', text)
     text = _NULL_REDIRECT.sub(' ', text)
     if '>' in text:
@@ -152,7 +165,7 @@ def scan_transcript(text: str) -> tuple[str, list[str], list[str]]:
     Returns
     -------
     tuple[str, list[str], list[str]]
-        The slug of the last ``hq.py open`` in the chunk or '' when it
+        The slug of the last ``hq open`` in the chunk or '' when it
         holds none, the file_path of every Read tool call, and every
         Bash command carrying a read verb.
 
@@ -161,7 +174,7 @@ def scan_transcript(text: str) -> tuple[str, list[str], list[str]]:
     - A line that is not JSON, not an assistant record, or holds no
       tool_use block is skipped; a transcript truncated mid-write costs
       at most its last line.
-    - An ``hq.py open`` quoted under a word that searches, edits, prints,
+    - An ``hq open`` quoted under a word that searches, edits, prints,
       or records text - a grep or sed on the phrase, a commit message -
       is a mention and arms nothing; quoted under an executor such as
       ``bash -c``, or inside a ``$(``, it is the command and arms.
@@ -380,7 +393,7 @@ def gate(payload: dict[str, Any]) -> int:
             listed = ', '.join(f'{path} ({span})' for path, span in missing)
             message = (f'handoff gate: {folder.name}: {len(missing)} gated '
                        f'path(s) not read this session - {listed}; read each '
-                       f'or run: hq.py read {folder.name} {missing[0][0]}')
+                       f'or run: hq read {folder.name} {missing[0][0]}')
 
     state['gate'] = {
         'offset': offset,

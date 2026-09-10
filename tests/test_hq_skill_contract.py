@@ -17,7 +17,7 @@ SKILL = HERE.parent / 'skills' / 'handoff' / 'SKILL.md'
 
 from scripts import hq
 
-_HQ_CALL = 'python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py'
+_HQ_CALL = 'hq'
 # Flags in the skill that belong to other tools, never to hq.py.
 _FOREIGN_FLAGS = {'--no-check', '--oneline', '--porcelain', '--show-toplevel'}
 # Messages the agent never meets: a usage slip the skill's own command
@@ -47,7 +47,7 @@ def _parser_surface():
 
 
 def _fenced_commands(text):
-    """Yield each hq.py command line from the skill's fenced blocks, joined
+    """Yield each hq command line from the skill's fenced blocks, joined
     across backslash continuations and cut before any heredoc marker.
     """
     in_fence = False
@@ -63,7 +63,7 @@ def _fenced_commands(text):
             buf = buf[:-1] + ' '
             continue
         cmd, buf = buf, ''
-        if cmd.startswith(_HQ_CALL):
+        if cmd.split()[:1] == [_HQ_CALL]:
             yield cmd.split('<<')[0].strip()
 
 
@@ -75,7 +75,7 @@ def test_the_skill_and_the_parser_name_the_same_verbs():
     Oracle: the argparse subcommand table.
     """
     verbs, _ = _parser_surface()
-    named = set(re.findall(r'hq\.py (\w[\w-]*)', SKILL.read_text()))
+    named = set(re.findall(r'\bhq (\w[\w-]*)(?![\w:-])', SKILL.read_text()))
     assert named <= set(verbs), named - set(verbs)
     assert set(verbs) <= named, set(verbs) - named
 
@@ -109,8 +109,7 @@ def test_every_command_example_in_the_skill_parses():
     commands = list(_fenced_commands(SKILL.read_text()))
     assert len(commands) >= 10
     for cmd in commands:
-        argv = shlex.split(
-            cmd.replace(_HQ_CALL, '', 1).replace('<slug>', 'demo'))
+        argv = shlex.split(cmd.replace('<slug>', 'demo'))[1:]
         try:
             args, rest = parser.parse_known_args(argv)
         except SystemExit as exc:
@@ -163,6 +162,29 @@ def test_every_line_the_script_prints_is_named_in_the_skill():
         if piece not in text
         and not any(piece.startswith(u) for u in _UNDOCUMENTED_PRINTS)]
     assert missing == []
+
+
+def test_every_pointer_line_the_script_renders_is_named_in_the_skill():
+    """Each `- hq <verb> ...` pointer hq.py renders names a real verb the
+    skill shows verbatim.
+
+    Mutation: a pointer's verb renamed in a rendered block or the begin
+    work list, with the skill still showing the old word, so the agent is
+    told to type a verb the file never names; or a pointer built from a
+    word that is no parser verb at all.
+    Oracle: every string constant in hq.py holding `- hq <word>`, checked
+    against the argparse verb table and the whitespace-normalized skill.
+    """
+    verbs, _ = _parser_surface()
+    tree = ast.parse((SCRIPTS / 'hq.py').read_text())
+    skill_text = ' '.join(SKILL.read_text().split())
+    pointers = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            pointers += re.findall(r'- hq (\w+)', node.value)
+    assert len(pointers) >= 4
+    assert set(pointers) <= set(verbs), set(pointers) - set(verbs)
+    assert [v for v in pointers if f'- hq {v} ' not in skill_text] == []
 
 
 def test_every_refusal_string_in_the_script_is_named_in_the_skill():

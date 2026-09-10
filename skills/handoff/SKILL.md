@@ -9,7 +9,7 @@ description: >-
   when, diff, artifacts, standing query the ledger. Replaces /compact,
   and replaces re-planning: the file carries the approved plan across
   sessions.
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/*)
+allowed-tools: Bash(hq *)
 ---
 
 # Handoff
@@ -22,12 +22,12 @@ a total clear, in which only this folder and the repo survive. Run
 `/handoff <slug>` in a fresh one. A later bare `/handoff` updates the
 same file.
 
-Throughout this file `hq.py` abbreviates
-`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py`. Every verb but `list`
-takes the slug first. Five flags before the verb - `--root DIR`, `--cycle N`,
-`--now ISO`, `--session ID`, `--host H` - override the `HQ_ROOT`,
-`HQ_CYCLE`, `HQ_NOW`, `HQ_SESSION`, and `HQ_HOST` environment values
-the script otherwise reads; a session never needs them. Exit 0 is
+The plugin puts `hq` on the agent's PATH while it is enabled. Every
+verb but `list` takes the slug first. Five flags before the verb -
+`--root DIR`, `--cycle N`, `--now ISO`, `--session ID`, `--host H` -
+override the `HQ_ROOT`, `HQ_CYCLE`, `HQ_NOW`, `HQ_SESSION`, and
+`HQ_HOST` environment values the script otherwise reads; a session
+never needs them. Exit 0 is
 done; 1 is a refusal or a blocking finding, and
 nothing is written except that a refused `stamp` appends its receipt row
 (R2, below); 2 is a usage error. All output is stdout, one fact per
@@ -116,7 +116,7 @@ say so, list the candidates, and stop - touch nothing.
 A folder argument resolves the same way everywhere: exact folder
 name, else a unique prefix of the `working/*/` names, else list the
 candidates and stop (write: create the folder). A target exists when
-its `HANDOFF.md` exists. `hq.py` resolves its slug the same way and
+its `HANDOFF.md` exists. `hq` resolves its slug the same way and
 exits 2 with `hq: ambiguous slug '<slug>': <names>` or
 `hq: no folder matching '<slug>' under <path>`.
 
@@ -234,22 +234,22 @@ How to read the generated blocks:
   resolves: for `## s4: Field-to-path mapping`, `s4`, `s4: Field-to-path
   mapping`, or `Field-to-path mapping`; for `## 4. Cache warmup`, `s4` or
   `Cache warmup`; for `# 11b. Proof`, `s11b`, `11b. Proof`, or `Proof`.
-  Re-run `hq.py open` after the re-stamp; a `?` that survives means the
+  Re-run `hq open` after the re-stamp; a `?` that survives means the
   anchor is still wrong.
 - `Artifacts`: one full line, `path  kind  read_before  cNN  label`,
   per live row with `read_before` in {always, edit, mention}, and
   `path  spec?  unstamped` for a file on disk with no row. Rows with
   `read_before=never` collapse to counts such as
-  `notes x11  snapshot x6  - hq.py artifacts <slug>`; past 40 full
+  `notes x11  snapshot x6  - hq artifacts <slug>`; past 40 full
   lines the overflow folds into those counts; rows no longer live
-  collapse to `superseded n  archived n  missing n  - hq.py when <slug>
+  collapse to `superseded n  archived n  missing n  - hq when <slug>
   <path>`, where `<path>` is a placeholder for the row to expand. The
   command named on a line expands it.
 - `Standing`: ids are `d` decision, `c` constraint, `x` dead end;
   `(c1)` is the cycle that recorded the item. Constraints print in
-  full, the rest as headlines; `superseded n  - hq.py standing <slug>`
-  counts the superseded items and `... n more  - hq.py standing <slug>`
-  names the cut past 80 lines. `hq.py standing <slug>` prints every
+  full, the rest as headlines; `superseded n  - hq standing <slug>`
+  counts the superseded items and `... n more  - hq standing <slug>`
+  names the cut past 80 lines. `hq standing <slug>` prints every
   item in full.
 - `Log`: `+1` counts dirty paths at that finish. An adopted folder's
   first line reads `adopted`, or `adopted; prior Log: N lines in
@@ -259,7 +259,7 @@ How to read the generated blocks:
 
 Rules:
 
-- Point, never paste: a rehomed sibling is stamped with `hq.py stamp`;
+- Point, never paste: a rehomed sibling is stamped with `hq stamp`;
   its pointer line is generated, never typed.
 - Skip what the repo records: git history, CLAUDE.md, README content.
 - Too big for the file but worth keeping (a log excerpt, a survey):
@@ -289,9 +289,9 @@ Rules:
 ### The artifact ledger
 
 The ledger (`ledger.tsv`) is append-only; the agent never opens it.
-Rows are dictated through `hq.py stamp`, `hq.py note`, and
-`hq.py supersede`. `stamp` and `note` also take `--batch`, reading one
-row per stdin line.
+Rows are dictated through `hq stamp`, `hq note`, and `hq supersede`.
+`stamp` and `note` also take `--batch`, reading one row per stdin
+line.
 
 Thirteen fields per stamp row: `cycle ts path base kind status
 read_before successor where sha12 lines reason label`.
@@ -349,17 +349,17 @@ Rules the script enforces:
 Stamp forms, all real:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp <slug> SPEC.md \
+hq stamp <slug> SPEC.md \
   --where "3. Retry" --label "refresh contract; s3 is the retry schedule"
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp <slug> \
+hq stamp <slug> \
   ~/code/poller/scripts/auth.py --label "poller; the 401 branch is under edit"
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp <slug> notes-idp-quirks.md \
+hq stamp <slug> notes-idp-quirks.md \
   --read-before edit --label "staging IdP quirks, found the hard way"
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp <slug> SPEC.md \
+hq stamp <slug> SPEC.md \
   --successor SPEC-v2.md
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp <slug> DRAFT.py \
+hq stamp <slug> DRAFT.py \
   --archive --reason "abandoned for the sidecar approach"
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp <slug> notes-old.md --defer
+hq stamp <slug> notes-old.md --defer
 ```
 
 - A path is relative to the folder: `./SPEC.md` and `sub/../SPEC.md`
@@ -401,7 +401,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp <slug> notes-old.md --defer
   <line>`), the rest still run, and the exit is 2.
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp <slug> --batch <<'ROWS'
+hq stamp <slug> --batch <<'ROWS'
 SPEC.md --where "3. Retry" --label "refresh contract; s3 is the retry schedule"
 notes-idp-quirks.md --read-before edit --label "staging IdP quirks"
 ROWS
@@ -420,13 +420,13 @@ prefix ('d17' vs 'c04')` and `hq supersede: 'd99' not found in
 standing.md` are its refusals (exit 1).
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py note <slug> decision \
+hq note <slug> decision \
   --headline "Refresh in-process, no sidecar" "One caller; latency is fine."
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py note <slug> --batch <<'ROWS'
+hq note <slug> --batch <<'ROWS'
 constraint --headline "Never log token values" "Not even at debug."
 dead-end --headline "httpx event hooks" "A hook cannot retry the request."
 ROWS
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py supersede <slug> d17 d23
+hq supersede <slug> d17 d23
 ```
 
 ### Unfiled
@@ -456,35 +456,36 @@ section is optional: omit it when every item went through `note`.
 
 ### The gate and the Stop hook
 
-Two hooks ship with the plugin beside `hq.py`. Both report and never
-block, and `finish` consults neither: what blocks `finish` is R3, and
-a re-stamp clears R3.
+Two hooks ship with the plugin beside `scripts/hq.py`. Both report
+and never block, and `finish` consults neither: what blocks `finish`
+is R3, and a re-stamp clears R3.
 
 - The gate runs on every Bash, Edit, Write, and NotebookEdit call. It
-  arms on the first `hq.py open <slug>` in the session's transcript and
+  arms on the first `hq open <slug>` in the session's transcript and
   follows the slug opened most recently.
   On the first write after that - an Edit or Write outside
   `working/<slug>/`, or a Bash command that redirects to a file, runs
   `sed -i`, `tee`, `git add`, or `git commit` - it names each gated
   path (`read_before` in {always, edit}) with no read-shaped evidence
   in the session: `handoff gate: <slug>: N gated path(s) not read this
-  session - <path> (lines a-b), ...; read each or run: hq.py read
-  <slug> <path>`. Read each named span, or run `hq.py read` on it,
+  session - <path> (lines a-b), ...; read each or run: hq read
+  <slug> <path>`. Read each named span, or run `hq read` on it,
   before going on with the write; the line comes once per session.
   Evidence is a Read tool call, a `cat`/`head`/`tail`/`less`/`sed -n`
-  naming the path, or an `hq.py read` receipt; `ls`, `wc`, `grep`, and
-  a `stamp` naming the path do not count. A command containing `hq.py`
-  and a write whose target is inside the handoff folder are exempt; a
-  command that only reads from the folder is not, and a target reached
-  through a shell variable is not recognized. `HQ_GATE=0` in the
-  environment turns the gate off; `HQ_GATE_DENY=1` makes it deny the
-  write instead of reporting.
+  naming the path, or an `hq read` receipt; `ls`, `wc`, `grep`, and
+  a `stamp` naming the path do not count. A command whose command
+  word is `hq` or `hq.py` - the tooling itself - and a write whose
+  target is inside the handoff folder are exempt; the word elsewhere
+  on the line exempts nothing, a command that only reads from the
+  folder is not exempt, and a target reached through a shell variable
+  is not recognized. `HQ_GATE=0` in the environment turns the gate
+  off; `HQ_GATE_DENY=1` makes it deny the write instead of reporting.
 - The Stop hook runs at the end of every turn. When a folder's
   `HANDOFF.md` no longer matches the sha its last finished cycle
   recorded and no cycle is open, it tells the user once (the line can
   repeat when the state directory cannot be written): `handoff:
   working/<slug>/HANDOFF.md was written by hand since cycle N finished;
-  run hq.py begin <slug>, then hq.py finish <slug> --log "...", or the
+  run hq begin <slug>, then hq finish <slug> --log "...", or the
   next open reports LEDGER BEHIND`. The move is the one it names.
 
 ### A plan that lives in a todo file
@@ -511,16 +512,15 @@ it - state, decisions, the Now step. Neither restates the other.
 
 Run these steps in order:
 
-1. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py begin <slug>` takes
-   the lock and prints the work list, then `cycle N begun by <session>
-   on <host>`. Each class shows up to five names and `... and N more`,
-   every line indented two spaces under `begin`'s own. Each work-list
-   line and its move:
+1. `hq begin <slug>` takes the lock and prints the work list, then
+   `cycle N begun by <session> on <host>`. Each class shows up to five
+   names and `... and N more`, every line indented two spaces under
+   `begin`'s own. Each work-list line and its move:
    - `unstamped <kind> xN: <names>` - stamp each in step 3.
-   - `sha moved: <path>` - re-read the span (`hq.py read <slug> <path>`
+   - `sha moved: <path>` - re-read the span (`hq read <slug> <path>`
      records the read; a `cat` of the span counts too), then re-stamp
      (R3).
-   - `missing live: <path> - hq.py when <slug> <path>` - run the command
+   - `missing live: <path> - hq when <slug> <path>` - run the command
      shown to check the path was stored right (a repo file is stamped by
      its `~` or absolute path) and re-stamp the correct path; a file
      genuinely gone takes `stamp --successor` or `stamp --archive
@@ -549,13 +549,13 @@ Run these steps in order:
      taken over without `--force`; `begin` prints `hq begin: took over
      from <session>` and `cycle N begun by <session> on <host> at
      <time>, never finished`.
-2. One `hq.py note` per item settled this session, or one `--batch`.
+2. One `hq note` per item settled this session, or one `--batch`.
    `advisory: standing.md lacked its trailing newline; restored` (also
    for `ledger.tsv`, from `stamp`) says a sync or an editor cut the
-   file's last byte and the append put it back; nothing else to do.
-   One `hq.py supersede <slug> <old-id> <new-id>` when a ruling
-   reverses an earlier one.
-3. One `hq.py stamp` per artifact created, re-read, or moved, or one
+   file's last byte and the append put it back; nothing else to do. One
+   `hq supersede <slug> <old-id> <new-id>` when a ruling reverses an
+   earlier one.
+3. One `hq stamp` per artifact created, re-read, or moved, or one
    `--batch`. A refusal (exit 1) means the row stays as it was. The
    texts: `hq stamp: refused: R1: <kind> read_before must stay always
    without --successor or --archive`, `... R1: <kind> status must stay
@@ -575,9 +575,9 @@ Run these steps in order:
    cursor lines the rewrite seat. Each surviving finding becomes a
    `note`, a `stamp`, or a cursor edit in this cycle; return to step 2
    for it, then continue.
-6. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py finish <slug> --log
-   "<one line for the Log>"`. It checks, in order, and exits 1 having
-   written nothing on the first class that fires:
+6. `hq finish <slug> --log "<one line for the Log>"`. It checks, in
+   order, and exits 1 having written nothing on the first class that
+   fires:
    - `hq finish: lock held by <session>; this is <session>` - run
      `begin` first.
    - `W1 ...` / `W2 ...` - as above; `--acknowledge "<reason>"` turns
@@ -619,15 +619,15 @@ Run these steps in order:
 One whole cycle on the example thread, in order:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py begin auth-token-refresh
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py note auth-token-refresh decision \
+hq begin auth-token-refresh
+hq note auth-token-refresh decision \
   --headline "Refresh in-process, no sidecar" "One caller; latency is fine."
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp auth-token-refresh SPEC.md \
+hq stamp auth-token-refresh SPEC.md \
   --where "3. Retry" --label "refresh contract; s3 is the retry schedule"
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py stamp auth-token-refresh \
+hq stamp auth-token-refresh \
   ~/code/poller/scripts/auth.py --label "poller; the 401 branch is under edit"
 # rewrite the cursor; spawn the skeptic; apply what survives
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py finish auth-token-refresh \
+hq finish auth-token-refresh \
   --log "token store and refresh endpoint written"
 ```
 
@@ -636,7 +636,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py finish auth-token-refresh \
 A target with no conforming header was written by some other process.
 Converge the form, destroy no content, in this order:
 
-1. `hq.py adopt <slug>`. On a file with no conforming header it
+1. `hq adopt <slug>`. On a file with no conforming header it
    changes nothing and prints `hq adopt: non-conforming header; write
    a conforming HANDOFF.md first` and the heading inventory (exit 1) -
    the map for step 3.
@@ -691,7 +691,7 @@ Converge the form, destroy no content, in this order:
    section, or a stamped sibling - and settle each label with a
    `stamp` in step 3.
 
-`hq.py adopt <slug>` on an adopted folder prints `hq adopt: already
+`hq adopt <slug>` on an adopted folder prints `hq adopt: already
 adopted; ledger.tsv exists`, and on an empty one `hq adopt: no
 HANDOFF.md in <folder>` (exit 1 each). On success it prints `hq adopt:
 seeded N entries in <slug>` - the ledger's row count: every walk entry
@@ -735,14 +735,12 @@ Resume: kill this session, start a fresh one, run
 
 ## read
 
-1. Resolve `<slug>` per the shared rule. With none given, run
-   `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py list`: one line, read
-   that slug; several, list them and ask which;
-   `hq list: no handoff under <path>`, say so. The last two stop there -
-   never pick the newest, and never fall through to write.
-2. Run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py open <slug>`. It
-   is read-only and prints only what is wrong; silence is good. Each
-   line and its move:
+1. Resolve `<slug>` per the shared rule. With none given, run `hq list`:
+   one line, read that slug; several, list them and ask which; `hq list:
+   no handoff under <path>`, say so. The last two stop there - never
+   pick the newest, and never fall through to write.
+2. Run `hq open <slug>`. It is read-only and prints only what is wrong;
+   silence is good. Each line and its move:
    - `WARNING: W1 ...` / `WARNING: W2 ...` - a recorded line was
      edited since the last finish; report it, read on.
    - `unfinished cycle N held by <session> on <host>` - a session
@@ -756,28 +754,26 @@ Resume: kill this session, start a fresh one, run
      `git log --oneline <sha>..HEAD` to see what landed, and
      `-- <todo path>` for each todo file the Plan points at.
    - `block sha mismatch: hq:<block> ...` - a block was hand-edited;
-     trust `hq.py artifacts` / `hq.py standing`, not the block.
+     trust `hq artifacts` / `hq standing`, not the block.
    - `unresolved anchor in <path>: '<anchor>'` - the heading moved or
      was renamed; read the whole file and, at write time, re-stamp
      with a `--where` that resolves (the worked forms are under "How
      to read the generated blocks"), then re-run `open`.
    - `span moved: <path> [...] -> [...]` - the read block's line
      numbers are stale; the printed spans are current.
-3. Read `HANDOFF.md`. Then, for each line of the `## Read first`
-   block, run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py read <slug>
-   <path>`, the path in any spelling `stamp` accepts - the block's `~`
-   form or its expansion: it prints the resolved span (or the whole
-   file when the row has no anchor) and records the read. A
-   `? unresolved: <anchor>` line follows the spans that did resolve,
-   one per anchor that did not; when nothing else printed, read that
-   file whole. `hq read:
-   <path> not in ledger` means the path was
-   never stamped - read it whole by hand; `hq read: <path> not on
-   disk` means it is gone; `hq read: receipt not written: <error>`
-   (exit 1, after the spans) means the read happened but the state
-   directory refused the receipt - the gate will not credit it. Then
-   read every todo file the Plan points at. A conforming target with
-   no `ledger.tsv` has no generated blocks yet: follow its `## Key
+3. Read `HANDOFF.md`. Then, for each line of the `## Read first` block,
+   run `hq read <slug> <path>`, the path in any spelling `stamp`
+   accepts - the block's `~` form or its expansion: it prints the
+   resolved span (or the whole file when the row has no anchor) and
+   records the read. A `? unresolved: <anchor>` line follows the spans
+   that did resolve, one per anchor that did not; when nothing else
+   printed, read that file whole. `hq read: <path> not in ledger` means
+   the path was never stamped - read it whole by hand; `hq read: <path>
+   not on disk` means it is gone; `hq read: receipt not written:
+   <error>` (exit 1, after the spans) means the read happened but the
+   state directory refused the receipt - the gate will not credit it.
+   Then read every todo file the Plan points at. A conforming target
+   with no `ledger.tsv` has no generated blocks yet: follow its `## Key
    files` `Read now:` pointers by hand; the first write adopts it. A
    target with no conforming header names its own reading order or
    read-first pointers - follow those instead. Read nothing else.
@@ -795,7 +791,7 @@ Resume: kill this session, start a fresh one, run
 
 ## list
 
-`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hq.py list [n]` prints one line
+`hq list [n]` prints one line
 per folder under `working/` that holds a `HANDOFF.md`, newest
 first by the time that file last changed, and writes nothing:
 `<slug>  <Written date>  c<N>  <done>/<total>  <Task line>`. A bare
@@ -823,34 +819,33 @@ how often the thread was worked, not how far it got.
 
 Resolve like read, then read steps 2 and 3. Open questions do not stop
 a check; its job is the review. Then run the write path: `begin`; steps
-2 to 4 only for findings - what `open` printed and what the skeptic
-seat returns - as notes, stamps, and cursor edits; the skeptic seat;
-and `finish --log "check: <n> findings applied"`, counting both kinds.
-A check
-with nothing to apply still runs `finish`, which releases the lock and
-advances the cycle by one. A folder with no
-`ledger.tsv` has `begin` run `adopt` first. A target with no conforming
-header instead runs the adoption pass (write, above) and stops.
+2 to 4 only for findings - what `open` printed and what the skeptic seat
+returns - as notes, stamps, and cursor edits; the skeptic seat; and
+`finish --log "check: <n> findings applied"`, counting both kinds. A
+check with nothing to apply still runs `finish`, which releases the lock
+and advances the cycle by one. A folder with no `ledger.tsv` has `begin`
+run `adopt` first. A target with no conforming header instead runs the
+adoption pass (write, above) and stops.
 
 ## when, diff, artifacts, standing
 
-Each runs the `hq.py` verb of the same name and shows the user its
+Each runs the `hq` verb of the same name and shows the user its
 output, unchanged. None writes anything.
 
-- `hq.py when <slug> <path>`: every ledger row for the path, oldest
+- `hq when <slug> <path>`: every ledger row for the path, oldest
   first, seven tab-separated columns: `path cycle status read_before
   successor reason label`. Over 30 rows, the newest 30 and one line
   `N older rows omitted`.
-- `hq.py diff <slug> <c1> <c2>`: cursor lines of `cycles/c<c1>.md`
+- `hq diff <slug> <c1> <c2>`: cursor lines of `cycles/c<c1>.md`
   absent from `cycles/c<c2>.md` as `- line`, the reverse as `+ line`;
   at most 60 lines plus one naming the cut. No output means the two
   cursors are identical (so `diff <slug> 5 5` prints nothing). `hq
   diff: cNN.md not found` (exit 1) means that cycle was never finished
   here.
-- `hq.py artifacts <slug>`: every live row as a full line, no cap,
+- `hq artifacts <slug>`: every live row as a full line, no cap,
   then `<name>  <kind>?  unstamped` for a file with no row,
   `<name>  conflicted copy` for a sync duplicate, and
   `<name>  unstampable` for a name holding a tab or newline or an entry
   that is not a regular file.
-- `hq.py standing <slug> [--all]`: every unsuperseded item in full;
+- `hq standing <slug> [--all]`: every unsuperseded item in full;
   `--all` adds the superseded ones.

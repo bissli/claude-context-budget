@@ -665,7 +665,7 @@ def test_artifacts_overflow_counts_by_kind_not_by_read_before():
     body = hq.render_artifacts(walk, rows, 'demo').splitlines()
     assert len(body) == 41
     assert sum(1 for ln in body if '  spec  always  ' in ln) == 40
-    assert body[-1] == 'spec x3  - hq.py artifacts demo'
+    assert body[-1] == 'spec x3  - hq artifacts demo'
 
 
 # --- item 16: the walk ------------------------------------------------
