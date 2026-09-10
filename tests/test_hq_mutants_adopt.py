@@ -1137,7 +1137,7 @@ def test_adopt_kf_label_ne_dash_condition(tmp_path, monkeypatch):
     so labeled entries are never tracked and unlabeled entries are, reversing
     whether the label appears in the summary.
     Oracle: a file with a grading label has its label in the manifest log
-    or triggers standard adopt behaviour (exits 0).
+    or triggers standard adopt behavior (exits 0).
     """
     folder = _root(tmp_path, monkeypatch)
     (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n', encoding='utf-8')

@@ -1060,7 +1060,7 @@ def test_verb_begin_no_ledger_triggers_creation(tmp_path, monkeypatch):
     """_verb_begin() checks for 'ledger.tsv' (lowercase) to detect a new folder.
 
     Mutation: 'LEDGER.TSV' is never found, so no_ledger is always True;
-    a folder with HANDOFF.md + ledger.tsv is erroneously re-initialised.
+    a folder with HANDOFF.md + ledger.tsv is erroneously re-initialized.
     Oracle: a folder with both HANDOFF.md and ledger.tsv must NOT re-create.
     """
     folder = _new_root(tmp_path, monkeypatch)
@@ -1658,7 +1658,7 @@ def test_verb_finish_label_row_continue_not_break(tmp_path, monkeypatch):
     """_verb_finish() continues past single-row paths in the label check.
 
     Mutation: (mutmut_350, 376, 379) continue -> break stops the loop after
-    the first single-row path, the first '-'-labelled path, or the first
+    the first single-row path, the first '-'-labeled path, or the first
     shorter-label path, missing checks on subsequent paths.
     Oracle: two paths, one with 1 row (skip), one with 2 rows (check); both
     must be processed.

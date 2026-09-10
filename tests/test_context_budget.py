@@ -884,7 +884,7 @@ def test_the_decision_numbers_survive_a_narrow_pane():
     Mutation: putting the directory or the model first, as most status
     lines do. A pane is cut from the right, so the two fields that carry
     the decision are the ones lost.
-    Oracle: hand-checked - the visible line with colour stripped must
+    Oracle: hand-checked - the visible line with color stripped must
     start with the size and fit a narrow split.
     """
     visible = re.sub(r'\x1b\[[0-9;]*m', '', sl.render({

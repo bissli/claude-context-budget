@@ -380,7 +380,7 @@ def test_stamp_on_an_unreadable_directory_does_not_raise(tmp_path, monkeypatch):
     Mutation: _do_stamp counting a directory itself instead of through
     _line_count, so the OSError escapes as a traceback.
     Oracle: exit 0 and lines '0' on the row; the directory is restored
-    readable afterwards so tmp_path can be removed.
+    readable afterward so tmp_path can be removed.
     """
     if os.geteuid() == 0:
         return
