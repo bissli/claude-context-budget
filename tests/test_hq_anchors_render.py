@@ -114,6 +114,37 @@ def test_dash_separated_number_is_a_section_token():
     assert hq._norm_heading('## s11b: Proof') == 'proof'
 
 
+def test_letter_led_section_id_resolves_by_its_id():
+    """`F7`, `f7`, and `sF7` resolve `## F7. Title`; `Q3` resolves `## Q3: Title`.
+
+    Mutation: the section index accepting digit-led tokens alone, so a
+    heading keyed `F<n>` has no short anchor and only its full title
+    resolves; or _norm_heading leaving `F7.` in place, so the title alone
+    does not resolve either; or the id compared without its letters, so
+    `F7` lands on `## 7. Seven`.
+    Oracle: hand-computed spans on the fixture - `## 7. Seven` is lines
+    3-4, `## F7. ...` lines 5-6, `## Q3: ...` lines 7-8.
+    """
+    text = (
+        '# Findings\n'
+        '\n'
+        '## 7. Seven\n'
+        'body\n'
+        '## F7. Cache hit ratio holds (n>=2)\n'
+        'body\n'
+        '## Q3: Open question\n'
+        'body\n'
+    )
+    for anchor in ('F7', 'f7', 'sF7'):
+        assert hq.resolve_where(text, [anchor]) == ([(5, 6)], []), anchor
+    assert hq.resolve_where(
+        text, ['Cache hit ratio holds (n>=2)']) == ([(5, 6)], [])
+    assert hq.resolve_where(text, ['q3']) == ([(7, 8)], [])
+    assert hq.resolve_where(text, ['s7']) == ([(3, 4)], [])
+    assert hq._norm_heading(
+        '## F7. Cache hit ratio holds (n>=2)') == 'cache hit ratio holds (n>=2)'
+
+
 def test_literal_proof_resolves_to_11b_heading_by_text_match():
     """Literal anchor 'Proof' resolves to '# 11b. Proof' via normalized text.
 

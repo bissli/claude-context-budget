@@ -234,9 +234,10 @@ How to read the generated blocks:
   resolves: for `## s4: Field-to-path mapping`, `s4`, `s4: Field-to-path
   mapping`, or `Field-to-path mapping`; for `## 4. Cache warmup`, `s4` or
   `Cache warmup`; for `# 11b. Proof`, `s11b`, `11b. Proof`, or `Proof`;
-  for `#### 2a - Basis`, `s2a`, `2a - Basis`, or `Basis`. Re-run `hq
-  open` after the re-stamp; a `?` that survives means the anchor is
-  still wrong.
+  for `#### 2a - Basis`, `s2a`, `2a - Basis`, or `Basis`; for `## F65.
+  Long title`, `F65`, `f65`, `sF65`, or `Long title`. Re-run `hq open`
+  after the re-stamp; a `?` that survives means the anchor is still
+  wrong.
 - `Artifacts`: one full line, `path  kind  read_before  cNN  label`,
   per live row with `read_before` in {always, edit, mention}, and
   `path  spec?  unstamped` for a file on disk with no row. Rows with
@@ -385,7 +386,9 @@ hq stamp <slug> notes-old.md --defer
   all count as the number 4; a bare `S4 ...` is a word, not a number. A
   number may carry one letter when a `.`, `:`, or ` - ` follows it:
   `s11b` names `# 11b. Proof`, `s11` does not, and a bare `3D ...` or
-  `2a-b ...` is a word.
+  `2a-b ...` is a word. A heading keyed by a letter-led id, `## F65.
+  Title` or `## Q3: Title`, is named by that id - `F65`, `f65`, or
+  `sF65` - and `F7` never lands on `## 7. Seven`.
 - `--successor P` sets `status=superseded read_before=never` unless
   the stamp says otherwise. `--archive` sets `status=archived
   read_before=never`; without `--reason` it prints `hq stamp: --archive

@@ -423,39 +423,56 @@ def resolve_where(
       Equality on the whole token is required, so ``s11`` does not resolve
       to ``# 11b. Proof``. A bare ``S3`` word without a dot or colon is not
       a token. A literal heading match is tried first.
+    - A letter-led id, ``<letters><d>[<letter>]`` followed by ``.``, ``:``,
+      or `` - ``, is a token too: ``F65``, ``f65``, and ``sF65`` all resolve
+      ``## F65. Title``. The letters count, so ``F7`` never lands on
+      ``## 7. Seven``.
     - The literal match is equality on the normalized text, never
       containment, so ``Retry`` does not land on ``## Retry budget``.
     - An unresolved anchor prints ``?`` in its span slot during rendering.
     """
     file_lines = text.splitlines()
-    heading_info: list[tuple[int, int, str, str]] = []
+    heading_info: list[tuple[int, int, str, set[str]]] = []
     for i, line in enumerate(file_lines):
         if line.startswith('#'):
             level = len(line) - len(line.lstrip('#'))
-            number_m = re.match(
-                r'^#+\s*(?:(\d+[a-z])(?:[.:]|\s+-(?=\s))|(\d+)[.:]?|s(\d+[a-z]?)[.:])'
-                r'(?=\s|$)',
+            token_m = re.match(
+                r'^#+\s*(?:(\d+[a-z])(?:[.:]|\s+-(?=\s))|(\d+)[.:]?'
+                r'|([a-z]+)(\d+[a-z]?)(?:[.:]|\s+-(?=\s)))(?=\s|$)',
                 line, re.IGNORECASE)
-            number = ''
-            if number_m:
-                number = next((g for g in number_m.groups() if g), '').lower()
-            heading_info.append((i + 1, level, _norm_heading(line), number))
+            tokens: set[str] = set()
+            if token_m:
+                letters, id_digits = token_m.group(3), token_m.group(4)
+                if letters is None:
+                    tokens.add((token_m.group(1) or token_m.group(2)).lower())
+                else:
+                    tokens.add((letters + id_digits).lower())
+                    # `s4:` numbers the heading 4 as `4.` does.
+                    if letters.lower() == 's':
+                        tokens.add(id_digits.lower())
+            heading_info.append((i + 1, level, _norm_heading(line), tokens))
     spans: list[tuple[int, int]] = []
     unresolved: list[str] = []
     total = len(file_lines)
     for part in anchors:
-        # The s<d> form must be read before normalizing: _norm_heading
-        # strips the very token that names the section.
+        # The s<d> and id forms must be read before normalizing:
+        # _norm_heading strips the very token that names the section.
+        anchor_keys: list[str] = []
         section_m = re.fullmatch(r's(\d+[a-z]?)', part.strip(), re.IGNORECASE)
+        if section_m:
+            anchor_keys.append(section_m.group(1).lower())
+        ident_m = re.fullmatch(r's?([a-z]+\d+[a-z]?)', part.strip(), re.IGNORECASE)
+        if ident_m:
+            anchor_keys.extend([ident_m.group(1).lower(), part.strip().lower()])
         norm_part = _norm_heading(part)
         match_idx = None
         for j, (_, _, norm_h, _) in enumerate(heading_info):
             if norm_part and norm_h == norm_part:
                 match_idx = j
                 break
-        if match_idx is None and section_m:
-            for j, (_, _, _, number) in enumerate(heading_info):
-                if number == section_m.group(1).lower():
+        if match_idx is None and anchor_keys:
+            for j, (_, _, _, tokens) in enumerate(heading_info):
+                if tokens.intersection(anchor_keys):
                     match_idx = j
                     break
         if match_idx is None:
@@ -1359,9 +1376,10 @@ def _norm_heading(text: str) -> str:
     Notes
     -----
     - The leading section token is ``<d>``, ``<d>.``, ``<d>:``, ``<d> -``,
-      ``<d><letter>.``, ``<d><letter>:``, ``<d><letter> -``, or
-      ``s<d>[<letter>][.:]``, so ``## 11b. Proof``, ``## s11b: Proof``, and
-      ``## 2a - Basis`` all resolve. A bare ``S3`` (no dot or colon) is a
+      ``<d><letter>.``, ``<d><letter>:``, ``<d><letter> -``, or a
+      letter-led id ``<letters><d>[<letter>]`` with the same delimiters,
+      so ``## 11b. Proof``, ``## s11b: Proof``, ``## 2a - Basis``, and
+      ``## F65. Title`` all resolve. A bare ``S3`` (no dot or colon) is a
       word, and stays.
     - The dash delimiter needs whitespace on both sides, so ``2a-b`` in
       ``## 2a-b range`` is not a token and its ``2`` is stripped by the
@@ -1372,7 +1390,8 @@ def _norm_heading(text: str) -> str:
     """
     text = re.sub(r'^[#\s]+', '', text)
     text = re.sub(
-        r'^(?:s\d+[a-z]?[.:]|\d+[a-z]?(?:[.:]|\s+-(?=\s))|\d[\d.]*:?)\s*',
+        r'^(?:[a-z]+\d+[a-z]?(?:[.:]|\s+-(?=\s))|\d+[a-z]?(?:[.:]|\s+-(?=\s))'
+        r'|\d[\d.]*:?)\s*',
         '', text, flags=re.IGNORECASE)
     text = re.sub(r'`', '', text)
     return text.strip().lower()
