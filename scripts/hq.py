@@ -2434,7 +2434,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     #   adopting session rides in the note with the adopt date and sha.
     archive_text = archive.read_text(encoding='utf-8-sig', errors='replace')
     archive_parsed = split_handoff(archive_text)
-    written_m = re.search(r'Written:\s*(\S+)', archive_parsed['header'])
+    written_m = re.search(r'Written:\s*(\d{4}-\d{2}-\d{2})', archive_parsed['header'])
     archive_written = written_m.group(1) if written_m else ts[:10]
     repos_m = re.search(r'\|\s*(\S+)\s*@\s*([0-9a-f]+)', archive_parsed['header'])
     archive_repos = f'{repos_m.group(1)}@{repos_m.group(2)}' if repos_m else '-'

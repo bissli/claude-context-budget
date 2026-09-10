@@ -602,6 +602,36 @@ def test_adopt_row_describes_the_archive_and_notes_its_own_provenance(
         ' in cycles/c04.md')
 
 
+
+def test_adopt_row_written_is_the_date_alone_or_the_adopt_date(
+        tmp_path, monkeypatch):
+    """`written` on the adopt row is the header's YYYY-MM-DD, else the adopt date.
+
+    Mutation: taking the first token after `Written:` whole, so a
+    timestamped header persists `2026-08-31T09:15:00` and an empty one
+    persists `|`, each rendered into every later Log line; or the
+    fallback dropped, so an empty date crashes adopt.
+    Oracle: hand-computed - `Written: 2026-08-31T09:15:00 | Cycle: 2`
+    gives `2026-08-31`; `Written: | Cycle: 2`, which the header pattern
+    accepts, gives HQ_NOW's date `2026-09-01`.
+    """
+    stamped = _root(tmp_path, monkeypatch, slug='ptr-stamped')
+    (stamped / 'HANDOFF.md').write_text(
+        f'# Handoff: {stamped.name}\n\n'
+        'Written: 2026-08-31T09:15:00 | Cycle: 2\n\n## Task\n\nx\n',
+        encoding='utf-8')
+    undated = _root(tmp_path, monkeypatch, slug='ptr-undated')
+    (undated / 'HANDOFF.md').write_text(
+        f'# Handoff: {undated.name}\n\nWritten: | Cycle: 2\n\n## Task\n\nx\n',
+        encoding='utf-8')
+
+    assert hq.main(['adopt', 'ptr-stamped']) == 0
+    assert hq.main(['adopt', 'ptr-undated']) == 0
+
+    assert _manifest(stamped)[-1]['written'] == '2026-08-31'
+    assert _manifest(undated)[-1]['written'] == '2026-09-01'
+
+
 # --- HANDOFF*.md at the top level only ---
 
 
