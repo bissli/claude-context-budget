@@ -1949,6 +1949,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     kf_free_text = ''
     kf_raw_text = ''
     kf_more_path = re.compile(r'^\s*,\s*(`[^`]+`|[^\s,]+)(.*)$', re.DOTALL)
+    where_dropped: list[tuple[str, str]] = []
 
     def _flush_kf_pointer(path_tok: str, free: str, group: str, raw: str) -> None:
         """Record the current Key files pointer into kf_map.
@@ -2015,7 +2016,24 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             if range_m:
                 tok = range_m.group(1)
                 tok_free = f'lines {range_m.group(2)}; {tok_free}'.rstrip('; ')
-            stored, _, base = _pointer_path(folder, tok)
+            stored, path_obj, base = _pointer_path(folder, tok)
+            # An anchor is seeded only where it resolves: a bare `s1` in
+            # prose most often names a step of another file, and a seed
+            # that cannot resolve prints `?` in the read block every
+            # cycle.
+            tok_where = '-'
+            if where_val != '-':
+                candidates = where_val.split(';')
+                unresolved = candidates
+                if path_obj.is_file():
+                    _, unresolved = resolve_where(
+                        path_obj.read_text(encoding='utf-8', errors='replace'),
+                        candidates)
+                tok_where = ';'.join(
+                    a for a in candidates if a not in unresolved) or '-'
+                for anchor in unresolved:
+                    if (stored, anchor) not in where_dropped:
+                        where_dropped.append((stored, anchor))
             label = tok_free.strip() or '-'
             if stored in kf_map:
                 # A second bullet naming the same path adds to its row
@@ -2034,12 +2052,12 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
                 else:
                     rb_merged = None
                 anchors_seen = [p for p in prev_where.split(';') if p and p != '-']
-                for anchor in where_val.split(';'):
+                for anchor in tok_where.split(';'):
                     if anchor and anchor != '-' and anchor not in anchors_seen:
                         anchors_seen.append(anchor)
                 kf_map[stored] = (label, rb_merged, ';'.join(anchors_seen) or '-')
             else:
-                kf_map[stored] = (label, rb_over, where_val)
+                kf_map[stored] = (label, rb_over, tok_where)
             if not first_stored:
                 first_stored = stored
                 first_part = tok_free.strip() or '-'
@@ -2366,6 +2384,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         print(f'  read_before={rb_val}: {cnt}')
     if gated_cnt:
         print(f'  gated ({gated_cnt}): {", ".join(gated_names[:5])}')
+    for path_dropped, anchor_dropped in where_dropped:
+        print(f'  where dropped: {path_dropped} {anchor_dropped!r}')
     _ = never_cnt
     # Notes:
     # - The first line measures the file adopt read: every line must

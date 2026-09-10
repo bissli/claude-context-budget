@@ -868,7 +868,8 @@ def test_adopt_sref_findall_is_ignorecase(tmp_path, monkeypatch):
     Oracle: SPEC.md with label 'see Section 3' yields where='s3'.
     """
     folder = _root(tmp_path, monkeypatch)
-    (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n', encoding='utf-8')
+    (folder / 'SPEC.md').write_text(
+        '# Spec\n\n## 3. Retry\n\nContent.\n', encoding='utf-8')
     _handoff(folder, key_files='- `SPEC.md` see Section 3\n')
     assert hq.main(['adopt', _SLUG]) == 0
     rows = {r['path']: r for r in _ledger(folder)}

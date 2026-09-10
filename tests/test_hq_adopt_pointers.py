@@ -275,7 +275,8 @@ def test_where_seed_accepts_trailing_letter_on_section_number(
     cites 'section 11b' and 'section 12, Migration'.
     """
     folder = _root(tmp_path, monkeypatch)
-    (folder / 'DESIGN.md').write_text('# Design\n')
+    (folder / 'DESIGN.md').write_text(
+        '# Design\n\n## 11b. Proof\n\nx\n\n## 12. Migration\n\ny\n')
     _handoff(folder, key_files=(
         '- `DESIGN.md` covers section 11b and section 12, Migration\n'))
 
@@ -293,13 +294,40 @@ def test_where_seed_plain_number_unchanged(tmp_path, monkeypatch):
     Oracle: ledger where field is 's5'.
     """
     folder = _root(tmp_path, monkeypatch)
-    (folder / 'DESIGN.md').write_text('# Design\n')
+    (folder / 'DESIGN.md').write_text('# Design\n\n## 5. Details\n\nx\n')
     _handoff(folder, key_files='- `DESIGN.md` see section 5 for details\n')
 
     assert hq.main(['adopt', _SLUG]) == 0
 
     rows = {r['path']: r for r in _ledger(folder)}
     assert rows['DESIGN.md']['where'] == 's5'
+
+
+def test_where_seed_keeps_only_anchors_the_file_resolves(
+        tmp_path, monkeypatch, capsys):
+    """An `s<n>` word whose section is not in the pointed file is not seeded.
+
+    Mutation: the mined anchors written unfiltered, so `s1` from prose
+    naming another file's step seeds `where=s1`, the read block renders
+    `?`, and `open` reports it every cycle; or the dropped anchor not
+    printed, so the loss is silent at adopt time.
+    Oracle: notes-cache.md has headings 2 and 4 only; the label cites
+    `s1`, `s2`, and `section 4`, so the row's where is `s2;s4` and the
+    summary prints `where dropped: notes-cache.md 's1'`.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'notes-cache.md').write_text(
+        '# Cache\n\n## 2. Layout\n\nx\n\n## 4. Eviction\n\ny\n')
+    _handoff(folder, key_files=(
+        '- `notes-cache.md` Read now: layout (s2), the S1 premise, and\n'
+        '  eviction under section 4\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['notes-cache.md']['where'] == 's2;s4'
+    out = capsys.readouterr().out
+    assert "  where dropped: notes-cache.md 's1'" in out
 
 
 # --- The adopt Log roll-up ---

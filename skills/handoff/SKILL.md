@@ -677,8 +677,12 @@ Converge the form, destroy no content, in this order:
    cycle 1, archived as `cycles/c01.md`. `adopt` infers kinds, seeds
    the read obligations, and prints what still needs judgment: `label:
    <text>` per seeded label, `read_before=<x>: <n>` counts, `gated
-   (n): <names>`, `Key files pointer not on disk: <path>`, `skipped
-   conflicted copy: <name>`, `unstampable name: <name>` (a tab or
+   (n): <names>`, `where dropped: <path> '<anchor>'` (an `s<n>` or
+   `section <n>` the label cites that names no heading of that file -
+   `s1` in prose most often means another file's step; where it was
+   meant, re-stamp with a `--where` that resolves), `Key files pointer
+   not on disk: <path>`, `skipped conflicted copy: <name>`,
+   `unstampable name: <name>` (a tab or
    newline in the name, or a socket or FIFO; rename the file before
    stamping it), `advisory: R1 ...`, and the conservation line:
    `conservation: every original line carried`, or `conservation: N
