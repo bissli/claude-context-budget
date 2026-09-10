@@ -438,6 +438,31 @@ def test_an_anchor_cited_twice_on_one_bullet_is_seeded_once(
     assert 'notes-x.md:3-6  ' in (folder / 'HANDOFF.md').read_text()
 
 
+def test_a_label_less_pointer_to_a_walked_file_seeds_one_row(
+        tmp_path, monkeypatch, capsys):
+    r"""`- \`SPEC.md\`` with no text grades the walk row and adds no second row.
+
+    Mutation: the walk marking a pointer as matched only when it carries
+    a label, so a bare pointer seeds a duplicate row and the summary
+    counts and lists the file twice.
+    Oracle: one SPEC.md row, read_before always; the summary reads
+    `seeded 2 entries` for SPEC.md and notes-a.md and `gated (1)`.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'SPEC.md').write_text('# Spec\n')
+    (folder / 'notes-a.md').write_text('# A\n')
+    _handoff(folder, key_files='Read now:\n- `SPEC.md`\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = _ledger(folder)
+    assert [r['path'] for r in rows].count('SPEC.md') == 1
+    assert {r['path']: r for r in rows}['SPEC.md']['read_before'] == 'always'
+    out = capsys.readouterr().out
+    assert f'hq adopt: seeded 2 entries in {_SLUG}' in out
+    assert '  gated (1): SPEC.md' in out
+
+
 # --- The adopt Log roll-up ---
 
 

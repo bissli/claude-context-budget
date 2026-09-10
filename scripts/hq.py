@@ -2248,7 +2248,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             status = 'superseded'
             rb = 'never'
         kf_label, kf_rb, kf_where = kf_map.get(name, ('-', None, '-'))
-        if kf_label != '-':
+        if name in kf_map:
             kf_matched.add(name)
         if kf_rb is not None and successor == '-':
             # Apply 'edit' only when kind is notes; always
