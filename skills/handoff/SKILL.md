@@ -15,7 +15,8 @@ allowed-tools: Bash(hq *)
 # Handoff
 
 One folder per task thread, `.handoff/<slug>/` at the repo root
-(`git rev-parse --show-toplevel`; the cwd outside a repo). Its
+(`git rev-parse --show-toplevel`; outside a repo, the nearest ancestor
+of the cwd that already holds `.handoff/`, else the cwd). Its
 `HANDOFF.md` carries what a fresh session needs to resume and nothing
 the repo already records. Write near the budget, then kill the session:
 a total clear, in which only this folder and the repo survive. Run

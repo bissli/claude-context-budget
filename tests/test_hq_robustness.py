@@ -381,3 +381,33 @@ def test_access_error_without_a_path_prints_a_placeholder(
     out, _ = capsys.readouterr()
     assert rc == 1
     assert out == 'hq: cannot access ?: OSError\n'
+
+
+# --- A cwd inside the handoff tree ---
+
+
+def test_root_resolves_to_the_ancestor_holding_the_handoff_dir(
+        tmp_path, monkeypatch, capsys):
+    """Outside git, a cwd inside .handoff/<slug>/ or any subdirectory of
+    the root resolves the root to the ancestor that holds .handoff/.
+
+    Mutation: the walk-up dropped, so the cwd is the root and `open` looks
+    for <folder>/.handoff/<slug> and exits 2 with `no folder matching`.
+    Oracle: `open` and `list` exit 0 from inside the folder, from a probe
+    directory nested in it, and from an unrelated subdirectory of the root;
+    `list` names the slug.
+    """
+    root, folder = _setup(tmp_path, monkeypatch)
+    _begin(_SLUG, folder)
+    capsys.readouterr()
+    monkeypatch.delenv('HQ_ROOT')
+    probes = folder / 'probes'
+    probes.mkdir()
+    deep = root / 'src' / 'pkg'
+    deep.mkdir(parents=True)
+    for cwd in (folder, probes, deep):
+        monkeypatch.chdir(cwd)
+        assert hq.main(['open', _SLUG]) == 0, f'open failed from {cwd}'
+        capsys.readouterr()
+        assert hq.main(['list']) == 0
+        assert capsys.readouterr().out.startswith(f'{_SLUG}  ')

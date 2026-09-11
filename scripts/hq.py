@@ -1088,13 +1088,18 @@ def _resolve_root(argv: argparse.Namespace) -> pathlib.Path:
     -------
     pathlib.Path
         Project root, in priority order: ``--root`` flag, ``HQ_ROOT``
-        env var, ``git rev-parse --show-toplevel``, cwd.
+        env var, ``git rev-parse --show-toplevel``, the nearest ancestor
+        of the cwd (itself included) that holds a ``.handoff`` directory,
+        cwd.
 
     Notes
     -----
     - A root that exists and is not a directory exits 2; every caller
       would otherwise raise NotADirectoryError joining ``.handoff`` onto
       it.
+    - The ancestor walk covers a shell whose cwd moved into
+      ``.handoff/<slug>/`` outside a repo; taking that cwd as the root
+      would look for ``.handoff/<slug>/.handoff/<slug>``.
     """
     root = getattr(argv, 'root', None) or os.environ.get('HQ_ROOT')
     if root:
@@ -1112,7 +1117,12 @@ def _resolve_root(argv: argparse.Namespace) -> pathlib.Path:
             capture_output=True, text=True, check=True)
         return pathlib.Path(out.stdout.strip())
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return pathlib.Path.cwd()
+        pass
+    cwd = pathlib.Path.cwd()
+    for ancestor in (cwd, *cwd.parents):
+        if (ancestor / HANDOFF_DIRNAME).is_dir():
+            return ancestor
+    return cwd
 
 
 def _git_state(root: pathlib.Path) -> tuple[str, str, list[str]]:
