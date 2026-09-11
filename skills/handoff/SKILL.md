@@ -728,7 +728,11 @@ Converge the form, destroy no content, in this order:
    not on disk: <path>`, `skipped conflicted copy: <name>`,
    `unstampable name: <name>` (a tab or
    newline in the name, or a socket or FIFO; rename the file before
-   stamping it), `advisory: R1 ...`, and the conservation line:
+   stamping it), `advisory: R1 ...`, `unfiled: <n> bullets to rehome`
+   (the `- unfiled:` bullets the rewrite left under `## Unfiled`; each
+   blocks `finish` until it is typed `decision:`, `constraint:`, or
+   `dead-end:`, moved into a cursor section, or rehomed to a sibling),
+   and the conservation line:
    `conservation: every original line carried`, or `conservation: N
    original lines not carried` with one `not carried: <line>` line under
    it per missing line, each printed whole - text of the file `adopt`

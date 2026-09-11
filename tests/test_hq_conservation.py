@@ -126,3 +126,31 @@ def test_conservation_reports_a_label_heading_outside_key_files(
     assert rc == 0
     assert 'conservation: 1 original lines not carried' in out
     assert 'not carried: ## Reference only, until the audit clears' in out
+
+
+def test_adopt_counts_the_bullets_it_left_unfiled(tmp_path, monkeypatch, capsys):
+    """adopt names how many Unfiled bullets the rewrite left behind.
+
+    Mutation: the summary reporting conservation alone, so a run that
+    parks every foreign line under ## Unfiled prints 'every original line
+    carried' and the agent meets the untyped-bullet refusal only at
+    finish; or the line printed after the conservation block, where it
+    reads as one of its 'not carried' lines.
+    Oracle: hand-computed - a foreign section of two bullets yields two
+    '- unfiled:' bullets, so the summary reads 'unfiled: 2 bullets to
+    rehome' above the conservation line; a file with nothing unfiled
+    prints no such line.
+    """
+    folder = _setup(tmp_path, monkeypatch)
+    _write_handoff(folder, '\n## Background context\n\n- One stray note.\n'
+                   '- Another stray note.\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    out = capsys.readouterr().out
+    assert '  unfiled: 2 bullets to rehome' in out.splitlines()
+    assert out.index('unfiled: 2') < out.index('conservation:')
+    clean = _setup(tmp_path, monkeypatch, slug='cons-clean')
+    _write_handoff(clean)
+    assert hq.main(['adopt', 'cons-clean']) == 0
+    assert 'unfiled:' not in capsys.readouterr().out

@@ -2690,6 +2690,11 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         print(f'  gated ({gated_cnt}): {", ".join(gated_names[:5])}')
     for path_dropped, anchor_dropped in where_dropped:
         print(f'  where dropped: {path_dropped} {anchor_dropped!r}')
+    # Conservation counts a line parked under ## Unfiled as carried,
+    # yet every such bullet blocks finish until it is retyped; the
+    # count is the agent's one notice of that work.
+    if unfiled_parts:
+        print(f'  unfiled: {len(unfiled_parts)} bullets to rehome')
     _ = never_cnt
     # Notes:
     # - The first line measures the file adopt read: every line must
