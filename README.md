@@ -219,6 +219,8 @@ session chose.)
 `.handoff/` belongs in the project's gitignore when handoffs should stay
 untracked. Versions before 0.3.0 wrote to `working/`, and before 0.2.2
 to `scratch/`; move each old folder to `.handoff/<task-name>/` once.
+After the move, `hq open` names every cursor line and standing item
+that still says `working/<task-name>/`.
 
 ## What you see
 
