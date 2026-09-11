@@ -593,7 +593,7 @@ def artifact_lines(
     walk: list[tuple[str, str]],
     rows: dict[str, Row],
 ) -> tuple[list[str], dict[str, int], dict[str, int]]:
-    """Sort every artifact into a full line, a never count, or a non-live count.
+    """Sort artifacts into full lines, a never count, and a non-live count.
 
     Parameters
     ----------
@@ -1082,7 +1082,7 @@ def conservation(
             flags=re.IGNORECASE)
 
     def _joined(part: str) -> list[str]:
-        """Return the part's lines with each indented line joined on the one above.
+        """Join each indented line onto the line above and return the lines.
         """
         out_lines: list[str] = []
         for raw in part.splitlines():
@@ -2184,9 +2184,9 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
                 in_header = False
             elif in_header:
                 header_tail.append(line.strip())
-            # A paragraph wrapped at the column is one item, as under Key
-            # files: a plain line continues the open run, a bullet or a
-            # heading opens a new one, a blank line ends it.
+            # A paragraph wrapped at the column is one item, as under
+            # Key files: a plain line continues the open run, a bullet
+            # or a heading opens a new one, a blank line ends it.
             if line.strip() and not line.startswith('# ') and not in_header:
                 if preamble_open and not item_start.match(line):
                     preamble[-1] += ' ' + line.strip()
@@ -3875,7 +3875,7 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
 
 
 def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int:
-    """Run open: print status, drift, W1/W2, sha-moved rows, stale folder paths.
+    """Run open: print status, drift, W1/W2, sha-moved rows, and stale paths.
 
     Parameters
     ----------

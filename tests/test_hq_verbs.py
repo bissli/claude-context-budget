@@ -1378,7 +1378,8 @@ def test_adopt_joins_a_wrapped_lead_in_sentence_into_one_unfiled_bullet(
     assert hq.main(['adopt', _SLUG]) == 0
 
     items, _ = hq._parse_standing((folder / 'standing.md').read_text())
-    assert [i['headline'] for i in items] == ['Keep the retry ceiling at four attempts.']
+    assert [i['headline'] for i in items] == [
+        'Keep the retry ceiling at four attempts.']
     text = (folder / 'HANDOFF.md').read_text()
     assert [ln for ln in text.splitlines() if ln.startswith('- unfiled: ')] == [
         '- unfiled: These rulings govern the loader and survive every rewrite'

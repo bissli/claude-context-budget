@@ -302,7 +302,8 @@ def test_finish_success_and_advisory_lines_have_their_documented_shape(
     _run(['begin', _SLUG])
     _spec(folder)
     (folder / 'notes-x.md').write_text('# Notes\n')
-    assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'a long spec label here'])[0] == 0
+    assert _run(
+        ['stamp', _SLUG, 'SPEC.md', '--label', 'a long spec label here'])[0] == 0
     assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'short'])[0] == 0
     rc, out, _ = _run(['finish', _SLUG, '--log', 'one'])
     assert rc == 0
@@ -511,7 +512,7 @@ def test_finish_advises_when_the_artifacts_block_is_over_its_cap(
 
 
 def test_supersede_prints_the_item_it_drops_from_the_block(tmp_path, monkeypatch):
-    """supersede echoes the superseded item's stored line as it leaves the block.
+    """supersede echoes the superseded item's stored line as it leaves.
 
     Mutation: the echo dropped, the new id's item echoed instead of the
     old one, or the headline echoed without the body a decision never
@@ -535,7 +536,7 @@ def test_supersede_prints_the_item_it_drops_from_the_block(tmp_path, monkeypatch
 
 
 def test_open_names_a_folder_path_under_another_directory(tmp_path, monkeypatch):
-    """open reports cursor and standing text naming the folder outside .handoff/.
+    """open names cursor and standing text placing the folder under an old dir.
 
     Mutation: HANDOFF.md scanned and not standing.md, the scan widened to
     any directory so a source tree named after the slug reports as a
@@ -583,7 +584,8 @@ def test_shorter_label_advisory_fires_only_in_the_cycle_that_shortened_it(
     folder = _root(tmp_path, monkeypatch)
     _run(['begin', _SLUG])
     _spec(folder)
-    assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'a long spec label here'])[0] == 0
+    assert _run(
+        ['stamp', _SLUG, 'SPEC.md', '--label', 'a long spec label here'])[0] == 0
     assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'short'])[0] == 0
     rc, out, _ = _run(['finish', _SLUG, '--log', 'one'])
     assert rc == 0

@@ -161,7 +161,7 @@ def test_multi_path_bullet_seeds_one_row_per_path(tmp_path, monkeypatch):
 
 def test_multi_range_pointer_seeds_the_bare_path_with_the_ranges_in_its_label(
         tmp_path, monkeypatch, capsys):
-    """A `path:96-115,157` pointer seeds the bare path, ranges leading the label.
+    """A multi-range pointer seeds the bare path with the ranges in its label.
 
     Mutation: the range group accepting one segment only, so the comma
     token resolves nowhere and is seeded missing/never under a junk path;
@@ -226,7 +226,7 @@ def test_paths_joined_by_and_each_take_a_row_sharing_the_text(
 
 def test_a_continuation_line_keeps_a_leading_dash_used_as_punctuation(
         tmp_path, monkeypatch):
-    """A wrapped line opening with `- ` keeps its dash in the label and in Unfiled.
+    """A wrapped line opening with `- ` keeps its dash in label and Unfiled.
 
     Mutation: the continuation stripped of a leading list marker, so a
     dash used as punctuation is deleted and the two clauses weld into a
@@ -405,13 +405,14 @@ def test_reference_only_grades_a_non_notes_row_mention_so_its_label_shows(
     assert (rows['stack.yaml']['read_before'], rows['stack.yaml']['label']) == (
         'mention', 'the stack config')
     assert rows['sub/helper.py']['read_before'] == 'mention'
-    assert (rows['SPEC.md']['read_before'], rows['SPEC.md']['reason']) == ('always', '-')
+    assert (rows['SPEC.md']['read_before'], rows['SPEC.md']['reason']) == (
+        'always', '-')
     assert rows['probes']['read_before'] == 'never'
 
 
 def test_an_ungraded_header_that_mentions_a_label_word_still_grades_mention(
         tmp_path, monkeypatch):
-    """A colon line holding 'read now' mid-sentence is no label and grades mention.
+    """A colon line saying 'read now' mid-sentence grades mention, not always.
 
     Mutation: the grade test a substring match, so the header text an
     ungraded group carries as its grade matches 'read now' or 'reference
@@ -463,7 +464,7 @@ def test_a_bare_multi_range_pointer_after_a_separator_keeps_its_ranges(
 
 def test_two_bullets_to_one_path_under_an_ungraded_group_merge_to_mention(
         tmp_path, monkeypatch):
-    """Two bullets naming one path under an ungraded group keep the mention grade.
+    """Two bullets to one path under an ungraded group keep the mention grade.
 
     Mutation: the merge carrying always and edit only, so two mention
     grades collapse to none and the merged row reads never with its label

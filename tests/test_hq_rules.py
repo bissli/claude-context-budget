@@ -127,15 +127,21 @@ def test_an_authored_notes_or_todo_name_beats_a_design_heading():
 
     Mutation: the heading rule left above the name rules, so a notes file
     whose first heading opens 'Design' is stamped spec/always and R1
-    refuses every later demotion; or the name rules moved above the
-    _SPEC_PATS rule, so a DESIGN-todo.md stops being a spec.
+    refuses every later demotion; the name rules moved above the
+    _SPEC_PATS rule, so a DESIGN-todo.md stops being a spec; or the name
+    rules moved back below the draft-extension rule, so a top-level
+    notes-*.py is a gated draft again.
     Oracle: hand-derived from the first-match table as reordered, with
     the heading-only guide.md and the DESIGN-* name as the control rows.
     """
+    assert hq.infer_kind('notes-probe.py', False, '') == ('notes', 'never')
     assert hq.infer_kind(
-        'notes-widget-deltas.md', False, '# Design deltas to close') == ('notes', 'never')
-    assert hq.infer_kind('REVIEW-pass2.md', False, '## Design notes') == ('notes', 'never')
-    assert hq.infer_kind('todo-widget.md', False, '# Design of the todo') == ('todo', 'never')
+        'notes-widget-deltas.md', False, '# Design deltas to close',
+        ) == ('notes', 'never')
+    assert hq.infer_kind(
+        'REVIEW-pass2.md', False, '## Design notes') == ('notes', 'never')
+    assert hq.infer_kind(
+        'todo-widget.md', False, '# Design of the todo') == ('todo', 'never')
     assert hq.infer_kind('guide.md', False, '# Design') == ('spec', 'always')
     assert hq.infer_kind('DESIGN-todo.md', False, '# Design') == ('spec', 'always')
 
@@ -850,7 +856,8 @@ def test_drain_unfiled_runs_a_short_label_headline_on_and_still_refuses_none():
     ]
     _, _, refusal = hq.drain_unfiled(
         '## Task\nx\n\n## Unfiled\n- decision: . rest of the thing\n')
-    assert refusal == "Unfiled bullet has no headline: '- decision: . rest of the thing'"
+    assert refusal == (
+        "Unfiled bullet has no headline: '- decision: . rest of the thing'")
 
 
 def test_collisions_ignore_a_capital_at_sentence_start():
@@ -870,7 +877,7 @@ def test_collisions_ignore_a_capital_at_sentence_start():
 
 
 def test_collisions_ignore_a_capital_opening_a_list_item():
-    """A capital at the head of a Now bullet or heading is position, not a term.
+    """A capital heading a Now bullet or a heading is position, not a term.
 
     Mutation: the sentence-start test reading only the character before
     the word, so a bullet marker or a heading mark leaves 'Lattice'
@@ -884,7 +891,8 @@ def test_collisions_ignore_a_capital_opening_a_list_item():
     assert hq.collisions('- Lattice must hold.', [], headings, {'Lattice': 1}) == []
     assert hq.collisions('### Lattice next', [], headings, {'Lattice': 1}) == []
     assert hq.collisions('1. Lattice first.', [], headings, {'Lattice': 1}) == []
-    assert len(hq.collisions('Fix the Lattice path.', [], headings, {'Lattice': 1})) == 1
+    assert len(hq.collisions(
+        'Fix the Lattice path.', [], headings, {'Lattice': 1})) == 1
     cam = [('SPEC.md', 9, 'LatticeCache is frozen')]
     assert len(hq.collisions(
         '- LatticeCache was renamed.', [], cam, {'LatticeCache': 1})) == 1
@@ -942,7 +950,7 @@ def test_standing_cap_keeps_the_superseded_line():
 
 
 def test_the_standing_cut_takes_from_the_longest_kind_first():
-    """The 80-line cut spreads across kinds, longest first, keeping every heading.
+    """The 80-line cut spreads across kinds, longest first, and keeps headings.
 
     Mutation: the list truncated from the end, so the cut lands on the
     dead ends alone - x13 to x26 gone in the first fixture and the whole
@@ -961,7 +969,8 @@ def test_the_standing_cut_takes_from_the_longest_kind_first():
     items = _items('c', 26, 'why it holds') + _items('d', 38, '') + _items('x', 26, '')
     lines = hq.render_standing(items, set(), 'widget-alpha').splitlines()
     assert len(lines) == 80
-    assert [lines.count(h) for h in ('### Constraints', '### Decisions', '### Dead ends')] == [1, 1, 1]
+    headings = ('### Constraints', '### Decisions', '### Dead ends')
+    assert [lines.count(h) for h in headings] == [1, 1, 1]
     assert [sum(ln.startswith(f'[{p}') for ln in lines) for p in 'cdx'] == [25, 26, 25]
     assert lines[-1] == '... 14 more  - hq standing widget-alpha'
     lines = hq.render_standing(
@@ -1135,9 +1144,11 @@ def test_conservation_passes_a_rewrap_and_still_flags_a_drop():
     truncated = '## Plan\n- Rework the loader to use batch reads.\n- Then ship it.\n'
     assert hq.conservation(original, rewrapped, '', []) == []
     assert hq.conservation(original, truncated, '', []) == [bullet]
-    glued = '## Plan\n- Rework the loader to use batch reads instead of one read per row,'
+    glued = (
+        '## Plan\n- Rework the loader to use batch reads instead of one read per row,')
     assert hq.conservation(f'{glued}\n', rewrapped, '', []) == []
-    assert hq.conservation('- Then ship it. - Rework the loader\n', rewrapped, '', []) == [
+    assert hq.conservation(
+        '- Then ship it. - Rework the loader\n', rewrapped, '', []) == [
         '- Then ship it. - Rework the loader']
 
 
