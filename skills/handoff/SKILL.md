@@ -699,11 +699,12 @@ Converge the form, destroy no content, in this order:
    wording unchanged: `## Key files`, its bullets under a `Read now:`
    line and a `Reference only:` line - a clause after the label is fine,
    `Read now, under x/ unless noted:`, wrapped over several lines or
-   not; a label grades every bullet below it until the next label, and
-   a line ending in `:` that is neither label ends the group and opens
-   an ungraded one, whose pointers seed `mention` so their labels stay
-   in view (a spec or draft stays `always`) - with a path first on each
-   bullet
+   not; `Read now:` seeds `always`, `Reference only:` seeds `edit` on a
+   notes file and `mention` on any other, and a spec or draft stays
+   `always` under either; a label grades every bullet below it until
+   the next label, and a line ending in `:` that is neither label ends
+   the group and opens an ungraded one, whose pointers seed `mention`
+   so their labels stay in view - with a path first on each bullet
    and its text on the same line or an indented line below (`adopt`
    grades them into the ledger and the read block; a pointer may name
    lines after a colon, `mod.py:96-115,157`, and the ledger stores the

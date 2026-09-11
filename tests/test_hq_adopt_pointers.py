@@ -372,6 +372,43 @@ def test_a_colon_line_that_is_no_label_opens_an_ungraded_mention_group(
     assert '- unfiled: Read before touching the gateway:' in text
 
 
+def test_reference_only_grades_a_non_notes_row_mention_so_its_label_shows(
+        tmp_path, monkeypatch):
+    """Under `Reference only:` a notes file reads edit, any other file mention.
+
+    Mutation: the mention fallback dropped, so a .yaml or a nested .py
+    stays never and its label folds into the Artifacts count unseen; or
+    the fallback applied without the never guard, so the spec is demoted
+    to mention and R1 refuses it with an advisory.
+    Oracle: hand-computed from the kind table - notes to edit, other to
+    mention with its label kept, spec to always with no refusal, and a
+    directory with no pointer stays never.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'SPEC.md').write_text('# Spec\n')
+    (folder / 'notes-bg.md').write_text('# Bg\n')
+    (folder / 'stack.yaml').write_text('a: 1\n')
+    (folder / 'sub').mkdir()
+    (folder / 'sub' / 'helper.py').write_text('x = 1\n')
+    (folder / 'probes').mkdir()
+    _handoff(folder, key_files=(
+        'Reference only:\n'
+        '- `SPEC.md` the spec\n'
+        '- `notes-bg.md` background notes\n'
+        '- `stack.yaml` the stack config\n'
+        '- `sub/helper.py` the nested helper\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['notes-bg.md']['read_before'] == 'edit'
+    assert (rows['stack.yaml']['read_before'], rows['stack.yaml']['label']) == (
+        'mention', 'the stack config')
+    assert rows['sub/helper.py']['read_before'] == 'mention'
+    assert (rows['SPEC.md']['read_before'], rows['SPEC.md']['reason']) == ('always', '-')
+    assert rows['probes']['read_before'] == 'never'
+
+
 # --- The conservation witness ---
 
 

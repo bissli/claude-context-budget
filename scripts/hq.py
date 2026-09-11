@@ -2252,8 +2252,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         if 'read now' in grade:
             rb_over = 'always'
         elif 'reference only' in grade:
-            # 'edit' override only applies to notes-kind files
-            # (design s12 step 3).
+            # edit lands on a notes file; the seeding branches turn it
+            # into mention for any other ungated kind.
             rb_over = 'edit'
         elif grade:
             # An ungraded group: the label stays in view, the file is
@@ -2479,11 +2479,12 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         if kf_rb is not None and successor == '-':
             # Notes:
             # - always applies to every kind; edit only to a notes file.
-            # - mention lifts a row that would otherwise read never, so
-            #   its label shows, and never demotes a gated kind.
+            # - Any other grade lifts a row that would otherwise read
+            #   never to mention, so its label shows in the Artifacts
+            #   block, and never demotes a gated kind.
             if kf_rb == 'always' or (kf_rb == 'edit' and kind == 'notes'):
                 rb = kf_rb
-            elif kf_rb == 'mention' and rb == 'never':
+            elif rb == 'never':
                 rb = 'mention'
         row: Row = {
             'cycle': cycle_str, 'ts': ts, 'path': name, 'base': 'folder',
@@ -2538,7 +2539,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         # The grade applies exactly as the walk branch applies it.
         if kf_rb == 'always' or (kf_rb == 'edit' and kind == 'notes'):
             rb = kf_rb
-        elif kf_rb == 'mention' and rb == 'never':
+        elif kf_rb is not None and rb == 'never':
             rb = 'mention'
         row = {
             'cycle': cycle_str, 'ts': ts, 'path': stored_again, 'base': base,
