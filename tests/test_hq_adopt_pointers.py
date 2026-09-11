@@ -224,6 +224,35 @@ def test_paths_joined_by_and_each_take_a_row_sharing_the_text(
     assert [rows[p]['label'] for p in ('one.md', 'two.md')] == ['the pair', 'the pair']
 
 
+def test_a_continuation_line_keeps_a_leading_dash_used_as_punctuation(
+        tmp_path, monkeypatch):
+    """A wrapped line opening with `- ` keeps its dash in the label and in Unfiled.
+
+    Mutation: the continuation stripped of a leading list marker, so a
+    dash used as punctuation is deleted and the two clauses weld into a
+    sentence the author never wrote - 'is deliberate it holds' - in the
+    ledger label and in the loose bullet alike.
+    Oracle: hand-computed - the bullet's free text, one space, and the
+    continuation line exactly as written, for a pointer and for a loose
+    bullet.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'module-map.md').write_text('# Map\n')
+    _handoff(folder, key_files=(
+        '- `module-map.md` - the rotation path is deliberate\n'
+        '  - it holds the client secret\n'
+        '- Earlier material is parked\n'
+        '  - never read it first\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['module-map.md']['label'] == (
+        'the rotation path is deliberate - it holds the client secret')
+    text = (folder / 'HANDOFF.md').read_text()
+    assert '- unfiled: - Earlier material is parked - never read it first' in text
+
+
 # --- The conservation witness ---
 
 

@@ -708,7 +708,8 @@ Converge the form, destroy no content, in this order:
    two bullets naming one path merge into one row, labels joined with
    `; `, or a space after a label that ends a sentence, and anchors with
    `;`; a bullet whose first token is not a path
-   lands whole under `## Unfiled`, its indented lines joined); `##
+   lands whole under `## Unfiled`, its indented lines joined as
+   written); `##
    Decisions`, `## Constraints`, and `## Dead ends` (moved whole into
    `standing.md`, one item per bullet or unindented line; a sentence
    above the first bullet of a bulleted section introduces the bullets,

@@ -2339,8 +2339,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     #   word is text: the pointer's free text when indented under one,
     #   Unfiled otherwise.
     # - An indented line continues the open pointer or, when none is
-    #   open, the loose bullet above it, so a wrapped bullet stays one
-    #   item either way.
+    #   open, the loose bullet above it, as written, so a wrapped bullet
+    #   stays one item either way.
     # - A ` - ` separator between the path and its text is structure.
     kf_group = ''
     kf_loose: list[str] = []
@@ -2385,11 +2385,14 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             kf_free_text = bm.group(2)
             kf_raw_text = re.sub(r'^\s*[-*+]\s+', '', line).strip()
         elif line.startswith(' ') and line.strip() and kf_path_token:
-            continued = re.sub(r'^[-*+]\s+', '', line.strip())
-            kf_free_text += ' ' + continued
-            kf_raw_text += ' ' + continued
+            # A dash opening a wrapped line is kept: as punctuation it
+            # is the author's wording, and as a nested marker it costs
+            # one `- ` in the label, where stripping it would weld two
+            # clauses into a sentence never written.
+            kf_free_text += ' ' + line.strip()
+            kf_raw_text += ' ' + line.strip()
         elif line.startswith(' ') and line.strip() and kf_loose_current:
-            kf_loose_current += ' ' + re.sub(r'^[-*+]\s+', '', line.strip())
+            kf_loose_current += ' ' + line.strip()
         elif line.strip():
             _flush_kf_pointer(kf_path_token, kf_free_text, kf_group, kf_raw_text)
             kf_path_token = ''
