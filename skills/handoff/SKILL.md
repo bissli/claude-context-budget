@@ -695,7 +695,9 @@ Converge the form, destroy no content, in this order:
    `;`; a bullet whose first token is not a path
    lands whole under `## Unfiled`, its indented lines joined); `##
    Decisions`, `## Constraints`, and `## Dead ends` (moved whole into
-   `standing.md`, one item per bullet or unindented line); and `## Log`
+   `standing.md`, one item per bullet or unindented line; a sentence
+   above the first bullet of a bulleted section introduces the bullets,
+   is no item, and lands under `## Unfiled`); and `## Log`
    (carried in the manifest row). Map every other foreign section to
    the cursor section carrying the same kind of fact - Task, Now, Plan,
    State, Environment, Open questions - and keep every fact. A

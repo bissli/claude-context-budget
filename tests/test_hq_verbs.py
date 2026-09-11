@@ -1321,6 +1321,40 @@ def test_key_files_continuation_with_one_space_joins_the_label(
         'first half of the label second half')
 
 
+def test_adopt_files_a_lead_in_sentence_above_the_first_bullet_under_unfiled(
+        tmp_path, monkeypatch, capsys):
+    """A lead-in sentence above a section's first bullet is not an item.
+
+    Mutation: every unindented non-empty line read as an item, so the
+    lead-in is filed as [x01] and stands in the block for good; or the
+    skip generalized past the first bullet, so a bullet-free section
+    loses all its items.
+    Oracle: the hand-written fixture - the two bullets are the only dead
+    ends, the lead-in is read back verbatim under ## Unfiled, and the
+    three-line bullet-free Constraints section still seeds three items.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    _conforming(folder, 2, '## Task\nx\n\n## Constraints\n'
+                'Never below one.\nAlways above zero.\nKeep the floor.\n\n'
+                '## Dead ends\nDo not retry these.\n'
+                '- Tried caching the row; the lock still breaks it.\n'
+                '- Tried an async retry loop; the same lock blocks it.\n\n'
+                '## Log\n- 2026-09-01: started\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    items, _ = hq._parse_standing((folder / 'standing.md').read_text())
+    assert [(i['id'], i['headline']) for i in items] == [
+        ('c01', 'Never below one.'),
+        ('c02', 'Always above zero.'),
+        ('c03', 'Keep the floor.'),
+        ('x01', 'Tried caching the row; the lock still breaks it.'),
+        ('x02', 'Tried an async retry loop; the same lock blocks it.'),
+    ]
+    assert '- unfiled: Do not retry these.' in (folder / 'HANDOFF.md').read_text()
+    assert 'conservation: every original line carried' in capsys.readouterr().out
+
+
 def test_adopt_headline_ends_at_a_sentence_not_a_dot(tmp_path, monkeypatch):
     """A plain item's headline is its first sentence, dots inside words kept.
 

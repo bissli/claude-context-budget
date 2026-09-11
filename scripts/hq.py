@@ -2432,9 +2432,18 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         'Constraints': 'constraint',
         'Dead ends': 'dead-end',
         }
+    lead_ins: list[str] = []
+    item_marker = re.compile(r'^(?:[-*]\s+|\d+[.)]\s+)')
     for section_name, kind_str in section_kind_map.items():
         current_kind = kind_str
         bullet_lines: list[str] = []
+        section_lines = sections_raw.get(section_name, [])
+        # A bulleted section may open with a sentence that introduces
+        # the bullets rather than being one; standing.md has no delete,
+        # so filing it would cost a block line for good.
+        first_bullet = next(
+            (i for i, ln in enumerate(section_lines) if item_marker.match(ln)),
+            None)
 
         def _flush_bullet(lines: list[str]) -> None:
             """Format and append one standing bullet to standing.md.
@@ -2454,14 +2463,19 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
 
         # An item starts at any unindented non-empty line, whatever its
         # marker; an indented line continues the item above it.
-        for line in sections_raw.get(section_name, []):
+        for idx, line in enumerate(section_lines):
             if not line.strip():
                 continue
             if line.startswith(' ') and bullet_lines:
                 bullet_lines.append(line)
-            else:
-                _flush_bullet(bullet_lines)
-                bullet_lines = [line]
+                continue
+            _flush_bullet(bullet_lines)
+            bullet_lines = []
+            if (first_bullet is not None and idx < first_bullet
+                    and not item_marker.match(line)):
+                lead_ins.append(line.strip())
+                continue
+            bullet_lines = [line]
         _flush_bullet(bullet_lines)
 
     # --- Step 5: rewrite HANDOFF.md ---
@@ -2473,7 +2487,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         body = '\n'.join(sections_raw.get(h, [])).strip()
         cursor_parts.append(f'## {h}\n{body}' if body else f'## {h}')
 
-    unfiled_parts: list[str] = [f'- unfiled: {ln}' for ln in preamble + kf_loose]
+    unfiled_parts: list[str] = [
+        f'- unfiled: {ln}' for ln in preamble + kf_loose + lead_ins]
     for h, lines in sections_raw.items():
         if h in _cursor_headings:
             continue
