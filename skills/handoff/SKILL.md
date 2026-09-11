@@ -23,8 +23,12 @@ a total clear, in which only this folder and the repo survive. Run
 `/handoff <slug>` in a fresh one. A later bare `/handoff` updates the
 same file.
 
-The plugin puts `hq` on the agent's PATH while it is enabled. Every
-verb but `list` takes the slug first. Five flags before the verb -
+The plugin puts `hq` on the agent's PATH while it is enabled. After a
+plugin update mid-session the PATH still names the old version's
+directory and `hq` fails with `command not found`: run
+`/reload-plugins`, or until then call the shim by its path,
+`~/.claude/plugins/cache/claude-handoff/claude-handoff/<version>/bin/hq`.
+Every verb but `list` takes the slug first. Five flags before the verb -
 `--root DIR`, `--cycle N`, `--now ISO`, `--session ID`, `--host H` -
 override the `HQ_ROOT`, `HQ_CYCLE`, `HQ_NOW`, `HQ_SESSION`, and
 `HQ_HOST` environment values the script otherwise reads; a session
