@@ -3,30 +3,40 @@
 
 A handoff ledger marks some artifacts read_before=always or edit. Those
 are the files whose content the next session has to hold before it
-changes anything - the spec it is building to, the decision it must not
-undo. Nothing enforces that today: the agent opens the handoff, reads
+changes anything - the spec it is building to, the draft it is about to
+edit. Nothing enforces that today: the agent opens the handoff, reads
 the cursor, and edits the repo without ever opening the spec.
 
-This hook watches for the first write after an ``hq open`` and, when
-a gated path has not been read this session, hands the model one line
-naming the path and the lines to read.
+This hook watches each write after an ``hq open`` and, when a gated
+path the write needs has not been read this session, hands the model
+one line naming the path and the lines to read.
 
 Notes
 -----
 - The hook runs on every Bash, Edit, Write, and NotebookEdit call on the
-  machine, so the common path does one directory glob and stops. Only a
-  write inside a project that already holds a handoff ledger costs more.
-- It speaks once per session. A gate that repeats becomes noise, and the
-  model has the message in context from the first time.
+  machine, so the common path globs the ancestors of the write target
+  and of cwd for a ledger and stops. Only a write that reaches a project
+  holding a handoff ledger costs more.
+- Reach is decided by the write target, never by cwd alone: the root is
+  the nearest ancestor of the target holding ``.handoff/*/ledger.tsv``,
+  and a target under no such root is in reach only under the armed
+  folder's pinned work dir.
+- An ``always`` row is named at the first write in reach; an ``edit``
+  row at a write to its own path. Each path is named once per session:
+  a gate that repeats becomes noise, and the model has the message in
+  context from the first time.
 - It fails open in every direction: bad payload, missing transcript,
   unreadable ledger, or any unexpected exception exits 0 in silence. A
   broken gate must never stop a tool call.
-- Evidence of a read is the Read tool, a read verb in a Bash command, or
-  an ``hq read`` receipt. A path named to ``ls``, ``wc``, or ``grep``
-  was listed or searched, not read.
-- A write is exempt when one of its targets resolves inside the armed
-  folder from the payload's cwd. A ``cd`` inside the command and a
-  shell variable holding the path are not seen, so such a write still
+- Evidence of a read is the Read tool, the path as an argument of a
+  shell segment whose command word is a read verb, or an ``hq read``
+  receipt. A path named to ``ls``, ``wc``, or ``grep`` was listed or
+  searched, not read, and a path piped into ``head`` was never its
+  argument.
+- A write into the armed folder is the handoff's own bookkeeping and
+  names no ``always`` row; an ``edit`` row is still named when the
+  target is its own path. A ``cd`` inside the command and a shell
+  variable holding the path are not seen, so such a write still
   reports.
 """
 
@@ -58,7 +68,12 @@ _FD_REDIRECT = re.compile(r'\d?>\s*&\s*\d')
 _NULL_REDIRECT = re.compile(r'(?:\d|&)?>\s*/dev/null')
 _INPLACE = re.compile(r'\bsed\s+-[a-zA-Z]*i|\bsed\s+--in-place')
 _WRITE_VERB = re.compile(r'\btee\s|\bgit\s+add\b|\bgit\s+commit\b')
-_READ_VERB = re.compile(r'\b(?:cat|head|tail|less)\s|\bsed\s+-n\b')
+# The command word of a read segment, after an opening paren and any
+# variable assignments, is a read verb; sed counts only with -n, since
+# a bare sed edits and prints alike.
+_READ_SEGMENT = re.compile(
+    r'^[\s(]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*'
+    r'(?:(?:cat|head|tail|less)\s|sed\s+-n\b)')
 # A redirect's target is the one word after `>`, `>>`, or the
 # noclobber form `>|`, cut at the shell punctuation that ends it.
 _REDIRECT_TARGET = re.compile(r'>>?\|?\s*([^\s;|&()<>]+)')
@@ -174,7 +189,8 @@ def scan_transcript(text: str) -> tuple[str, list[str], list[str]]:
     tuple[str, list[str], list[str]]
         The slug of the last ``hq open`` in the chunk or '' when it
         holds none, the file_path of every Read tool call, and every
-        Bash command carrying a read verb.
+        shell segment of a Bash command whose command word is a read
+        verb, its redirect targets dropped.
 
     Notes
     -----
@@ -185,10 +201,14 @@ def scan_transcript(text: str) -> tuple[str, list[str], list[str]]:
       or records text - a grep or sed on the phrase, a commit message -
       is a mention and arms nothing; quoted under an executor such as
       ``bash -c``, or inside a ``$(``, it is the command and arms.
+    - A segment is the run between ``;``, ``|``, ``&``, and newline,
+      heredoc bodies dropped first. ``cat f | head`` yields ``cat f``;
+      ``hq when s f | head`` and ``grep x f | head`` yield ``head``,
+      which names no path.
     """
     slug = ''
     reads: list[str] = []
-    commands: list[str] = []
+    segments: list[str] = []
     for line in text.splitlines():
         if '"tool_use"' not in line:
             continue
@@ -220,9 +240,8 @@ def scan_transcript(text: str) -> tuple[str, list[str], list[str]]:
                 for opened in _OPEN_VERB.finditer(command):
                     if not any(a <= opened.start() < b for a, b in mention_spans):
                         slug = opened.group(1)
-                if _READ_VERB.search(command):
-                    commands.append(command)
-    return slug, reads, commands
+                segments.extend(_REDIRECT_TARGET.sub(' ', segment).strip() for segment in _SEGMENT_SPLIT.split(_strip_heredocs(command)) if _READ_SEGMENT.match(segment))
+    return slug, reads, segments
 
 
 def gate(payload: dict[str, Any]) -> int:
@@ -244,7 +263,8 @@ def gate(payload: dict[str, Any]) -> int:
     -----
     - Session state lives beside the context-budget state, keyed
       ``<session>.handoff.json`` under HQ_STATE_DIR, and holds the
-      transcript offset already scanned so no call rescans from 0.
+      transcript offset already scanned so no call rescans from 0, and
+      ``reported``, the stored paths already named this session.
     - The Stop hook writes the ``stop`` key of that same file, so the
       whole document is read and rewritten, never replaced.
     """
@@ -252,32 +272,56 @@ def gate(payload: dict[str, Any]) -> int:
         return 0
     name = hq.HANDOFF_DIRNAME
     cwd = str(payload.get('cwd') or '')
-    start = pathlib.Path(cwd or '.')
-    root = None
-    for candidate in [start, *start.parents]:
-        if next((candidate / name).glob('*/ledger.tsv'), None):
-            root = candidate
-            break
-    if root is None:
-        return 0
-
     tool = str(payload.get('tool_name') or '')
     fields = payload.get('tool_input') or {}
     command = str(fields.get('command') or '')
+    # Notes:
+    # - A Bash target is the word after a redirect, or a non-flag word
+    #   of an in-place edit or a write verb up to the end of its shell
+    #   segment.
+    # - A quoted target keeps its text while a quoted operator loses
+    #   its angle brackets, so `> ".handoff/x/f"` counts as a write into
+    #   the folder and `grep '>' .handoff/x/f > out` does not.
     if tool in WRITE_TOOL_TARGETS:
-        named = str(fields.get(WRITE_TOOL_TARGETS[tool]) or '')
-        if not named:
-            return 0
-        target = pathlib.Path(os.path.expanduser(named))
-        if not target.is_absolute():
-            target = pathlib.Path(cwd) / target
-        handoffs = os.path.normpath(str(root / name)) + os.sep
-        if os.path.normpath(str(target)).startswith(handoffs):
+        spelled = [str(fields.get(WRITE_TOOL_TARGETS[tool]) or '')]
+        if not spelled[0]:
             return 0
     elif tool == 'Bash':
         if not bash_writes(command):
             return 0
+        text = _QUOTED.sub(
+            lambda m: re.sub(r'[<>]', ' ', m.group(0)[1:-1]),
+            _strip_heredocs(command))
+        text = _NULL_REDIRECT.sub(' ', _FD_REDIRECT.sub(' ', text))
+        spelled = [m.group(1) for m in _REDIRECT_TARGET.finditer(text)]
+        for verb in [*_INPLACE.finditer(text), *_WRITE_VERB.finditer(text)]:
+            segment = _SEGMENT_SPLIT.split(text[verb.end():])[0]
+            spelled += [t for t in segment.split() if not t.startswith('-')]
     else:
+        return 0
+    # Every target is joined to cwd when relative and normalized, so
+    # `../../src/f` written from inside the folder resolves outside it.
+    # os.path.expanduser leaves `~nouser/f` as written where pathlib's
+    # raises, and a raise here would silence the gate.
+    targets: list[str] = []
+    for target in spelled:
+        resolved = pathlib.Path(os.path.expanduser(target))
+        if not resolved.is_absolute():
+            resolved = pathlib.Path(cwd or '.') / resolved
+        targets.append(os.path.normpath(str(resolved)))
+
+    # The root is the target's, so a write reaches the project it lands
+    # in from any cwd; cwd's root is the fallback for a write verb with
+    # no target and for a target only the pin can cover.
+    root = None
+    for start in [*targets, cwd or '.']:
+        for candidate in [pathlib.Path(start), *pathlib.Path(start).parents]:
+            if next((candidate / name).glob('*/ledger.tsv'), None):
+                root = candidate
+                break
+        if root is not None:
+            break
+    if root is None:
         return 0
 
     session = str(payload.get('session_id') or 'unknown').replace('/', '_')
@@ -290,12 +334,13 @@ def gate(payload: dict[str, Any]) -> int:
     if not isinstance(state, dict):
         state = {}
     held = state.get('gate') or {}
-    if held.get('reported'):
-        return 0
     offset = int(held.get('offset') or 0)
     slug = str(held.get('slug') or '')
     reads = list(held.get('reads') or [])
-    commands = list(held.get('read_commands') or [])
+    segments = list(held.get('read_commands') or [])
+    reported = held.get('reported')
+    if not isinstance(reported, list):
+        reported = []
 
     transcript = pathlib.Path(str(payload.get('transcript_path') or ''))
     try:
@@ -310,11 +355,11 @@ def gate(payload: dict[str, Any]) -> int:
         # rather than split across two scans and lost.
         chunk = chunk[:chunk.rfind(b'\n') + 1]
         offset += len(chunk)
-        found, new_reads, new_commands = scan_transcript(
+        found, new_reads, new_segments = scan_transcript(
             chunk.decode('utf-8', 'replace'))
         slug = found or slug
         reads.extend(new_reads)
-        commands.extend(new_commands)
+        segments.extend(new_segments)
 
     folder = None
     if slug:
@@ -328,44 +373,41 @@ def gate(payload: dict[str, Any]) -> int:
                 ]
             folder = matches[0] if len(matches) == 1 else None
     # Notes:
-    # - A write inside the folder is the handoff's own bookkeeping, so
-    #   the folder is exempt as a write target and never as a read
-    #   source. A target is the word after a redirect, or a non-flag
-    #   word of an in-place edit or a write verb up to the end of its
-    #   shell segment.
-    # - A target that spells the folder path is exempt as written, so
-    #   `$ROOT/.handoff/x/f` still counts. Every other target is joined
-    #   to cwd when relative and normalized: a bare `smoke.log` written
-    #   from inside the folder is exempt, as is the folder itself
-    #   (`git add .` run from it), and `../../src/f` written from
-    #   there is not.
-    # - os.path.expanduser leaves `~nouser/f` as written where
-    #   pathlib's raises, and a raise here would silence the gate.
-    # - A quoted target keeps its text while a quoted operator loses
-    #   its angle brackets, so `> ".handoff/x/f"` counts as a write into
-    #   the folder and `grep '>' .handoff/x/f > out` does not.
-    if folder is not None and tool == 'Bash':
-        text = _QUOTED.sub(
-            lambda m: re.sub(r'[<>]', ' ', m.group(0)[1:-1]),
-            _strip_heredocs(command))
-        text = _NULL_REDIRECT.sub(' ', _FD_REDIRECT.sub(' ', text))
-        targets = [m.group(1) for m in _REDIRECT_TARGET.finditer(text)]
-        for verb in [*_INPLACE.finditer(text), *_WRITE_VERB.finditer(text)]:
-            segment = _SEGMENT_SPLIT.split(text[verb.end():])[0]
-            targets += [t for t in segment.split() if not t.startswith('-')]
-        prefix = f'{name}/{folder.name}/'
+    # - A target under the pin is in reach from any cwd: the pin is
+    #   where this thread's made files live. A target under neither the
+    #   root nor the pin is another project's, and the command is
+    #   silent unless no target could be read at all (`git commit`),
+    #   when the write is the cwd's.
+    # - A write inside the armed folder is the handoff's own
+    #   bookkeeping and names no `always` row. A target that spells the
+    #   folder path is such a write as written, so `$ROOT/.handoff/x/f`
+    #   still counts; every other target is judged resolved, so a bare
+    #   `smoke.log` written from inside the folder is bookkeeping, as
+    #   is the folder itself (`git add .` run from it), and
+    #   `../../src/f` written from there is not. An Edit tool aimed
+    #   anywhere under `.handoff/` is bookkeeping the same way.
+    own = False
+    if folder is not None and targets:
+        pin, _ = hq.resolve_work_dir(folder)
+        if pin and not pin.startswith(('/', '~')):
+            pin = str(root / pin)
+        bases = [os.path.normpath(str(root)) + os.sep]
+        if pin:
+            bases.append(os.path.normpath(os.path.expanduser(pin)) + os.sep)
+        if not any((t + os.sep).startswith(b) for t in targets for b in bases):
+            folder = None
+    if folder is not None:
         inside = os.path.normpath(str(folder)) + os.sep
-        for target in targets:
-            resolved = pathlib.Path(os.path.expanduser(target))
-            if not resolved.is_absolute():
-                resolved = pathlib.Path(cwd) / resolved
-            if (prefix in target
-                or (os.path.normpath(str(resolved)) + os.sep).startswith(inside)):
-                folder = None
-                break
+        if tool == 'Bash':
+            prefix = f'{name}/{folder.name}/'
+            own = any(
+                prefix in target or (resolved + os.sep).startswith(inside)
+                for target, resolved in zip(spelled, targets))
+        else:
+            handoffs = os.path.normpath(str(root / name)) + os.sep
+            own = targets[0].startswith(handoffs)
 
     message = ''
-    reported = False
     if folder is not None:
         rows = hq.latest_rows(
             hq._read_tsv(folder / 'ledger.tsv', hq.LEDGER_FIELDS))
@@ -380,7 +422,7 @@ def gate(payload: dict[str, Any]) -> int:
             if not item.is_absolute():
                 item = pathlib.Path(cwd) / item
             opened.add(os.path.normpath(str(item)))
-        tokens = [set(_TOKEN_SPLIT.split(entry)) for entry in commands]
+        tokens = [set(_TOKEN_SPLIT.split(entry)) for entry in segments]
         missing: list[tuple[str, str]] = []
         for row in rows.values():
             if row['status'] != 'live' or row['read_before'] not in hq._GATE_RB:
@@ -391,6 +433,13 @@ def gate(payload: dict[str, Any]) -> int:
             else:
                 target = folder / stored
             absolute = os.path.normpath(str(target))
+            if stored in reported:
+                continue
+            if row['read_before'] == 'edit':
+                if absolute not in targets:
+                    continue
+            elif own:
+                continue
             named = {stored, absolute, os.path.relpath(absolute, cwd or '.')}
             if absolute in opened:
                 continue
@@ -412,7 +461,7 @@ def gate(payload: dict[str, Any]) -> int:
                 span = (f'lines {spans[0][0]}-{spans[0][1]}' if spans
                         else 'anchor not found')
             missing.append((stored, span))
-        reported = True
+        reported.extend(path for path, _ in missing)
         if missing:
             listed = ', '.join(f'{path} ({span})' for path, span in missing)
             message = (f'handoff gate: {folder.name}: {len(missing)} gated '
@@ -423,7 +472,7 @@ def gate(payload: dict[str, Any]) -> int:
         'offset': offset,
         'slug': slug,
         'reads': reads,
-        'read_commands': commands,
+        'read_commands': segments,
         'reported': reported,
         }
     try:

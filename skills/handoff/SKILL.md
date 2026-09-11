@@ -31,8 +31,7 @@ Every verb but `list` and `help` takes the slug first. Exit 0 is
 done; 1 is a refusal or a blocking finding, and nothing is written
 except that a refused `stamp` appends its receipt row; 2 is a usage
 error.
-Every line that calls for a move names it: `<finding> - <what to do>`;
-`hq help <topic>` and `hq <verb> --help` hold the longer forms.
+Every line that calls for a move names it: `<finding> - <what to do>`.
 
 ## The folder
 
@@ -501,14 +500,16 @@ the superseded ones.
 ## The hooks
 
 Two hooks report and, unless the operator sets `HQ_GATE_DENY`, never
-block; `finish` consults neither - R3 is what blocks `finish`. On the
-first write after an `hq open`, the gate names each gated path (graded
-always or edit) with no read-shaped evidence in the session, once.
-Evidence is a Read tool call, a `cat`/`head`/`tail`/`less`/`sed -n`
-naming the path, or an `hq read` receipt; `ls`, `wc`, `grep`, and a
-`stamp` do not count. At the end of a turn, the Stop hook names a
-`HANDOFF.md` written by hand since its last finished cycle and the
-`begin`/`finish` pair that files it.
+block; `finish` consults neither - R3 blocks `finish`. Once `hq open`
+arms it, at a write in reach - under the root or the armed folder's
+pinned work dir - the gate names each unread gated path once: an
+`always` row at the first such write, an `edit` row at a write to that
+file. A read is a Read tool call, the path as an argument of its own
+`cat`/`head`/`tail`/`less`/`sed -n` segment, or an `hq read` receipt;
+`ls`, `wc`, `grep`, a `stamp`, and a path piped into `head` are none.
+At the end of a turn, the Stop hook names a `HANDOFF.md` written by
+hand since its last finished cycle and the `begin`/`finish` pair that
+files it.
 
 
 ## Adoption
