@@ -700,8 +700,11 @@ Converge the form, destroy no content, in this order:
    line and a `Reference only:` line - a clause after the label is fine,
    `Read now, under x/ unless noted:` - with a path first on each bullet
    and its text on the same line or an indented line below (`adopt`
-   grades them into the ledger and the read block; several paths on one
-   bullet, comma-separated, each take a row sharing the bullet's text;
+   grades them into the ledger and the read block; a pointer may name
+   lines after a colon, `mod.py:96-115,157`, and the ledger stores the
+   bare path with the line numbers leading the label; several paths on
+   one bullet, comma-separated, each take a row sharing the bullet's
+   text;
    two bullets naming one path merge into one row, labels joined with
    `; `, or a space after a label that ends a sentence, and anchors with
    `;`; a bullet whose first token is not a path

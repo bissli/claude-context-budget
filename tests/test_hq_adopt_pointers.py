@@ -159,6 +159,39 @@ def test_multi_path_bullet_seeds_one_row_per_path(tmp_path, monkeypatch):
     assert not rows['hq.py']['label'].startswith('`')
 
 
+def test_multi_range_pointer_seeds_the_bare_path_with_the_ranges_in_its_label(
+        tmp_path, monkeypatch, capsys):
+    """A `path:96-115,157` pointer seeds the bare path, ranges leading the label.
+
+    Mutation: the range group accepting one segment only, so the comma
+    token resolves nowhere and is seeded missing/never under a junk path;
+    or the bare form failing the pointer test, so the bullet lands in
+    Unfiled and the path is never seeded.
+    Oracle: the file on disk at the fixture path - one live always row
+    keyed on the bare name, the ranges in its label, and no not-on-disk
+    line.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'loader.py').write_text('# loader\n')
+    (folder / 'saver.py').write_text('# saver\n')
+    _handoff(folder, key_files=(
+        'Read now:\n'
+        '- `loader.py:10-25,40` the loader\n'
+        '- saver.py:12-30,44-46 the saver\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    out = capsys.readouterr().out
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert 'loader.py:10-25,40' not in rows
+    assert (rows['loader.py']['read_before'], rows['loader.py']['status']) == (
+        'always', 'live')
+    assert rows['loader.py']['label'] == 'lines 10-25,40; the loader'
+    assert rows['saver.py']['label'] == 'lines 12-30,44-46; the saver'
+    assert 'Key files pointer not on disk' not in out
+    assert '- unfiled:' not in (folder / 'HANDOFF.md').read_text()
+
+
 # --- The conservation witness ---
 
 

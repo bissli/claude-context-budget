@@ -2253,10 +2253,11 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         first_dir: pathlib.Path | None = None
         for tok in path_toks:
             tok_free = free
-            # A `path:12-40` pointer names lines; the ledger has no
-            # range column, so the range leads the label and the path
-            # stays bare.
-            range_m = re.match(r'^`?([^`]+?):(\d+(?:-\d+)?)`?$', tok)
+            # A `path:12-40` or `path:12-40,57` pointer names lines; the
+            # ledger has no range column, so the ranges lead the label
+            # and the path stays bare.
+            range_m = re.match(
+                r'^`?([^`]+?):(\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)`?$', tok)
             if range_m:
                 tok = range_m.group(1)
                 tok_free = f'lines {range_m.group(2)}; {tok_free}'.rstrip('; ')
@@ -2341,7 +2342,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     kf_loose: list[str] = []
     kf_loose_current = ''
     kf_path_like = re.compile(
-        r'^(?:`[^`]+`|[~./]\S*|\S*/\S+|\S+\.\w{1,5}(?::\d+(?:-\d+)?)?)$')
+        r'^(?:`[^`]+`|[~./]\S*|\S*/\S+'
+        r'|\S+\.\w{1,5}(?::\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)?)$')
     kf_bare_label = re.compile(
         r'^\s*(?:[-*+]\s+|#+\s*)?(?:read now|reference only)\s*:?\s*$',
         re.IGNORECASE)
