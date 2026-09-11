@@ -61,6 +61,10 @@ HANDOFF_DIRNAME = '.handoff'
 # The directories earlier plugin versions kept the folder under; a
 # path written under one of them names where a folder used to be.
 _FORMER_HANDOFF_DIRNAMES = ('working', 'scratch')
+_NOTE_BATCH_LINE = re.compile(
+    r'^(?P<kind>decision|constraint|dead-end)\s+--headline\s+'
+    r'(?:"(?P<dq>[^"]*)"|\'(?P<sq>[^\']*)\'|(?P<bare>[^"\'\s]\S*))'
+    r'(?P<body>.*)$')
 _HEADER_PAT = re.compile(r'Written:\s*.+?\s*\|\s*Cycle:\s*(\d+)')
 # Notes:
 # - A grading label under Key files may be written as its own heading;
@@ -3716,39 +3720,35 @@ def _verb_note(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     Notes
     -----
     - Under ``--batch`` the kind slot holds the batch marker ``-`` (or
-      nothing) and each stdin line carries its own kind, headline, and
-      body, split like a shell line.
+      nothing) and each stdin line reads ``<kind> --headline <headline>
+      <body>``: the headline quoted or one bare word, the body the rest
+      of the line verbatim. Prose is not shell: an apostrophe or a
+      parenthesis in the body carries no meaning here, and a body
+      wrapped whole in one pair of quotes loses only that pair.
     - A batch line that does not parse, names no known kind, or carries
       no headline is reported by number; the rest still run.
     """
     if getattr(argv, 'batch', False):
         rc = 0
-        parser = _build_parser()
-        slug = folder.name
         for line_no, raw_line in enumerate(sys.stdin, 1):
             line = raw_line.strip()
             if not line or line == '-':
                 continue
-            try:
-                sub, rest = parser.parse_known_args(
-                    ['note', slug] + shlex.split(line))
-            except (SystemExit, ValueError):
-                sub, rest = None, []
-            leftover = list(rest)
-            kind_str = getattr(sub, 'note_kind', '') or ''
-            headline = getattr(sub, 'headline', '') or ''
-            unparsed = (
-                kind_str not in {'decision', 'constraint', 'dead-end'}
-                or not headline.strip()
-                or any(tok.startswith('-') and tok != '-' for tok in leftover)
-                )
-            if unparsed:
+            match = _NOTE_BATCH_LINE.match(line)
+            if match is None:
                 print(
                     f'hq note: batch line {line_no} not parsed: {line}'
-                    ' - fix that line and re-run it alone; the other lines ran')
+                    ' - write it as <kind> --headline "<headline>" <body>'
+                    ' and re-run it alone; the other lines ran')
                 rc = max(rc, 2)
                 continue
-            body = ' '.join([getattr(sub, 'body', None) or ''] + leftover)
+            kind_str = match.group('kind')
+            headline = next(
+                g for g in match.group('dq', 'sq', 'bare') if g is not None)
+            body = match.group('body').strip()
+            if len(body) >= 2 and body[0] == body[-1] and body[0] in '"\'':
+                if body[0] not in body[1:-1]:
+                    body = body[1:-1]
             rc = max(rc, _do_note(folder, anch, kind_str, headline, body.strip()))
         return rc
     return _do_note(
@@ -4715,7 +4715,9 @@ def _build_parser() -> argparse.ArgumentParser:
     _note_epilog = (
         'Kinds are decision, constraint, dead-end. --headline is required and\n'
         'one line; the body follows it as the last argument. --batch reads\n'
-        'one note per stdin line: <kind> --headline "<h>" "<body>".'
+        'one note per stdin line: <kind> --headline "<h>" <body>, the body\n'
+        'taken verbatim to the end of the line, quotes and apostrophes\n'
+        'included; a body wrapped whole in one pair of quotes loses the pair.'
     )
     # The kind slot carries no choices: the batch marker '-' lands
     # here on 3.13 and later, and _verb_note names an unknown kind.

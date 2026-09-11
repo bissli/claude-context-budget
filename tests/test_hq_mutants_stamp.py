@@ -1133,13 +1133,14 @@ def test_verb_note_batch_dead_end_kind_case_sensitive(tmp_path, monkeypatch):
     assert 'x01' in standing or 'Bad' in standing  # dead-end item written
 
 
-def test_verb_note_batch_rejects_unknown_flags_in_leftover(
+def test_verb_note_batch_keeps_a_flag_shaped_word_in_the_body(
         tmp_path, monkeypatch):
-    """_verb_note() batch marks a line as unparsed when leftover has flags.
+    """_verb_note() batch takes the body verbatim, so a dash-led word after
+    the headline is prose, not a flag to refuse.
 
-    Mutation: tok.startswith('-') and tok == '-' never detects bad flags
-    (since tok == '-' is only true for '-', which is excluded from leftover).
-    Oracle: 'decision --headline H --unknown-flag' is marked as unparsed.
+    Mutation: shell-style splitting restored, which treats the token as an
+    unknown flag and refuses the line.
+    Oracle: rc 0 and the body '--unknown-flag value' in standing.md.
     """
     folder = _root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
@@ -1147,10 +1148,8 @@ def test_verb_note_batch_rejects_unknown_flags_in_leftover(
     batch = 'decision --headline H --unknown-flag value\n'
     with mock.patch('sys.stdin', io.StringIO(batch)):
         rc = hq.main(['note', _SLUG, '--batch'])
-    # bad flag line is refused (rc=2); standing.md not written
-    assert rc == 2
-    standing = folder / 'standing.md'
-    assert not standing.exists() or 'H' not in standing.read_text()
+    assert rc == 0
+    assert '**H** --unknown-flag value' in (folder / 'standing.md').read_text()
 
 
 def test_verb_note_batch_body_from_correct_attr(tmp_path, monkeypatch):
@@ -1615,24 +1614,24 @@ def test_verb_note_batch_shlex_error_handled_gracefully(
     assert 'Good' in standing.read_text()
 
 
-def test_verb_note_batch_body_attr_not_uppercase(tmp_path, monkeypatch):
-    """_verb_note() batch reads body from 'body' attr, not 'BODY'.
+def test_verb_note_batch_refuses_a_body_placed_before_the_headline(
+        tmp_path, monkeypatch):
+    """_verb_note() batch reads kind, headline, body in that order; a line
+    with words between the kind and --headline is refused, nothing written.
 
-    Mutation: getattr(sub, 'BODY', None) returns None; body text is lost.
-    Oracle: batch note with body 'evidence-text' before headline has body
-    in standing.md (written to a distinct identifier not in the headline).
+    Mutation: the pattern anchored loosely, so 'evidence-text' is swallowed
+    as the kind's tail or the headline and the line lands.
+    Oracle: rc 2 and no standing.md item for the line.
     """
     folder = _root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     from unittest import mock
-
-    # body 'evidence-text' parsed by argparse into sub.body
     batch = 'decision evidence-text --headline Decision\n'
     with mock.patch('sys.stdin', io.StringIO(batch)):
         rc = hq.main(['note', _SLUG, '--batch'])
-    assert rc == 0
-    standing = (folder / 'standing.md').read_text()
-    assert 'evidence-text' in standing
+    assert rc == 2
+    standing = folder / 'standing.md'
+    assert not standing.exists() or 'Decision' not in standing.read_text()
 
 
 # ---------------------------------------------------------------------------

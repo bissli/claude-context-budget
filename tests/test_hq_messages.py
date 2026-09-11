@@ -229,10 +229,11 @@ def test_note_and_supersede_refusals_print_their_documented_lines(
     prefix mismatch, and an unknown id each print their exact line.
 
     Mutation: any of the three messages reworded, a refusal exiting 0, the
-    kind choices dropped from the parser, or the good batch line dropped
-    alongside the bad one.
+    kind choices dropped from the parser, the good batch line dropped
+    alongside the bad one, or the batch body split like a shell line so an
+    apostrophe refuses the line or a pair of them strips two letters.
     Oracle: exit 2 for the kind; the three documented lines; d01 and c01
-    exist afterward.
+    exist afterward; two prose bodies land in standing.md verbatim.
     """
     folder = _root(tmp_path, monkeypatch)
     _run(['begin', _SLUG])
@@ -246,6 +247,13 @@ def test_note_and_supersede_refusals_print_their_documented_lines(
     standing = (folder / 'standing.md').read_text()
     assert '[c01]' in standing
     assert '**Keep** the floor' in standing
+    monkeypatch.setattr('sys.stdin', io.StringIO(
+        "constraint --headline 'Prose' The user's house (WATCH, PORT) isn't up for it.\n"
+        'dead-end --headline "Said" He said "no" (twice); we didn\'t ask again.\n'))
+    assert _run(['note', _SLUG, '--batch'])[0] == 0
+    standing = (folder / 'standing.md').read_text()
+    assert "**Prose** The user's house (WATCH, PORT) isn't up for it." in standing
+    assert '**Said** He said "no" (twice); we didn\'t ask again.' in standing
     assert _run(['note', _SLUG, 'decision', '--headline', 'D', 'b'])[0] == 0
     rc, out, _ = _run(['supersede', _SLUG, 'd01', 'c01'])
     assert (rc, out.strip()) == (
