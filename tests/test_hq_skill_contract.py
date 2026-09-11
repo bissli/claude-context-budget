@@ -218,3 +218,20 @@ def test_every_refusal_string_in_the_script_is_named_in_the_skill():
     assert len(pieces) >= 5, pieces
     missing = [(line, piece) for line, piece in pieces if piece not in skill_text]
     assert missing == []
+
+
+def test_every_reviewer_seat_names_the_host_tier_before_a_literal_model():
+    """Each Reviewer-pass seat names the host's own tier, then a literal model.
+
+    Mutation: a seat's host-tier clause dropped, so a host whose agent
+    rules pin tiers leaves the agent with one literal type or model and
+    no alternative it may use.
+    Oracle: the skill's Skeptic and Rewrite bullets - each carries the
+    word 'host' before its literal `model` name.
+    """
+    text = ' '.join(SKILL.read_text().split())
+    seats = re.findall(r'- (Skeptic|Rewrite) \((.*?)\)', text)
+    assert [name for name, _ in seats] == ['Skeptic', 'Rewrite'], seats
+    for name, seat in seats:
+        assert 'host' in seat and 'model `' in seat, (name, seat)
+        assert seat.index('host') < seat.index('model `'), (name, seat)

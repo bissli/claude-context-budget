@@ -780,18 +780,18 @@ re-check each in the write session, apply what survives, and stop -
 never loop. A question it raises for the user goes under `## Open
 questions`; do not stop for it.
 
-- Skeptic (always; Agent tool, type `general-purpose`, model `sonnet` -
-  or the reviewer tier the host's own agent rules name, when they name
-  one): from the file alone, fill five slots - the task, the next
-  action, why it is next, how to verify it, what to ask the user; an
-  empty slot is a finding. For each
-  line of the read block, open the resolved span and report any point
-  where the Now step contradicts it. For each todo file the Plan
-  points at, verify that the Now step agrees with the corresponding
-  live item in that file.
-- Rewrite (past 160 cursor lines, as `finish` counts them): one
-  opus-tier agent (Agent tool, model `opus`) rewrites the cursor for
-  precision and returns it; apply it before `finish`.
+- Skeptic (always; Agent tool, at the reviewer tier the host's own
+  agent rules name, else type `general-purpose`, model `sonnet`): from
+  the file alone, fill five slots - the task, the next action, why it
+  is next, how to verify it, what to ask the user; an empty slot is a
+  finding. For each line of the read block, open the resolved span and
+  report any point where the Now step contradicts it. For each todo
+  file the Plan points at, verify that the Now step agrees with the
+  corresponding live item in that file.
+- Rewrite (past 160 cursor lines, as `finish` counts them; Agent tool,
+  at the opus tier the host's own agent rules name, else model `opus`):
+  one agent rewrites the cursor for precision and returns it; apply it
+  before `finish`.
 
 ### Report
 
