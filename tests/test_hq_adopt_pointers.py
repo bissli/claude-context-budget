@@ -334,6 +334,44 @@ def test_a_label_wrapped_over_two_lines_grades_the_bullets_below_it(
     assert 'conservation: every original line carried' in capsys.readouterr().out
 
 
+def test_a_colon_line_that_is_no_label_opens_an_ungraded_mention_group(
+        tmp_path, monkeypatch):
+    """A `Read before touching the gateway:` line ends the group above it.
+
+    Mutation: the unrecognized colon line leaving the grade above in
+    force, so the pointer under it is gated always across a boundary the
+    author drew; or the ungraded group seeding never, so its labels fold
+    into a count and leave the Artifacts block; or the mention grade
+    applied to a spec, which R1 then refuses.
+    Oracle: hand-computed - only Read now grades always; the notes
+    pointer under the unrecognized header reads mention with its label
+    kept; the spec under it stays always with no refusal; the header
+    line lands under Unfiled; prose that ends no group leaves the grade
+    in force.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    for name in ('notes-a.md', 'notes-b.md', 'notes-gate.md', 'SPEC-gate.md'):
+        (folder / name).write_text('# x\n')
+    _handoff(folder, key_files=(
+        'Read now:\n\n- `notes-a.md` the a notes\n\n'
+        'Some prose that ends no group.\n\n- `notes-b.md` the b notes\n\n'
+        'Read before touching the gateway:\n\n'
+        '- `notes-gate.md` the gateway notes\n'
+        '- `SPEC-gate.md` the gateway spec\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert [rows[p]['read_before'] for p in ('notes-a.md', 'notes-b.md')] == [
+        'always', 'always']
+    assert rows['notes-gate.md']['read_before'] == 'mention'
+    assert rows['notes-gate.md']['label'] == 'the gateway notes'
+    assert (rows['SPEC-gate.md']['read_before'], rows['SPEC-gate.md']['reason']) == (
+        'always', '-')
+    text = (folder / 'HANDOFF.md').read_text()
+    assert '- unfiled: Read before touching the gateway:' in text
+
+
 # --- The conservation witness ---
 
 

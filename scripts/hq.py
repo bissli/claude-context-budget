@@ -2255,6 +2255,11 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             # 'edit' override only applies to notes-kind files
             # (design s12 step 3).
             rb_over = 'edit'
+        elif grade:
+            # An ungraded group: the label stays in view, the file is
+            # not gated, and the seeding branches keep a gated kind at
+            # always.
+            rb_over = 'mention'
         # A section number may carry one letter, `section 11b`, or be
         # dotted, `section 24.4`; the whole token is the anchor.
         sref_m = re.findall(
@@ -2345,7 +2350,9 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     # - A label line, bare, as a heading, or as a bullet, grades every
     #   pointer below it until the next label, nesting included; a
     #   label whose clause wraps onto further lines grades once the
-    #   lines are joined, at the point the loose item closes.
+    #   lines are joined, at the point the loose item closes. Any other
+    #   line ending in a colon ends the group too and opens an ungraded
+    #   one.
     # - `-`, `*`, and `+` open a pointer bullet when the first token is
     #   a path: backticked, `~`/`/`/`.` prefixed, holding `/`, or ending
     #   in an extension. A bullet whose first token is a plain
@@ -2387,6 +2394,13 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         joined_m = _KF_LABEL_PAT.match(kf_loose_current)
         if joined_m:
             kf_group = joined_m.group(1).lower()
+        elif kf_loose_current.endswith(':'):
+            # A header the parser does not know, `Read before touching
+            # the gateway:`, still ends the group above it: the bullets
+            # under it take the header's own text as their group, which
+            # grades mention, never the grade of a label the author
+            # closed.
+            kf_group = kf_loose_current.lower()
         kf_loose.append(kf_loose_current)
         kf_loose_current = ''
 
@@ -2463,10 +2477,14 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         if name in kf_map:
             kf_matched.add(name)
         if kf_rb is not None and successor == '-':
-            # Apply 'edit' only when kind is notes; always
-            # applies unconditionally.
-            if kf_rb != 'edit' or kind == 'notes':
+            # Notes:
+            # - always applies to every kind; edit only to a notes file.
+            # - mention lifts a row that would otherwise read never, so
+            #   its label shows, and never demotes a gated kind.
+            if kf_rb == 'always' or (kf_rb == 'edit' and kind == 'notes'):
                 rb = kf_rb
+            elif kf_rb == 'mention' and rb == 'never':
+                rb = 'mention'
         row: Row = {
             'cycle': cycle_str, 'ts': ts, 'path': name, 'base': 'folder',
             'kind': kind, 'status': status, 'read_before': rb,
@@ -2517,10 +2535,11 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             path_obj.name, is_dir, first_heading, top_level=at_top)
         on_disk = path_obj.exists()
         rb = 'always' if kind in {'spec', 'draft'} else 'never'
-        # 'Reference only' means edit only for a notes file, exactly as
-        # the walk branch grades it.
-        if kf_rb is not None and (kf_rb != 'edit' or kind == 'notes'):
+        # The grade applies exactly as the walk branch applies it.
+        if kf_rb == 'always' or (kf_rb == 'edit' and kind == 'notes'):
             rb = kf_rb
+        elif kf_rb == 'mention' and rb == 'never':
+            rb = 'mention'
         row = {
             'cycle': cycle_str, 'ts': ts, 'path': stored_again, 'base': base,
             'kind': kind, 'status': 'live' if on_disk else 'missing',
