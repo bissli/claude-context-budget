@@ -852,7 +852,10 @@ Resume: kill this session, start a fresh one, run
      text points at where the folder was. Run `grep -rl '<dir>/<slug>/'`
      over the repo; at the next write, correct the path in each cursor
      line that carries it and re-note plus supersede each standing item
-     that does, and the count clears.
+     that does, and the count clears. Edit the path alone, never a
+     quoted sentence, and never `HANDOFF.md` outside a cycle: a rewrite
+     outside one trips `block sha mismatch` at `open`, and `begin`
+     archives the file as `c<NN>.hand.md`.
 3. Read `HANDOFF.md`. Then, for each line of the `## Read first` block,
    run `hq read <slug> <path>`, the path in any spelling `stamp`
    accepts - the block's `~` form or its expansion: it prints the
