@@ -1425,15 +1425,14 @@ def test_verb_finish_unstamped_filter_not_in_live(tmp_path, monkeypatch):
     # Create two files; stamp only one.
     (folder / 'stamped.md').write_text('# Stamped\n', encoding='utf-8')
     (folder / 'free.md').write_text('# Free\n', encoding='utf-8')
+    (folder / 'SPEC (conflicted copy 2026-09-09).md').write_text('# S\n')
     rc1, _, _ = _run(['stamp', _SLUG, 'stamped.md', '--read-before', 'mention'])
     assert rc1 == 0
     rc2, out2, _ = _run(['finish', _SLUG, '--log', 'check unstamped'])
     assert rc2 == 0
-    assert 'free.md' in out2 or 'unstamped' in out2, (
-        'unstamped file must appear in finish advisory')
-    assert 'stamped.md' not in out2 or 'unstamped' not in out2.split(
-        'stamped.md')[0], (
-        'stamped file must not appear in unstamped list')
+    unstamped_lines = [
+        ln for ln in out2.splitlines() if ln.startswith('advisory: unstamped')]
+    assert unstamped_lines == ['advisory: unstamped other x1: free.md - stamp each']
 
 
 def test_verb_finish_unstamped_shown_count_boundary(tmp_path, monkeypatch):

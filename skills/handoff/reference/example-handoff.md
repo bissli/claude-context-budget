@@ -1,9 +1,8 @@
 # Example handoff: three finished cycles
 
 The file below is `hq` output: three finished cycles on a synthetic
-thread whose repo sits at `~/code/poller` and keeps its design docs
-under `docs/`. The cursor (Task through Open questions) is the agent's;
-the header line and everything from the
+thread whose repo sits at `~/code/poller`. The cursor (Task through
+Open questions) is the agent's; the header line and everything from the
 first `<!-- hq:` marker down is the script's. The golden test in
 `tests/test_hq_messages.py` replays the three cycles and compares the
 rendered file to this one line for line.
@@ -39,13 +38,13 @@ Wire refresh_token() into poll() at scripts/auth.py:88, in the 401 branch.
 <!-- hq:read 53c21ca4645f -->
 ## Read first
 ~/code/poller/scripts/auth.py (120 lines)  poller; the 401 branch is under edit
-~/code/poller/docs/auth-refresh.md:11-13  refresh contract; s3 is the retry schedule
+specs/SPEC.md:11-13  refresh contract; s3 is the retry schedule
 <!-- /hq:read -->
 
 <!-- hq:artifacts 9466c74c0e59 -->
 ## Artifacts
 notes/idp-quirks.md  notes  edit  c1  staging IdP quirks, found the hard way
-~/code/poller/docs/auth-refresh.md  spec  always  c1  refresh contract; s3 is the retry schedule
+specs/SPEC.md  spec  always  c1  refresh contract; s3 is the retry schedule
 ~/code/poller/scripts/auth.py  draft  always  c1  poller; the 401 branch is under edit
 <!-- /hq:artifacts -->
 

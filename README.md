@@ -195,12 +195,13 @@ session chose.)
   enabled, writes the ledger, renders the generated blocks of `HANDOFF.md` from
   it, and refuses the two edits that lose work over many cycles:
   lowering a spec's read obligation without naming its successor, and
-  rewriting a recorded line in place. What the thread made lives where
-  the project already keeps that kind of file - a spec beside its docs,
-  a prototype or experiment in the working directory `hq work-dir` pins
-  once - and the ledger points at it. What the project has no place for
-  sits in the thread folder under `notes/`, `specs/`, `drafts/`, or
-  `outputs/`, never loose at its top level.
+  rewriting a recorded line in place. What the thread made sits in the
+  thread folder under `specs/`, `drafts/`, `notes/`, or `outputs/`,
+  never loose at its top level, and the ledger points at it. A thread
+  whose spec and experiments already live in a project directory pins
+  that directory once with `hq work-dir`, and its specs, drafts, and
+  outputs go there instead; a pin is the thread's own, and no global
+  setting moves every thread at once.
 - Run again a session later, it updates the same folder: the cursor
   rewritten, the plan ticked off, decisions and dead ends appended,
   the previous cycle archived. The read-time payload stays flat - a
@@ -230,7 +231,9 @@ session chose.)
 untracked. Versions before 0.3.0 wrote to `working/`, and before 0.2.2
 to `scratch/`; move each old folder to `.handoff/<task-name>/` once.
 After the move, `hq open` names every cursor line and standing item
-that still says `working/<task-name>/` or `scratch/<task-name>/`.
+that still says `working/<task-name>/` or `scratch/<task-name>/`, unless
+that directory is the thread's own pinned work dir, where the paths are
+current.
 
 ## What you see
 

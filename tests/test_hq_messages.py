@@ -449,11 +449,6 @@ def test_the_reference_example_file_is_the_scripts_own_output(
     """
     root = tmp_path / 'poller'
     (root / 'scripts').mkdir(parents=True)
-    (root / 'docs').mkdir()
-    (root / 'docs' / 'auth-refresh.md').write_text(
-        '# Auth token refresh\n\n## 1. Token store\n\nKeep tokens in memory only.\n\n'
-        '## 2. Refresh endpoint\n\nPOST /oauth/refresh with the refresh token.\n\n'
-        '## 3. Retry\n\nBack off 1s, 2s, 4s; give up after five tries.\n')
     git = ['git', '-c', 'user.email=dev@example.com', '-c', 'user.name=dev']
     subprocess.run(['git', 'init', '-q', str(root)], check=True)
     auth_lines = ['def poll():'] + [
@@ -462,12 +457,16 @@ def test_the_reference_example_file_is_the_scripts_own_output(
     # Exclude the handoff dir so git status only shows code changes.
     (root / '.gitignore').write_text('.handoff/\n', encoding='utf-8')
     subprocess.run(
-        git + ['-C', str(root), 'add', 'scripts/auth.py', 'docs', '.gitignore'],
-        check=True)
+        git + ['-C', str(root), 'add', 'scripts/auth.py', '.gitignore'], check=True)
     subprocess.run(git + ['-C', str(root), 'commit', '-qm', 'poller'], check=True)
     (root / 'scripts' / 'auth.py').write_text('\n'.join(auth_lines[:-1]) + '\n    raise Refresh()\n')
     folder = root / '.handoff' / 'auth-token-refresh'
     (folder / 'notes').mkdir(parents=True)
+    (folder / 'specs').mkdir()
+    (folder / 'specs' / 'SPEC.md').write_text(
+        '# Spec\n\n## 1. Token store\n\nKeep tokens in memory only.\n\n'
+        '## 2. Refresh endpoint\n\nPOST /oauth/refresh with the refresh token.\n\n'
+        '## 3. Retry\n\nBack off 1s, 2s, 4s; give up after five tries.\n')
     (folder / 'notes' / 'idp-quirks.md').write_text(
         '# Staging IdP quirks\n\n- The 401 body is HTML, not JSON.\n'
         '- Refresh tokens rotate on every call.\n')
@@ -482,8 +481,7 @@ def test_the_reference_example_file_is_the_scripts_own_output(
     slug = 'auth-token-refresh'
     assert hq.main(['begin', slug]) == 0
     assert hq.main([
-        'stamp', slug, str(root / 'docs' / 'auth-refresh.md'), '--kind', 'spec',
-        '--where', '3. Retry',
+        'stamp', slug, 'specs/SPEC.md', '--where', '3. Retry',
         '--label', 'refresh contract; s3 is the retry schedule']) == 0
     assert hq.main([
         'stamp', slug, 'notes/idp-quirks.md', '--read-before', 'edit',

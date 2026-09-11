@@ -27,10 +27,10 @@ The plugin puts `hq` on the agent's PATH. After a plugin update
 mid-session `hq` fails with `command not found`: run `/reload-plugins`,
 or until then call
 `~/.claude/plugins/cache/claude-handoff/claude-handoff/<version>/bin/hq`.
-Every verb but `list`, `work-dir`, and `help` takes the slug first.
-Exit 0 is done; 1 is a refusal or a blocking finding, and nothing is
-written except that a refused `stamp` appends its receipt row; 2 is a
-usage error.
+Every verb but `list` and `help` takes the slug first. Exit 0 is
+done; 1 is a refusal or a blocking finding, and nothing is written
+except that a refused `stamp` appends its receipt row; 2 is a usage
+error.
 Every line that calls for a move names it: `<finding> - <what to do>`;
 `hq help <topic>` and `hq <verb> --help` hold the longer forms.
 
@@ -47,9 +47,10 @@ Every line that calls for a move names it: `<finding> - <what to do>`;
 +- cycles/         each finished HANDOFF.md verbatim, c01.md ..
 +- .hq.lock        held from begin to finish
 +- HANDOFF.orig.md the foreign file an adoption began from
++- work-dir        the pin, only when the work already lives elsewhere
 +- notes/          what the thread learned: evidence, excerpts, reviews
-+- specs/ drafts/ outputs/  what it made and the project has no place
-|                  for, by kind; probes/ or any other folder is one unit
++- specs/ drafts/ outputs/  what it made, by kind; probes/ or any other
+|                  folder is one unit
 ```
 
 The agent writes the cursor (Task through Open questions) and
@@ -59,25 +60,26 @@ The agent writes the cursor (Task through Open questions) and
 header line or below the first `<!-- hq:` marker is overwritten by
 `finish`.
 
-What the thread learned - a finding, its evidence, a review - stays in
-the folder, under `notes/` or a folder of the work's own. What it made
-goes where the project keeps that kind of file - a spec beside its docs
-- and a prototype, an experiment, a throwaway script, or a generated
-result goes to the directory `hq work-dir` prints, run before the first
-such file; each named as its neighbors are and stamped by its `~` or
-absolute path, `--kind spec` or `--kind draft` to gate it, else
-`--read-before mention` when the cursor points at it so its label
-prints. Settle the verb once: `hq work-dir <dir>` pins the directory
-CLAUDE.md or the user names for such work, made when missing, else one
-the agent located that already holds it - never one of end-user docs,
-todo items, or shipped source; two fit, ask under `Open questions` and
-hold the files in the folder meanwhile; none fits, `hq work-dir
-.handoff`. What the project has no place for goes in folders under the
-thread folder, never loose at its top level: under `specs/`, `drafts/`,
-`notes/`, or `outputs/` the folder sets the kind and any file name
-serves; `probes/` or a name the work calls for is stamped as one unit or
-file by file. The agent invents no project directory and proposes none.
-Only a file that outlives the session or is stamped is bound.
+Everything the thread learned or made lives in the folder, never
+loose at its top level. What it learned - a finding, its evidence, a
+review - goes under `notes/` or a folder of the work's own. What it
+made goes under `specs/`, `drafts/`, or `outputs/`: the folder sets the
+kind and any file name serves but a snapshot-shaped one (`*.bak`,
+`*.orig.*`, `*.prev.*`, `*.pre-*`, `cycle<N>`), which stays a snapshot;
+`probes/` or a name the work calls for is stamped as one unit or file
+by file. One exception, judged at the first `hq begin`, whose work list
+ends in `work dir:` and the verb: when the thread's spec and
+experiments already live in a project directory, `hq work-dir <slug>
+<dir>` pins it once - a directory already on disk, inside the repo or
+out, never the root, `.handoff/`, or the system temp directory unless
+the repo itself sits under it. From then on the specs, drafts, and
+outputs this thread makes go there, each named as its neighbors are and
+stamped by its `~` or absolute path, `--kind spec` or `--kind draft` to
+gate it, else `--read-before mention` when the cursor points at it so
+its label prints; `notes/` stays in the folder. The pin is the thread's
+own; `hq work-dir <slug>` prints the ruling, `--clear` undoes it. The
+agent invents no project directory and proposes none. Only a file that
+outlives the session or is stamped is bound.
 
 
 ## Which verb, which target
@@ -257,7 +259,7 @@ Rules the script enforces (`hq help rules` has them in full):
 Stamp forms, all real:
 
 ```
-hq stamp <slug> ~/code/poller/docs/auth-refresh.md --kind spec \
+hq stamp <slug> specs/SPEC.md \
   --where "3. Retry" --label "refresh contract; s3 is the retry schedule"
 hq stamp <slug> ~/code/poller/scripts/auth.py \
   --kind draft --label "poller; the 401 branch is under edit"
@@ -268,7 +270,7 @@ hq stamp <slug> specs/SPEC.md \
 hq stamp <slug> drafts/DRAFT.py \
   --archive --reason "abandoned for the sidecar approach"
 hq stamp <slug> --batch <<'ROWS'
-~/code/poller/docs/auth-refresh.md --kind spec --where "3. Retry" --label "the contract"
+specs/SPEC.md --where "3. Retry" --label "the contract"
 notes/idp-quirks.md --read-before edit --label "staging IdP quirks"
 ROWS
 ```
@@ -381,7 +383,7 @@ One whole cycle on the example thread, in order:
 hq begin auth-token-refresh
 hq note auth-token-refresh decision \
   --headline "Refresh in-process, no sidecar" "One caller; latency is fine."
-hq stamp auth-token-refresh ~/code/poller/docs/auth-refresh.md --kind spec \
+hq stamp auth-token-refresh specs/SPEC.md \
   --where "3. Retry" --label "refresh contract; s3 is the retry schedule"
 hq stamp auth-token-refresh ~/code/poller/scripts/auth.py \
   --kind draft --label "poller; the 401 branch is under edit"

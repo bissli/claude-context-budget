@@ -57,7 +57,8 @@ MANIFEST_FIELDS = [
 
 _LEDGER_HEADER = '\t'.join(LEDGER_FIELDS)
 _MANIFEST_HEADER = '\t'.join(MANIFEST_FIELDS)
-_SKIP_NAMES = {'HANDOFF.md', 'ledger.tsv', 'standing.md', 'cycles', '.hq.lock'}
+_SKIP_NAMES = {
+    'HANDOFF.md', 'ledger.tsv', 'standing.md', 'cycles', '.hq.lock', 'work-dir'}
 HANDOFF_DIRNAME = '.handoff'
 # The directories earlier plugin versions kept the folder under; a
 # path written under one of them names where a folder used to be.
@@ -80,6 +81,8 @@ _SNAPSHOT_PATS = ['*.pre-*', '*.prev.*', '*.orig.*', '*.bak']
 _SPEC_PATS = ['SPEC*', 'DESIGN*', 'PROPOSAL*', '*-DECLARATION*']
 _DRAFT_EXTS = {'.py', '.sql', '.js', '.ts', '.ps1'}
 _WORK_PIN_NAME = 'work-dir'
+_TEMP_DIRS = (
+    pathlib.Path(os.path.abspath(tempfile.gettempdir())), pathlib.Path('/tmp'))
 _KIND_DIRS = {'specs': 'spec', 'drafts': 'draft', 'notes': 'notes', 'outputs': 'other'}
 _GATE_RB = {'always', 'edit'}
 _FULL_RB = {'always', 'edit', 'mention'}
@@ -148,10 +151,13 @@ Kind inference, first match wins:
   anything else, a nested or outside file included     other      never
 
 - The kind folder sets the kind of a file one level under it, whatever
-  the name; probes/, like any other directory, is one probe-dir entry,
-  stamped as a unit or recorded by the rows of its files. drafts/ holds
-  the candidate that will land, gated always; a throwaway script goes
-  to the work dir or probes/. hq work-dir --help has where made files go.
+  the name but a snapshot-shaped one (*.bak, *.orig.*, *.prev.*,
+  *.pre-*, cycle<N>), which stays a snapshot; probes/, like any other
+  directory, is one probe-dir entry, stamped as a unit or recorded by
+  the rows of its files. drafts/ holds the candidate that will land,
+  gated always; a throwaway script goes to probes/. A thread pinned
+  with hq work-dir keeps the specs, drafts, and outputs it makes in
+  that directory instead (hq work-dir --help).
 - Outside the folder only the draft rule lapses: a SPEC*-shaped name
   or a Spec/Design first heading still infers spec; any other outside
   file infers other/never - pass --kind spec or --kind draft to gate it.
@@ -1656,31 +1662,31 @@ def validate_work_dir(root: pathlib.Path, token: str) -> tuple[str, str]:
     Parameters
     ----------
     root : pathlib.Path
-        Project root the value is stored relative to.
+        Project root; a directory under it is stored relative to it.
     token : str
-        ``.handoff``, or a directory spelled relative to the root, by
-        ``~``, or absolutely.
+        A directory spelled relative to the root, by ``~``, or
+        absolutely.
 
     Returns
     -------
     tuple[str, str]
-        ``(value, '')`` on a pass - ``.handoff``, or the directory's posix
-        path relative to the root - else ``('', reason)``, the reason a
-        clause that follows the token in a printed line.
+        ``(value, '')`` on a pass - the directory's posix path relative
+        to the root when under it, else its ``~`` or absolute spelling -
+        or ``('', reason)``, the reason a clause that follows the token
+        in a printed line.
 
     Notes
     -----
-    - The root itself, anything outside it, and anything under
-      ``.handoff/`` are refused: the first turns the root into a dump,
-      the second the project cannot carry, the third is the handoff's
-      own. An outside path under the system temp directory is named as
-      such, since /tmp is the one place a session reaches for.
-    - A directory not yet on disk passes: a declared work dir is made
-      by the caller, so the declaration alone settles the place.
+    - The root itself, anything under ``.handoff/``, and anything under
+      the system temp directory are refused: the first turns the root
+      into a dump, the second is the handoff's own, the third does not
+      outlive the host. Any other directory passes, inside the root or
+      out; a root that itself sits under the temp directory keeps its
+      own subdirectories.
+    - The directory must already be on disk: a pin names where the
+      thread's work already lives, so a missing one is a mistyped path.
     """
     clean = token.strip().strip('`')
-    if clean.rstrip('/') == HANDOFF_DIRNAME:
-        return HANDOFF_DIRNAME, ''
     root_abs = pathlib.Path(os.path.abspath(os.path.expanduser(str(root))))
     if clean.startswith(('/', '~')):
         candidate = pathlib.Path(os.path.normpath(os.path.expanduser(clean)))
@@ -1689,104 +1695,115 @@ def validate_work_dir(root: pathlib.Path, token: str) -> tuple[str, str]:
     if candidate == root_abs:
         return '', 'is the root itself'
     # Containment is lexical first, then by real path, so a root reached
-    # through a symlink still owns its directories spelled either way.
+    # through a symlink still owns its directories spelled either way
+    # and is still itself spelled either way.
     under_root = root_abs in candidate.parents
     if not under_root:
         real_root = pathlib.Path(os.path.realpath(root_abs))
         real_candidate = pathlib.Path(os.path.realpath(candidate))
+        if real_candidate == real_root:
+            return '', 'is the root itself'
         under_root = real_root in real_candidate.parents
         if under_root:
             candidate = real_root / real_candidate.relative_to(real_root)
             root_abs = real_root
+    if under_root:
+        rel = candidate.relative_to(root_abs).as_posix()
+        if rel == HANDOFF_DIRNAME or rel.startswith(HANDOFF_DIRNAME + '/'):
+            return '', f'is under {HANDOFF_DIRNAME}/'
     # A project checked out under the temp directory keeps its own
     # subdirectories; the temp refusal names a path outside the root.
-    temp_dirs = (
-        pathlib.Path(os.path.abspath(tempfile.gettempdir())), pathlib.Path('/tmp'))
-    if not under_root and any(
-            candidate == d or d in candidate.parents for d in temp_dirs):
+    elif any(candidate == d or d in candidate.parents for d in _TEMP_DIRS):
         return '', 'is under the system temp directory'
-    if candidate.exists() and not candidate.is_dir():
+    if not candidate.exists():
+        return '', 'does not exist'
+    if not candidate.is_dir():
         return '', 'is not a directory'
-    if not under_root:
-        return '', f'is outside the root {root_abs}'
-    rel = candidate.relative_to(root_abs).as_posix()
-    if rel == HANDOFF_DIRNAME or rel.startswith(HANDOFF_DIRNAME + '/'):
-        return '', f'is under {HANDOFF_DIRNAME}/'
-    return rel, ''
-
-
-def _make_work_dir(root: pathlib.Path, value: str) -> str:
-    """Create a declared work dir under the root; return '' or the failure.
-    """
-    if value == HANDOFF_DIRNAME:
-        return ''
+    if under_root:
+        return candidate.relative_to(root_abs).as_posix(), ''
+    home = pathlib.Path(os.path.abspath(os.path.expanduser('~')))
     try:
-        (root / value).mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        return exc.strerror or str(exc)
-    return ''
+        rel = candidate.relative_to(home).as_posix()
+    except ValueError:
+        return str(candidate), ''
+    return ('~' if rel == '.' else '~/' + rel), ''
 
 
-def resolve_work_dir(
-    root: pathlib.Path,
-    make: bool = True,
-) -> tuple[str, str, list[str]]:
-    """Resolve the work dir: HQ_WORK_DIR, then the pin, else unpinned.
+def resolve_work_dir(folder: pathlib.Path) -> tuple[str, list[str]]:
+    """Resolve the thread's work dir from its pin; no pin is the folder.
 
     Parameters
     ----------
-    root : pathlib.Path
-        Project root; the pin is ``root/.handoff/work-dir``.
-    make : bool, default True
-        Create a declared directory that is missing. ``open`` passes
-        False: it is read-only, and a directory it cannot make is no
-        finding of its own.
+    folder : pathlib.Path
+        Handoff folder; the pin is ``folder/work-dir`` and the root its
+        grandparent.
 
     Returns
     -------
-    tuple[str, str, list[str]]
-        ``(value, source, lines)``: the value as ``validate_work_dir``
-        returns it with ``source`` ``env`` or ``pin``, or ``('', '', lines)``
-        when neither names a directory. ``lines`` are the printed lines
-        for a source that failed its check, each naming its move.
+    tuple[str, list[str]]
+        ``(value, lines)``: the pinned directory as ``validate_work_dir``
+        returns it, or ``''`` when the folder's own kind folders take the
+        made files. ``lines`` are the printed lines for a pin that failed
+        its check, each naming its move.
 
     Notes
     -----
-    - The first source that passes wins; a failing env var falls
-      through to the pin rather than leaving the thread unpinned.
-    - A declared directory missing from disk is made here, so the
-      declaration is the one act the user or agent performs. One that
-      cannot be made is reported and passed over, never fatal: begin
-      and finish must still run on a bad pin.
+    - No pin is the default, not a finding: the folder's kind folders
+      hold what the thread makes. Only a pin naming no directory prints.
+    - A bad pin is reported and passed over, never fatal: begin and
+      finish must still run on one.
     """
-    lines: list[str] = []
-    raw_env = os.environ.get('HQ_WORK_DIR', '').strip()
-    if raw_env:
-        value, reason = validate_work_dir(root, raw_env)
-        if value:
-            reason = _make_work_dir(root, value) if make else ''
-            if not reason:
-                return value, 'env', lines
-            reason = f'could not be made: {reason}'
-        lines.append(
-            f'HQ_WORK_DIR={raw_env} {reason} - fix or unset it; the pin is read next')
-    pin = root / HANDOFF_DIRNAME / _WORK_PIN_NAME
-    if pin.is_file():
-        try:
-            raw_pin = pin.read_text(encoding='utf-8').strip()
-        except OSError:
-            raw_pin = ''
+    pin = folder / _WORK_PIN_NAME
+    if not pin.is_file():
+        return '', []
+    value = ''
+    try:
+        raw_pin = pin.read_text(encoding='utf-8').strip()
+    except OSError:
+        raw_pin, reason = '', 'cannot be read'
+    else:
         value, reason = (
-            validate_work_dir(root, raw_pin) if raw_pin else ('', 'is empty'))
-        if value:
-            reason = _make_work_dir(root, value) if make else ''
-            if not reason:
-                return value, 'pin', lines
-            reason = f'could not be made: {reason}'
-        lines.append(
-            f'{HANDOFF_DIRNAME}/{_WORK_PIN_NAME} names {raw_pin!r}: {reason}'
-            ' - repin it with hq work-dir <dir>')
-    return '', '', lines
+            validate_work_dir(folder.parent.parent, raw_pin) if raw_pin
+            else ('', 'is empty'))
+    if value:
+        return value, []
+    return '', [
+        (f'{HANDOFF_DIRNAME}/{folder.name}/{_WORK_PIN_NAME} names {raw_pin!r}:'
+         f' {reason} - repin it with hq work-dir {folder.name} <dir>, or'
+         ' --clear to fall back to the folder')]
+
+
+def work_dir_line(folder: pathlib.Path, value: str, first_cycle: bool = False) -> str:
+    """Return the ``work dir:`` line for a resolved value.
+
+    Parameters
+    ----------
+    folder : pathlib.Path
+        Handoff folder, named in the default line.
+    value : str
+        The pinned directory as ``resolve_work_dir`` returns it, or
+        ``''`` for the folder's own kind folders.
+    first_cycle : bool, default False
+        True at a thread's first begin: the line then ends in the pin
+        command, since that is when a thread whose work already lives in
+        a project directory says so.
+
+    Returns
+    -------
+    str
+        ``work dir: <where> (pin|default) - <where made files go>``.
+    """
+    if value:
+        return (
+            f'work dir: {value} (pin) - specs, drafts, and outputs go there,'
+            ' stamped by their ~ or absolute path; notes stay under notes/')
+    tail = (
+        '; when the spec and experiments already live in a project'
+        f' directory, hq work-dir {folder.name} <dir> pins it'
+        if first_cycle else '; any other folder is one unit')
+    return (
+        f'work dir: {HANDOFF_DIRNAME}/{folder.name}/ (default)'
+        f' - made files go under specs/, drafts/, notes/, or outputs/{tail}')
 
 
 def _find_folder(
@@ -3506,18 +3523,10 @@ def _print_worklist(folder: pathlib.Path, anch: dict) -> None:
         shown = ', '.join(deferred[:5])
         tail = f' ... and {len(deferred) - 5} more' if len(deferred) > 5 else ''
         print(f'  deferred x{len(deferred)}: {shown}{tail} - stamp each when decided')
-    wd_value, wd_source, wd_lines = resolve_work_dir(folder.parent.parent)
+    wd_value, wd_lines = resolve_work_dir(folder)
     for line in wd_lines:
         print(line)
-    if wd_value == HANDOFF_DIRNAME:
-        print(
-            f'work dir: {HANDOFF_DIRNAME}/{folder.name}/ ({wd_source})'
-            ' - made files go under notes/, specs/, drafts/, or outputs/;'
-            ' any other folder is one unit')
-    elif wd_value:
-        print(f'work dir: {wd_value} ({wd_source})')
-    else:
-        print('work dir: unpinned - run hq work-dir')
+    print(work_dir_line(folder, wd_value, first_cycle=anch['cycle'] == 1))
     print(f'cycle {anch["cycle"]} begun by {anch["session"]} on {anch["host"]}')
 
 
@@ -4201,43 +4210,38 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
     # - Only a path first stamped this cycle is named: an older row was
     #   placed under an earlier ruling, and moving it is the agent's
     #   call.
-    # - A directory is an organized unit under either ruling, the
-    #   recommended names or the agent's own, so only a loose file at
-    #   the top level is named.
-    wd_value, _, wd_lines = resolve_work_dir(folder.parent.parent)
+    # - A directory of the agent's own name is an organized unit under
+    #   either ruling, so only a loose file at the top level is named -
+    #   and, under a pin, a file in specs/, drafts/, or outputs/, whose
+    #   place the pin claims.
+    wd_value, wd_lines = resolve_work_dir(folder)
     for line in wd_lines:
         print(line)
-    if wd_value:
-        first_cycle: dict[str, int] = {}
-        for row in rows:
-            if row['cycle'].strip().isdigit():
-                first_cycle.setdefault(row['path'], int(row['cycle']))
-        # A spec's place is beside the project's docs, a judgment the
-        # work dir does not make, so a real work dir claims drafts and
-        # outputs alone; the folder ruling claims any loose made file.
-        made_kinds = (
-            {'spec', 'draft', 'other'} if wd_value == HANDOFF_DIRNAME
-            else {'draft', 'other'})
-        misplaced = [
-            path for path, row in live.items()
-            if row['base'] == 'folder' and row['status'] == 'live'
-            and row['kind'] in made_kinds
-            and first_cycle.get(path) == int(anch['cycle'])
-            and '/' not in path]
-        if misplaced:
-            shown = ', '.join(misplaced[:5])
-            tail = f' ... and {len(misplaced) - 5} more' if len(misplaced) > 5 else ''
-            if wd_value == HANDOFF_DIRNAME:
-                print(
-                    f'advisory: made at the top level x{len(misplaced)}: {shown}{tail}'
-                    ' - move each under notes/, specs/, drafts/, or outputs/'
-                    ' and re-stamp with --successor')
-            else:
-                print(
-                    f'advisory: made in the folder x{len(misplaced)}: {shown}{tail}'
-                    f' - move each to {wd_value}, or under notes/ when it is'
-                    ' evidence, then re-stamp with --successor and the'
-                    " file's ~ or absolute path")
+    first_cycle: dict[str, int] = {}
+    for row in rows:
+        if row['cycle'].strip().isdigit():
+            first_cycle.setdefault(row['path'], int(row['cycle']))
+    claimed_dirs = {'specs', 'drafts', 'outputs'} if wd_value else set()
+    misplaced = [
+        path for path, row in live.items()
+        if row['base'] == 'folder' and row['status'] == 'live'
+        and row['kind'] in {'spec', 'draft', 'other'}
+        and first_cycle.get(path) == int(anch['cycle'])
+        and ('/' not in path or kind_dir_of(path, 'folder') in claimed_dirs)]
+    if misplaced:
+        shown = ', '.join(misplaced[:5])
+        tail = f' ... and {len(misplaced) - 5} more' if len(misplaced) > 5 else ''
+        if wd_value:
+            print(
+                f'advisory: made in the folder x{len(misplaced)}: {shown}{tail}'
+                f' - move each to {wd_value}, or under notes/ when it is'
+                ' evidence, then re-stamp with --successor and the'
+                " file's ~ or absolute path")
+        else:
+            print(
+                f'advisory: made at the top level x{len(misplaced)}: {shown}{tail}'
+                ' - move each under specs/, drafts/, notes/, or outputs/'
+                ' and re-stamp with --successor')
     # A skip entry the ledger cannot carry: a sync duplicate by name
     # or a name holding a tab or newline, shown escaped.
     for n, k in walk:
@@ -4562,10 +4566,11 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     # - A superseded standing item is skipped: the file is append-only,
     #   so the old wording stays on disk after the re-note, and counting
     #   it would leave the line with no move that clears it.
-    # A work dir pinned under a former name is a real place: its
-    # per-thread paths are not stale, so that name leaves the scan.
-    wd_value, _, _ = resolve_work_dir(folder.parent.parent, make=False)
-    former = [d for d in _FORMER_HANDOFF_DIRNAMES if d != wd_value]
+    # A work dir pinned under or inside a former name is a real place:
+    # its per-thread paths are not stale, so that name leaves the scan.
+    wd_value, _ = resolve_work_dir(folder)
+    pinned_parts = pathlib.PurePosixPath(wd_value).parts
+    former = [d for d in _FORMER_HANDOFF_DIRNAMES if d not in pinned_parts]
     stale_pat = re.compile(
         r'(' + '|'.join(re.escape(d) for d in former) + r')/'
         + re.escape(folder.name) + r'/' if former else r'(?!)')
@@ -4813,64 +4818,59 @@ def _verb_standing(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -
     return 0
 
 
-def _verb_work_dir(root: pathlib.Path, argv: argparse.Namespace) -> int:
-    """Print the directory made files go to, or pin one.
+def _verb_work_dir(folder: pathlib.Path, argv: argparse.Namespace) -> int:
+    """Print where the thread's made files go, pin a directory, or clear it.
 
     Parameters
     ----------
-    root : pathlib.Path
-        Project root; the pin is ``root/.handoff/work-dir``.
+    folder : pathlib.Path
+        Handoff folder; the pin is ``folder/work-dir``.
     argv : argparse.Namespace
-        Parsed ``work-dir`` arguments; ``dir`` is the token to pin, or
-        None to resolve.
+        Parsed ``work-dir`` arguments: ``dir`` is the token to pin or
+        None, ``clear`` removes the pin.
 
     Returns
     -------
     int
-        0 with the resolved line, or once the pin is written; 1 when
-        unpinned or the token is refused, with nothing written.
+        0 with the resolved line, once the pin is written, or once it is
+        cleared; 1 when the token is refused or the pin on disk fails
+        its check, with nothing written; 2 when ``dir`` and ``--clear``
+        are both given.
 
     Notes
     -----
-    - No scan: which directory holds the project's work is a judgment
-      over the layout and CLAUDE.md, and a name list would pin a dump in
-      the wrong place. The agent judges and pins.
+    - No scan: whether the thread's work already lives in a project
+      directory is a judgment over the layout at the first begin, and a
+      name list would pin a dump in the wrong place. The agent judges
+      and pins.
     """
     token = getattr(argv, 'dir', None)
-    if token:
-        value, reason = validate_work_dir(root, token)
+    pin = folder / _WORK_PIN_NAME
+    if getattr(argv, 'clear', False):
+        if token is not None:
+            print('hq work-dir: --clear takes no directory - pass one or the other')
+            return 2
+        pin.unlink(missing_ok=True)
+        print(work_dir_line(folder, ''))
+        return 0
+    if token is not None:
+        value, reason = validate_work_dir(folder.parent.parent, token)
         if not value:
             print(
-                f'hq work-dir: {token} {reason} - name a directory under'
-                f' the root, or {HANDOFF_DIRNAME} for the folder')
+                f'hq work-dir: {token} {reason} - name a directory that'
+                " already holds the thread's work; with none, leave the"
+                ' folder unpinned')
             return 1
-        failure = _make_work_dir(root, value)
-        if failure:
-            print(
-                f'hq work-dir: {token} could not be made: {failure} - name a'
-                f' directory under the root, or {HANDOFF_DIRNAME} for the folder')
-            return 1
-        pin_dir = root / HANDOFF_DIRNAME
-        pin_dir.mkdir(parents=True, exist_ok=True)
-        (pin_dir / _WORK_PIN_NAME).write_text(value + '\n', encoding='utf-8')
-        print(f'work dir: {value} - pinned in {HANDOFF_DIRNAME}/{_WORK_PIN_NAME}')
+        pin.write_text(value + '\n', encoding='utf-8')
+        print(
+            f'work dir: {value} - pinned in'
+            f' {HANDOFF_DIRNAME}/{folder.name}/{_WORK_PIN_NAME}')
         return 0
-    value, source, lines = resolve_work_dir(root)
+    value, lines = resolve_work_dir(folder)
     for line in lines:
         print(line)
-    if value == HANDOFF_DIRNAME:
-        print(
-            f'work dir: {value} ({source})'
-            ' - made files go under notes/, specs/, drafts/, or outputs/'
-            ' in the thread folder; any other folder there is one unit')
-        return 0
-    if value:
-        print(f'work dir: {value} ({source})')
-        return 0
-    print(
-        'work dir: unpinned - judge the project layout and CLAUDE.md, then'
-        f' hq work-dir <dir>, or {HANDOFF_DIRNAME} when nothing fits')
-    return 1
+    print(work_dir_line(folder, value))
+    return 1 if lines else 0
 
 
 def _verb_list(root: pathlib.Path, argv: argparse.Namespace) -> int:
@@ -4984,9 +4984,9 @@ def _build_parser() -> argparse.ArgumentParser:
     """Return the top-level argument parser for all fifteen verbs.
     """
     _top_epilog = (
-        'Every verb but list, work-dir, and help takes the slug first. A slug\n'
-        'resolves to an exact folder name under .handoff/, else a unique\n'
-        'prefix of one.\n'
+        'Every verb but list and help takes the slug first. A slug resolves\n'
+        'to an exact folder name under .handoff/, else a unique prefix of\n'
+        'one.\n'
         'Five flags before the verb - --root DIR, --cycle N, --now ISO,\n'
         '--session ID, --host H - override the HQ_ROOT, HQ_CYCLE, HQ_NOW,\n'
         'HQ_SESSION, and HQ_HOST environment values the script otherwise\n'
@@ -5172,23 +5172,26 @@ def _build_parser() -> argparse.ArgumentParser:
     ).add_argument('count', nargs='?', type=int)
 
     _work_dir_epilog = (
-        'With no argument, prints the work dir and stops at the\n'
-        'first source that names a directory: HQ_WORK_DIR, then the pin\n'
-        '.handoff/work-dir - work dir: <dir> (env) or (pin). The value\n'
-        ".handoff means the thread folder's kind folders notes/, specs/,\n"
-        'drafts/, outputs/. Neither set: exit 1, nothing written; the agent\n'
-        'judges the project layout and CLAUDE.md, then pins. With an\n'
-        'argument, checks it - under the root, not the root, not under\n'
-        '.handoff/ or the system temp directory, or the word .handoff -\n'
-        'writes it root-relative to .handoff/work-dir, and makes the\n'
-        'directory when missing; a refused token writes nothing (exit 1).\n'
-        'The directory is for prototypes, experiments, throwaway scripts,\n'
-        "and generated output; a spec goes beside the project's docs.")
-    sub.add_parser(
+        "With the slug alone, prints where the thread's made files go:\n"
+        'work dir: .handoff/<slug>/ (default) - the kind folders specs/,\n'
+        'drafts/, notes/, outputs/ - or work dir: <dir> (pin) when the pin\n'
+        '.handoff/<slug>/work-dir names a directory. With a directory,\n'
+        'checks it - already on disk, not the root, not under .handoff/,\n'
+        'not under the system temp directory unless the root itself is;\n'
+        'inside the root or out - and writes it to the pin, root-relative\n'
+        'under the root, else by ~ or absolutely;\n'
+        'a refused token writes nothing (exit 1). --clear removes the pin.\n'
+        "Pin only when the thread's spec and experiments already live in a\n"
+        'project directory, judged at the first begin: the specs, drafts,\n'
+        'and outputs the thread makes then go there, stamped by their ~ or\n'
+        'absolute path, and notes stay in the folder.')
+    wd = sub.add_parser(
         'work-dir',
         epilog=_work_dir_epilog,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    ).add_argument('dir', nargs='?')
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    wd.add_argument('slug')
+    wd.add_argument('dir', nargs='?')
+    wd.add_argument('--clear', action='store_true')
 
     hlp = sub.add_parser('help')
     hlp.add_argument('topic', nargs='?')
@@ -5262,11 +5265,11 @@ def main(argv: list[str]) -> int:
         root = _resolve_root(args)
         if verb == 'list':
             return _verb_list(root, args)
-        if verb == 'work-dir':
-            return _verb_work_dir(root, args)
         slug = getattr(args, 'slug', '')
         is_begin = verb == 'begin'
         folder = _find_folder(root, slug, missing_ok=is_begin)
+        if verb == 'work-dir':
+            return _verb_work_dir(folder, args)
         anch = anchors(folder, args)
         dispatch = {
             'adopt': _verb_adopt,

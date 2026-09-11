@@ -1840,6 +1840,7 @@ def test_probe_dir_is_one_row(tmp_path, monkeypatch, capsys):
     for i in range(5):
         (exp_dir / f'run{i:02d}.py').write_text(f'# run {i}\n')
 
+    capsys.readouterr()
     hq.main(['artifacts', _SLUG])
     out = capsys.readouterr().out
     probe_lines = [ln for ln in out.splitlines() if 'experiments' in ln]
