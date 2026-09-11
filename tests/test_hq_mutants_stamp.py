@@ -1389,26 +1389,19 @@ def test_build_parser_finish_log_required(tmp_path, monkeypatch):
     assert rc != 0
 
 
-def test_build_parser_diff_c1_is_int(tmp_path, monkeypatch):
-    """_build_parser() diff c1 argument has type=int.
+def test_build_parser_diff_takes_cycle_spellings_a_section_and_full():
+    """_build_parser() reads diff cycles as text and takes a section and --full.
 
-    Mutation: type=int removed; c1 stored as string; downstream int ops fail.
-    Oracle: parsed c1 is an int, not a string.
+    Mutation: type=int restored on c1 or c2, so 'c3' is a usage error;
+    the section slot or --full dropped, so the expansion cannot be asked
+    for.
+    Oracle: parsed values for 'diff slug c3 05' and 'diff slug 3 5 now
+    --full'.
     """
-    ns = hq._build_parser().parse_args(['diff', 'slug', '3', '5'])
-    assert isinstance(ns.c1, int)
-    assert ns.c1 == 3
-
-
-def test_build_parser_diff_c2_is_int(tmp_path, monkeypatch):
-    """_build_parser() diff c2 argument has type=int.
-
-    Mutation: type=int removed; c2 stored as string.
-    Oracle: parsed c2 is an int.
-    """
-    ns = hq._build_parser().parse_args(['diff', 'slug', '3', '5'])
-    assert isinstance(ns.c2, int)
-    assert ns.c2 == 5
+    ns = hq._build_parser().parse_args(['diff', 'slug', 'c3', '05'])
+    assert (ns.c1, ns.c2, ns.section, ns.full) == ('c3', '05', None, False)
+    ns = hq._build_parser().parse_args(['diff', 'slug', '3', '5', 'now', '--full'])
+    assert (ns.c1, ns.c2, ns.section, ns.full) == ('3', '5', 'now', True)
 
 
 # ---------------------------------------------------------------------------

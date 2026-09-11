@@ -55,7 +55,6 @@ _TERMINAL_PRINTS = {
     'dropped from the block:',
     'acknowledged:',
     'advisory: --acknowledge given, no witness broke',
-    'older rows omitted',
     'hq list: no handoff under',
     'hq: cannot access',
     'hq finish: unknown item kind',

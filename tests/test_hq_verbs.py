@@ -926,11 +926,11 @@ def test_finish_ranks_collisions_by_folder_wide_rarity(tmp_path, monkeypatch, ca
     assert 'Alpha <- SPEC.md:3 ' in hits[1]
 
 
-def test_when_prints_the_omission_after_the_rows(tmp_path, monkeypatch, capsys):
-    """When shows the newest 30 rows, then one line counting the rest.
+def test_when_prints_every_row_with_no_cap(tmp_path, monkeypatch, capsys):
+    """When shows every row for the path, oldest first, however many.
 
-    Mutation: the omission line printed first, as a header.
-    Oracle: with 35 rows the last output line is '5 older rows omitted'.
+    Mutation: a 30-row cap restored, with a count line for the rest.
+    Oracle: 35 stamps of one file give 35 lines and no 'omitted' line.
     """
     folder = _new_root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
@@ -942,8 +942,8 @@ def test_when_prints_the_omission_after_the_rows(tmp_path, monkeypatch, capsys):
     assert hq.main(['when', _SLUG, 'notes-a.md']) == 0
 
     lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 31
-    assert lines[-1] == '5 older rows omitted'
+    assert len(lines) == 35
+    assert not any('omitted' in ln for ln in lines)
 
 
 def test_artifacts_verb_prints_live_rows_only(tmp_path, monkeypatch, capsys):
@@ -2207,11 +2207,12 @@ def test_when_shows_all_rows_for_path(tmp_path, monkeypatch, capsys):
 
 def test_diff_shows_cursor_changes_between_cycles(tmp_path, monkeypatch,
                                                   capsys):
-    """Diff shows lines present in one cycle archive but not the other.
+    """Diff summarizes the changed section and expands it on request.
 
-    Mutation: diff reporting cycle offsets as line numbers instead of content.
-    Oracle: 'Line A' removed (- prefix) and 'Line B' added (+ prefix) in
-    diff 1 2.
+    Mutation: diff reporting cycle offsets as line numbers instead of
+    content; or the summary and the expansion swapped.
+    Oracle: the summary is the one line '## Task  +1 -1'; 'task' expands
+    to 'Line A' removed (- prefix) and 'Line B' added (+ prefix).
     """
     folder = _new_root(tmp_path, monkeypatch, cycle='1')
     hq.main(['begin', _SLUG])
@@ -2222,8 +2223,11 @@ def test_diff_shows_cursor_changes_between_cycles(tmp_path, monkeypatch,
     hq.main(['begin', _SLUG])
     _set_cursor(folder / 'HANDOFF.md', '## Task\n\nLine B\n')
     hq.main(['finish', _SLUG, '--log', 'cycle two'])
+    capsys.readouterr()
 
     assert hq.main(['diff', _SLUG, '1', '2']) == 0
+    assert capsys.readouterr().out.splitlines() == ['## Task  +1 -1']
+    assert hq.main(['diff', _SLUG, '1', '2', 'task']) == 0
     out = capsys.readouterr().out
     assert any(ln.startswith('- ') and 'Line A' in ln for ln in out.splitlines())
     assert any(ln.startswith('+ ') and 'Line B' in ln for ln in out.splitlines())
@@ -2805,3 +2809,73 @@ def test_standing_by_id_prints_the_body_and_the_superseded_marker(
         f'hq standing: zz9 not in standing.md - hq standing {_SLUG} lists the ids',
         '[d02] (c1) **New way** In process.',
         ]
+
+
+# --- diff and addressing ----------------------------------------------
+
+
+def test_diff_counts_a_moved_line_in_both_sections_and_names_the_forms(
+        tmp_path, monkeypatch, capsys):
+    """A bullet moved between sections shows as -1 and +1, by any cycle spelling.
+
+    Mutation: a set difference of cursor lines, so the move cancels and
+    prints nothing while the help text says empty means identical; the
+    section match case-sensitive, so 'now' finds nothing; a cycle
+    spelling refused; or an unknown section exiting 0.
+    Oracle: hand-written summary lines for a cursor whose only change is
+    one bullet moved from Now to State; the same lines for '1 2', 'c1
+    c2', and 'c01 c02'; the expansion of 'now'; the unknown-section line
+    with exit 1; a non-number exiting 2.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    hq.main(['begin', _SLUG])
+    _set_cursor(folder / 'HANDOFF.md', '## Now\n- bullet\n## State\n')
+    hq.main(['finish', _SLUG, '--log', 'one'])
+    monkeypatch.setenv('HQ_CYCLE', '2')
+    hq.main(['begin', _SLUG])
+    _set_cursor(folder / 'HANDOFF.md', '## Now\n## State\n- bullet\n')
+    hq.main(['finish', _SLUG, '--log', 'two'])
+    capsys.readouterr()
+    for first, second in (('1', '2'), ('c1', 'c2'), ('c01', 'c02')):
+        assert hq.main(['diff', _SLUG, first, second]) == 0, (first, second)
+        assert capsys.readouterr().out.splitlines() == ['## Now  -1', '## State  +1']
+    assert hq.main(['diff', _SLUG, '1', '2', 'now']) == 0
+    assert capsys.readouterr().out.splitlines() == ['## Now  -1', '- - bullet']
+    assert hq.main(['diff', _SLUG, '1', '2', 'bogus']) == 1
+    assert capsys.readouterr().out.strip() == (
+        'hq diff: no section bogus in c1 or c2 - sections: Now, State')
+    assert hq.main(['diff', _SLUG, 'x', '2']) == 2
+
+
+def test_when_and_read_resolve_a_token_against_the_root_and_the_pin(
+        tmp_path, monkeypatch, capsys):
+    """A relative token the folder lacks is tried against the root, then the pin.
+
+    Mutation: the resolver joining a relative token onto the folder
+    alone, so 'src/app.py' and 'run.py' print nothing and exit 0; or a
+    miss exiting 0 in silence.
+    Oracle: two drafts stamped by their absolute paths under the root
+    and under the pinned directory; each found by the relative token,
+    'hq read' printing the pinned file's one line, and a token with no
+    row printing the hand-written miss line with exit 1.
+    """
+    folder = _new_root(tmp_path, monkeypatch, cycle='1')
+    root = folder.parent.parent
+    (root / 'src').mkdir()
+    (root / 'src' / 'app.py').write_text('a = 1\n')
+    (root / 'experiments').mkdir()
+    (root / 'experiments' / 'run.py').write_text('r = 1\n')
+    hq.main(['begin', _SLUG])
+    assert hq.main(['work-dir', _SLUG, 'experiments']) == 0
+    for path in (root / 'src' / 'app.py', root / 'experiments' / 'run.py'):
+        assert hq.main(['stamp', _SLUG, str(path), '--kind', 'draft']) == 0
+    capsys.readouterr()
+    assert hq.main(['when', _SLUG, 'src/app.py']) == 0
+    assert capsys.readouterr().out.startswith(f'{root}/src/app.py\t1\tlive\tedit')
+    assert hq.main(['when', _SLUG, 'run.py']) == 0
+    assert capsys.readouterr().out.startswith(f'{root}/experiments/run.py\t1\tlive\tedit')
+    assert hq.main(['read', _SLUG, 'run.py']) == 0
+    assert capsys.readouterr().out == 'r = 1\n'
+    assert hq.main(['when', _SLUG, 'nothere.md']) == 1
+    assert capsys.readouterr().out.strip() == (
+        f'hq when: nothere.md not in ledger - hq artifacts {_SLUG} lists the rows')

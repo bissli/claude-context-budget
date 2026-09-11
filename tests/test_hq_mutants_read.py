@@ -1058,13 +1058,16 @@ def test_verb_diff_missing_cycle_exits_one(tmp_path, monkeypatch, capsys):
     assert ret == 1
 
 
-def test_verb_diff_truncates_at_60_lines(tmp_path, monkeypatch, capsys):
-    """_verb_diff truncates output at exactly 60 lines, not 61.
+def test_verb_diff_counts_and_expands_sixty_one_lines_in_full(
+        tmp_path, monkeypatch, capsys):
+    """_verb_diff counts a section's change and expands it with no cap.
 
-    Mutation: x__verb_diff__mutmut_58 changes '> 60' to '>= 60', so output
-    with exactly 60 lines is truncated instead of shown in full.
-    Oracle: two cycle files whose cursors differ by exactly 60 lines -> no
-    truncation; differing by 61 -> truncation with '... N lines omitted'.
+    Mutation: a cap restored on the expansion, so the 61st line is cut;
+    or the counts taken from a set difference, so a line present in both
+    cycles under different neighbors is miscounted.
+    Oracle: two cycle files whose Now sections hold 30 and 31 unique
+    lines: the summary reads '## Now  +31 -30' and 'now' expands to 61
+    change lines.
     """
     folder = _new_root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
@@ -1072,30 +1075,21 @@ def test_verb_diff_truncates_at_60_lines(tmp_path, monkeypatch, capsys):
     hq.main(['begin', _SLUG])
     hq.main(['finish', _SLUG, '--log', 'c2'])
     cycles_dir = folder / 'cycles'
-    c1 = cycles_dir / 'c01.md'
-    c2 = cycles_dir / 'c02.md'
     preamble = '# Handoff: test-slug\n\nWritten: 2026-09-10 | Cycle: 1\n\n'
-    # 30 unique lines in c1, 30 unique in c2: 60 diff lines (30 removed + 30 added).
     c1_cursor = '## Now\n\n' + '\n'.join(f'only-c1-{i}' for i in range(30)) + '\n'
-    c2_cursor = '## Now\n\n' + '\n'.join(f'only-c2-{i}' for i in range(30)) + '\n'
-    c1.write_text(preamble + c1_cursor)
-    c2.write_text(preamble + c2_cursor)
+    c2_cursor = '## Now\n\n' + '\n'.join(f'only-c2-{i}' for i in range(31)) + '\n'
+    (cycles_dir / 'c01.md').write_text(preamble + c1_cursor)
+    (cycles_dir / 'c02.md').write_text(preamble + c2_cursor)
     capsys.readouterr()
 
-    hq.main(['diff', _SLUG, '1', '2'])
-
-    out = capsys.readouterr().out
-    assert 'omitted' not in out, f'60 diff lines should not be truncated; got: {out!r}'
-
-    # 30 unique in c1, 31 unique in c2: 61 diff lines -> truncation.
-    c2_cursor_61 = '## Now\n\n' + '\n'.join(f'only-c2-{i}' for i in range(31)) + '\n'
-    c2.write_text(preamble + c2_cursor_61)
-    capsys.readouterr()
-
-    hq.main(['diff', _SLUG, '1', '2'])
-
-    out = capsys.readouterr().out
-    assert 'omitted' in out, f'61 diff lines should be truncated; got: {out!r}'
+    assert hq.main(['diff', _SLUG, '1', '2']) == 0
+    assert capsys.readouterr().out.splitlines() == ['## Now  +31 -30']
+    assert hq.main(['diff', _SLUG, '1', '2', 'now']) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == '## Now  +31 -30'
+    assert sum(ln.startswith('- ') for ln in lines) == 30
+    assert sum(ln.startswith('+ ') for ln in lines) == 31
+    assert 'omitted' not in '\n'.join(lines)
 
 
 # ------------------------------------------------------------------

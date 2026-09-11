@@ -28,6 +28,7 @@ Notes
 
 import argparse
 import contextlib
+import difflib
 import datetime
 import fnmatch
 import hashlib
@@ -4796,6 +4797,53 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     return 0
 
 
+def _ledger_key(folder: pathlib.Path, token: str, known: set[str]) -> str | None:
+    """Resolve a read-only verb's path token to the ledger key it names.
+
+    Parameters
+    ----------
+    folder : pathlib.Path
+        Handoff folder; the root is its grandparent and the pin its
+        ``work-dir`` file.
+    token : str
+        The path as typed: folder-relative, root-relative, pin-relative,
+        or by ``~`` or absolutely.
+    known : set[str]
+        Every path the ledger holds a row for.
+
+    Returns
+    -------
+    str | None
+        The stored path whose row the token names, or ``None`` when no
+        spelling of it has a row.
+
+    Notes
+    -----
+    - A relative token is tried as ``stamp`` stores it, then against the
+      project root, then against the pinned work dir, so a repo file
+      is found by the path the cursor names. ``stamp`` never searches:
+      this is the read-only verbs' courtesy alone.
+    """
+    stored = _stored_path(folder, token)[0]
+    if stored in known:
+        return stored
+    clean = token.strip('`')
+    if clean.startswith(('/', '~')):
+        return None
+    root = folder.parent.parent
+    bases = [root]
+    pin, _ = resolve_work_dir(folder)
+    if pin:
+        bases.append(
+            pathlib.Path(os.path.expanduser(pin)) if pin.startswith(('/', '~'))
+            else root / pin)
+    for base in bases:
+        candidate = _stored_path(folder, str(base / clean))[0]
+        if candidate in known:
+            return candidate
+    return None
+
+
 def _verb_read(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int:
     """Run read: print resolved spans and record a receipt.
 
@@ -4819,20 +4867,21 @@ def _verb_read(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     - The spans print before the receipt is written, so a state directory
       the receipt cannot reach costs the caller the exit code, never
       the content it asked for.
-    - The path keys as ``stamp`` stores it and the file opens where that
-      token resolves, so a ``~`` row is found by its expansion and a
-      folder row by any spelling; the receipt carries the stored path,
-      which is what the gate matches.
+    - The path keys as ``stamp`` stores it, else relative to the root or
+      the pinned work dir (``_ledger_key``), and the file opens where the
+      stored path resolves; the receipt carries the stored path, which
+      is what the gate matches.
     - A ``/`` in the session id becomes ``_``: the id names one receipt
       file, not a path under the state directory.
     """
     path = getattr(argv, 'path', '')
-    stored_path, file_path, _ = _stored_path(folder, path)
     rows = _read_tsv(folder / 'ledger.tsv', LEDGER_FIELDS)
-    row = latest_rows(rows).get(stored_path)
-    if not row:
+    stored_path = _ledger_key(folder, path, {r['path'] for r in rows})
+    if stored_path is None:
         print(f'hq read: {path} not in ledger - read it whole by hand')
         return 1
+    file_path = _stored_path(folder, stored_path)[1]
+    row = latest_rows(rows)[stored_path]
     if not file_path.exists():
         print(
             f'hq read: {path} not on disk'
@@ -4881,29 +4930,34 @@ def _verb_when(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     Returns
     -------
     int
-        0 always; prints up to 30 rows, oldest first.
+        0 with every row for the path, oldest first, no cap; 1 when no
+        spelling of the path has a row.
 
     Notes
     -----
     - The path keys as ``stamp`` stores it, so every spelling of one
       file - ``~``, its expansion, a dotted folder path - shows one
-      history.
+      history; a relative token the folder does not hold is tried
+      against the project root, then the pinned work dir.
     """
     path = getattr(argv, 'path', '')
-    stored_path = _stored_path(folder, path)[0]
     rows = _read_tsv(folder / 'ledger.tsv', LEDGER_FIELDS)
-    matching = [r for r in rows if r['path'] == stored_path]
-    omitted = len(matching) - 30
-    for row in matching[-30:]:
-        print('\t'.join([row['path'], row['cycle'], row['status'], row['read_before'],
-                         row['successor'], row['reason'], row['label']]))
-    if omitted > 0:
-        print(f'{omitted} older rows omitted')
+    stored_path = _ledger_key(folder, path, {r['path'] for r in rows})
+    if stored_path is None:
+        print(
+            f'hq when: {path} not in ledger'
+            f' - hq artifacts {folder.name} lists the rows')
+        return 1
+    for row in rows:
+        if row['path'] == stored_path:
+            print('\t'.join([
+                row['path'], row['cycle'], row['status'], row['read_before'],
+                row['successor'], row['reason'], row['label']]))
     return 0
 
 
 def _verb_diff(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int:
-    """Run diff: show cursor lines added or removed between two cycles.
+    """Run diff: the cursor change between two cycles, by section.
 
     Parameters
     ----------
@@ -4912,30 +4966,92 @@ def _verb_diff(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     anch : dict
         Anchors dict from ``anchors()``; unused but required by dispatch.
     argv : argparse.Namespace
-        Parsed diff arguments: c1, c2 (cycle numbers).
+        Parsed diff arguments: ``c1`` and ``c2`` as ``5``, ``c5``, or
+        ``c05``; ``section``, a heading to expand, matched without regard
+        to case; ``--full``, every section expanded.
 
     Returns
     -------
     int
-        0 on success; 1 when either cycle archive is absent.
+        0 with one line per cursor section in file order - ``## Now  +3
+        -1``, ``## State  unchanged``, ``## Unfiled  added`` or
+        ``removed`` - or nothing when the two cursors are identical
+        once whitespace is normalized; with a section or ``--full``, the
+        section's ``-`` and ``+`` lines as difflib orders them, no cap.
+        1 when a cycle archive is absent or the section matches no
+        heading; 2 when a cycle is not a number.
+
+    Notes
+    -----
+    - A line that moved between sections counts in both, so the summary
+      never reads identical when only the shape changed; identity is
+      the whole cursor's, so the help text's "no output means identical"
+      holds.
     """
-    c1, c2 = getattr(argv, 'c1', 0), getattr(argv, 'c2', 0)
-    p1 = folder / 'cycles' / f'c{int(c1):02d}.md'
-    p2 = folder / 'cycles' / f'c{int(c2):02d}.md'
+    cycles: list[int] = []
+    for token in (str(getattr(argv, 'c1', '')), str(getattr(argv, 'c2', ''))):
+        digits = token[1:] if token[:1] in 'cC' else token
+        if not digits.isdigit():
+            print(
+                f'hq diff: cycle {token!r} is not N, cN, or cNN'
+                ' - name a finished cycle by its number')
+            return 2
+        cycles.append(int(digits))
+    c1, c2 = cycles
+    p1 = folder / 'cycles' / f'c{c1:02d}.md'
+    p2 = folder / 'cycles' / f'c{c2:02d}.md'
     for p in (p1, p2):
         if not p.exists():
             print(f'hq diff: {p.name} not found - that cycle was never finished here')
             return 1
-    lines1 = set(split_handoff(p1.read_text(encoding='utf-8'))['cursor'].splitlines())
-    lines2 = set(split_handoff(p2.read_text(encoding='utf-8'))['cursor'].splitlines())
-    out = [f'- {ln}' for ln in sorted(lines1 - lines2)]
-    out += [f'+ {ln}' for ln in sorted(lines2 - lines1)]
-    if len(out) > 60:
-        n_cut = len(out) - 60
-        out = out[:60]
-        out.append(f'... {n_cut} lines omitted')
-    if out:
-        print('\n'.join(out))
+    cursors = [split_handoff(p.read_text(encoding='utf-8'))['cursor'] for p in (p1, p2)]
+    if ' '.join(cursors[0].split()) == ' '.join(cursors[1].split()):
+        return 0
+    parsed: list[dict[str, list[str]]] = []
+    for cursor in cursors:
+        sections: dict[str, list[str]] = {}
+        heading = ''
+        for line in cursor.splitlines():
+            if line.startswith('## '):
+                heading = line[3:].strip()
+                sections[heading] = []
+            elif heading:
+                sections[heading].append(line)
+        parsed.append(sections)
+    old, new = parsed
+    order = list(old) + [h for h in new if h not in old]
+    wanted = getattr(argv, 'section', None)
+    expand = bool(wanted) or getattr(argv, 'full', False)
+    if wanted:
+        match = next((h for h in order if h.lower() == wanted.lower()), None)
+        if match is None:
+            print(
+                f'hq diff: no section {wanted} in c{c1} or c{c2}'
+                f' - sections: {", ".join(order)}')
+            return 1
+        order = [match]
+    for heading in order:
+        if heading not in old or heading not in new:
+            sign = '+' if heading not in old else '-'
+            print(f'## {heading}  {"added" if sign == "+" else "removed"}')
+            if expand:
+                for line in (new if sign == '+' else old)[heading]:
+                    print(f'{sign} {line}')
+            continue
+        changes = [
+            line for line in difflib.ndiff(old[heading], new[heading])
+            if line[:1] in '+-']
+        if not changes:
+            print(f'## {heading}  unchanged')
+            continue
+        counts = ' '.join(
+            f'{sign}{n}' for sign, n in (
+                ('+', sum(line[0] == '+' for line in changes)),
+                ('-', sum(line[0] == '-' for line in changes)))
+            if n)
+        print(f'## {heading}  {counts}')
+        if expand:
+            print('\n'.join(changes))
     return 0
 
 
@@ -5347,9 +5463,11 @@ def _build_parser() -> argparse.ArgumentParser:
     rd.add_argument('path')
 
     _when_epilog = (
-        'Every ledger row for the path, oldest first, seven tab-separated\n'
-        'columns: path cycle status read_before successor reason label. Over\n'
-        '30 rows, the newest 30 and one line naming the omitted count.'
+        'Every ledger row for the path, oldest first, no cap, seven\n'
+        'tab-separated columns: path cycle status read_before successor\n'
+        'reason label. The path keys as stamp stores it; a relative token\n'
+        'the folder does not hold is tried against the project root, then\n'
+        'the pinned work dir. A path with no row exits 1.'
     )
     wh = sub.add_parser(
         'when',
@@ -5359,20 +5477,27 @@ def _build_parser() -> argparse.ArgumentParser:
     wh.add_argument('path')
 
     _diff_epilog = (
-        "Cursor lines of cycles/c<c1>.md absent from cycles/c<c2>.md as\n"
-        "'- line', the reverse as '+ line'; at most 60 lines plus one naming\n"
-        'the cut. No output means the two cursors are identical.'
+        'Cycles are named N, cN, or cNN. With no section, one line per\n'
+        'cursor section in file order - "## Now  +3 -1", "## State\n'
+        'unchanged", "## Unfiled  added" or "removed" - and no output when\n'
+        'the two cursors are identical. A line that moved between sections\n'
+        'counts in both. With a section name, matched without regard to\n'
+        "case, that section's line diff in file order, '- line' and '+ line'\n"
+        'as difflib orders them, no cap; --full prints every section this\n'
+        'way. A name matching no section exits 1 and lists the sections.'
     )
     df = sub.add_parser(
         'diff',
         epilog=_diff_epilog,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     df.add_argument('slug')
-    df.add_argument('c1', type=int)
-    df.add_argument('c2', type=int)
+    df.add_argument('c1')
+    df.add_argument('c2')
+    df.add_argument('section', nargs='?')
+    df.add_argument('--full', action='store_true')
 
     _artifacts_epilog = (
-        'Every live row as a full line - path kind read_before cNN label - with\n'
+        'Every live row as a full line - path kind read_before cN label - with\n'
         'no cap, then <name>  <kind>?  unstamped for a file with no row,\n'
         '<name>  conflicted copy for a sync duplicate, and <name>  unstampable\n'
         'for a name holding a tab or newline or an entry that is not a regular\n'

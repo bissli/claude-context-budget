@@ -269,8 +269,6 @@ hq stamp <slug> specs/SPEC.md \
   --where "3. Retry" --label "refresh contract; s3 is the retry schedule"
 hq stamp <slug> ~/code/poller/scripts/auth.py \
   --kind draft --label "poller; the 401 branch is under edit"
-hq stamp <slug> notes/idp-quirks.md \
-  --read-before edit --label "staging IdP quirks, found the hard way"
 hq stamp <slug> specs/SPEC.md \
   --successor specs/SPEC-v2.md
 hq stamp <slug> --batch <<'ROWS'
@@ -497,9 +495,11 @@ count says neither.
 
 Each runs the `hq` verb of the same name and shows the user its output
 unchanged; none writes. `hq when <slug> <path>`: every ledger row for
-the path, oldest first. `hq diff <slug> <c1> <c2>`: the cursor lines
-that changed between two finished cycles; no output means none.
-`hq artifacts <slug>`: every live row, uncapped, plus unstamped files.
+the path, oldest first; a relative path resolves against the folder,
+root, then pin. `hq diff <slug> <c1> <c2>`: a line per cursor
+section, `## Now  +3 -1` or `unchanged`; a section name after the
+cycles expands it, `--full` all; no output means identical.
+`hq artifacts <slug>`: every live row plus unstamped files.
 `hq standing <slug>`: every unsuperseded item in full; `--all` adds
 the superseded ones; `<id> [<id> ...]` prints the named items, a
 superseded one with its successor.

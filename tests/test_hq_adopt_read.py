@@ -584,13 +584,17 @@ def test_standing_all_marks_the_superseded_item(tmp_path, monkeypatch, capsys):
 # --- item 13: the diff cap --------------------------------------------
 
 
-def test_diff_caps_at_sixty_lines_and_still_exits_zero(
+def test_diff_summarizes_a_section_and_expands_it_without_a_cap(
         tmp_path, monkeypatch, capsys):
-    """61 differing cursor lines print 60 plus one omission line, exit 0.
+    """The summary counts a section's change; the expansion prints every line.
 
-    Mutation: the cap moved to 61, or a capped diff returning 1.
-    Oracle: hand-counted - cycle 1 carries 61 lines cycle 2 drops, so the
-    cut is exactly one line.
+    Mutation: a line cap on the expansion, so a 61-line drop loses its
+    last line; a set difference for the count, so a removed line that
+    also stands elsewhere goes uncounted; or the summary printing the
+    lines themselves.
+    Oracle: hand-counted - cycle 1 carries 61 Task lines cycle 2 drops:
+    the summary is the one line '## Task  -61', and 'task' expands to
+    that line and 61 '- ' lines in file order.
     """
     folder = _root(tmp_path, monkeypatch, cycle='1')
     hq.main(['begin', _SLUG])
@@ -606,10 +610,11 @@ def test_diff_caps_at_sixty_lines_and_still_exits_zero(
     hq.main(['finish', _SLUG, '--log', 'two'])
     capsys.readouterr()
     assert hq.main(['diff', _SLUG, '1', '2']) == 0
+    assert capsys.readouterr().out.splitlines() == ['## Task  -61']
+    assert hq.main(['diff', _SLUG, '1', '2', 'task']) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 61
-    assert sum(1 for ln in lines if ln.startswith(('- ', '+ '))) == 60
-    assert lines[-1] == '... 1 lines omitted'
+    assert lines[0] == '## Task  -61'
+    assert lines[1:] == [f'- Line {i:02d}' for i in range(61)]
 
 
 # --- item 14: the when cap --------------------------------------------
@@ -625,29 +630,24 @@ def _seed_when(folder, count):
     (folder / 'ledger.tsv').write_text('\n'.join(rows) + '\n')
 
 
-def test_when_prints_thirty_rows_oldest_first_then_names_the_cut(
-        tmp_path, monkeypatch, capsys):
-    """30 rows print 30 lines with no cut; 31 print 30 plus one cut line.
+def test_when_prints_every_row_oldest_first(tmp_path, monkeypatch, capsys):
+    """31 rows print 31 lines, oldest first, with no cut.
 
-    Mutation: the omission line printed at zero (`>= 0`), or the rows
-    reversed so the newest prints first.
-    Oracle: hand-counted - with 31 rows the oldest kept row is cycle 2 and
-    exactly one row is dropped.
+    Mutation: a row cap restored, so the oldest row leaves the output
+    and a count line stands in for it; or the rows reversed so the
+    newest prints first.
+    Oracle: hand-counted - 31 seeded rows, cycle 1 first and cycle 31
+    last, no 'omitted' line.
     """
     folder = _root(tmp_path, monkeypatch)
-    _seed_when(folder, 30)
+    _seed_when(folder, 31)
     capsys.readouterr()
     assert hq.main(['when', _SLUG, 'SPEC.md']) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 30
-    assert lines[0].split('\t')[1] == '1'
-    assert not any('omitted' in ln for ln in lines)
-    _seed_when(folder, 31)
-    assert hq.main(['when', _SLUG, 'SPEC.md']) == 0
-    lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 31
-    assert lines[0].split('\t')[1] == '2'
-    assert lines[-1] == '1 older rows omitted'
+    assert lines[0].split('\t')[1] == '1'
+    assert lines[-1].split('\t')[1] == '31'
+    assert not any('omitted' in ln for ln in lines)
 
 
 # --- item 15: the artifacts overflow count ----------------------------
