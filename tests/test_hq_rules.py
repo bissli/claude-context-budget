@@ -122,6 +122,24 @@ def test_kind_inference_over_a_representative_name_set():
         assert result == expected, f'{name}: expected {expected}, got {result}'
 
 
+def test_an_authored_notes_or_todo_name_beats_a_design_heading():
+    """A notes-*, REVIEW*, or todo* name outranks a Spec/Design heading.
+
+    Mutation: the heading rule left above the name rules, so a notes file
+    whose first heading opens 'Design' is stamped spec/always and R1
+    refuses every later demotion; or the name rules moved above the
+    _SPEC_PATS rule, so a DESIGN-todo.md stops being a spec.
+    Oracle: hand-derived from the first-match table as reordered, with
+    the heading-only guide.md and the DESIGN-* name as the control rows.
+    """
+    assert hq.infer_kind(
+        'notes-widget-deltas.md', False, '# Design deltas to close') == ('notes', 'never')
+    assert hq.infer_kind('REVIEW-pass2.md', False, '## Design notes') == ('notes', 'never')
+    assert hq.infer_kind('todo-widget.md', False, '# Design of the todo') == ('todo', 'never')
+    assert hq.infer_kind('guide.md', False, '# Design') == ('spec', 'always')
+    assert hq.infer_kind('DESIGN-todo.md', False, '# Design') == ('spec', 'always')
+
+
 # --- apply_stem_rule --------------------------------------------------
 
 

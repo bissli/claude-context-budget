@@ -210,14 +210,17 @@ def infer_kind(
     for pat in _SPEC_PATS:
         if fnmatch.fnmatchcase(name, pat):
             return ('spec', 'always')
-    if re.match(r'^#+ *(Spec|Design)\b', first_heading):
-        return ('spec', 'always')
-    if top_level and pathlib.Path(name).suffix in _DRAFT_EXTS:
-        return ('draft', 'always')
+    # An authored name prefix outranks the first heading: a heading is a
+    # guess over prose, and a spec grade it gets wrong is gated for good
+    # under R1.
     if fnmatch.fnmatchcase(name, 'notes-*') or fnmatch.fnmatchcase(name, 'REVIEW*'):
         return ('notes', 'never')
     if fnmatch.fnmatchcase(name, 'todo*') or fnmatch.fnmatchcase(name, 'TODO*'):
         return ('todo', 'never')
+    if re.match(r'^#+ *(Spec|Design)\b', first_heading):
+        return ('spec', 'always')
+    if top_level and pathlib.Path(name).suffix in _DRAFT_EXTS:
+        return ('draft', 'always')
     return ('other', 'never')
 
 

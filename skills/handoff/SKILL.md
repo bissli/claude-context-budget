@@ -326,11 +326,11 @@ Kind inference, first match wins:
 | name contains `cycle<digits>`                     | snapshot  | never       |
 | a directory                                       | probe-dir | never       |
 | `SPEC*`, `DESIGN*`, `PROPOSAL*`, `*-DECLARATION*` | spec      | always      |
+| `notes-*`, `REVIEW*`                              | notes     | never       |
+| `todo*`, `TODO*`                                  | todo      | never       |
 | first heading starts `Spec`/`Design`, any level   | spec      | always      |
 | `*.py`, `*.sql`, `*.js`, `*.ts`, `*.ps1` at the   | draft     | always      |
 | folder's top level (nested or outside: other)     |           |             |
-| `notes-*`, `REVIEW*`                              | notes     | never       |
-| `todo*`, `TODO*`                                  | todo      | never       |
 | anything else                                     | other     | never       |
 
 When a stem (e.g. `SPEC`) has several members, `adopt` and `begin`
