@@ -478,6 +478,38 @@ def test_the_example_file_in_the_skill_is_the_scripts_own_output(
         _normalize(example).splitlines()
 
 
+def test_finish_advises_when_the_artifacts_block_is_over_its_cap(
+        tmp_path, monkeypatch):
+    """finish names the rows the 40-line Artifacts cap folds into the counts.
+
+    Mutation: the advisory computed off the capped list rather than the
+    full one, so it never fires; or the cap read differently in finish
+    and in the renderer, so it fires one row early or late.
+    Oracle: hand-counted - 41 mention rows over a 40-line cap leave one
+    folded; 40 rows leave none and print no advisory; the block itself
+    still prints exactly 40 full lines.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    _run(['begin', _SLUG])
+    for i in range(40):
+        (folder / f'note-{i:02d}.md').write_text('# N\n')
+        assert _run(['stamp', _SLUG, f'note-{i:02d}.md', '--read-before', 'mention',
+                     '--label', 'a note'])[0] == 0
+    rc, out, _ = _run(['finish', _SLUG, '--log', 'forty'])
+    assert rc == 0
+    assert 'advisory: artifacts' not in out
+    _run(['begin', _SLUG])
+    (folder / 'note-40.md').write_text('# N\n')
+    assert _run(['stamp', _SLUG, 'note-40.md', '--read-before', 'mention',
+                 '--label', 'a note'])[0] == 0
+    rc, out, _ = _run(['finish', _SLUG, '--log', 'forty-one'])
+    assert rc == 0
+    assert ('advisory: artifacts over the 40-line cap by 1, folded into the counts'
+            in out.splitlines())
+    block = hq.split_handoff((folder / 'HANDOFF.md').read_text())['blocks']['artifacts']
+    assert sum('  other  mention  ' in ln for ln in block.splitlines()) == 40
+
+
 def test_shorter_label_advisory_fires_only_in_the_cycle_that_shortened_it(
         tmp_path, monkeypatch):
     """A label shortened in one cycle is reported at that finish alone.

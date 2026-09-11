@@ -633,7 +633,11 @@ Run these steps in order:
    `resume: /handoff <slug>`. A `<path>:?` in the rendered read block
    is not a blocking line, but the anchor is unresolved: re-stamp with
    a `--where` that resolves and re-run `open`.
-   Lines prefixed `advisory:` never block: `advisory: unstamped <kind>
+   Lines prefixed `advisory:` never block: `advisory: artifacts over
+   the 40-line cap by N, folded into the counts` (the block prints 40
+   full lines and counts the rest by kind, so N labels left the file;
+   re-grade or supersede rows, or read them with `hq artifacts
+   <slug>`), `advisory: unstamped <kind>
    xN: <names>`, `advisory: conflicted copy: <name>`, `advisory:
    unstampable name: <name>`, `advisory: abs path not on disk: <path>`,
    `advisory: successor missing: <path> -> <successor>`, `advisory:

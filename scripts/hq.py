@@ -73,6 +73,7 @@ _SPEC_PATS = ['SPEC*', 'DESIGN*', 'PROPOSAL*', '*-DECLARATION*']
 _DRAFT_EXTS = {'.py', '.sql', '.js', '.ts', '.ps1'}
 _GATE_RB = {'always', 'edit'}
 _FULL_RB = {'always', 'edit', 'mention'}
+_ARTIFACTS_CAP = 40
 _TWO_HOURS = 7200
 _STOPWORDS = {
     'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'then',
@@ -585,12 +586,11 @@ def render_read(
     return '\n'.join(out)
 
 
-def render_artifacts(
+def artifact_lines(
     walk: list[tuple[str, str]],
     rows: dict[str, Row],
-    slug: str,
-) -> str:
-    """Render the hq:artifacts block body.
+) -> tuple[list[str], dict[str, int], dict[str, int]]:
+    """Sort every artifact into a full line, a never count, or a non-live count.
 
     Parameters
     ----------
@@ -599,14 +599,20 @@ def render_artifacts(
         excluded before this call.
     rows : dict[str, Row]
         Latest ledger row per path, with the caller's ``missing`` marks
-        already applied; the renderer never consults the disk.
-    slug : str
-        Handoff slug for the hq command in count lines.
+        already applied; the disk is never consulted.
 
     Returns
     -------
-    str
-        Block body lines joined with newlines.
+    tuple[list[str], dict[str, int], dict[str, int]]
+        The full lines, uncapped, in walk order and then ledger order for
+        the rows the walk cannot see; the ``never`` rows counted by kind;
+        the rows no longer live counted by status.
+
+    Notes
+    -----
+    - A full line is ``path  kind  read_before  cN  label`` for a live row
+      with ``read_before`` in {always, edit, mention}, or
+      ``path  kind?  unstamped`` for a walk entry with no row.
     """
     full_lines: list[str] = []
     kind_never: dict[str, int] = {}
@@ -645,9 +651,37 @@ def render_artifacts(
     for path, row in rows.items():
         if path not in seen:
             _classify(path, row, row.get('kind', 'other'))
+    return full_lines, kind_never, non_live
 
-    capped = full_lines[:40]
-    for line in full_lines[40:]:
+
+def render_artifacts(
+    walk: list[tuple[str, str]],
+    rows: dict[str, Row],
+    slug: str,
+) -> str:
+    """Render the hq:artifacts block body.
+
+    Parameters
+    ----------
+    walk : list[tuple[str, str]]
+        Top-level entries as ``(path, inferred_kind)``; ``'skip'`` entries
+        excluded before this call.
+    rows : dict[str, Row]
+        Latest ledger row per path, with the caller's ``missing`` marks
+        already applied; the renderer never consults the disk.
+    slug : str
+        Handoff slug for the hq command in count lines.
+
+    Returns
+    -------
+    str
+        Block body lines joined with newlines: at most ``_ARTIFACTS_CAP``
+        full lines, the overflow folded into the never counts by kind,
+        then the count lines.
+    """
+    full_lines, kind_never, non_live = artifact_lines(walk, rows)
+    capped = full_lines[:_ARTIFACTS_CAP]
+    for line in full_lines[_ARTIFACTS_CAP:]:
         kind = line.split('  ')[1].rstrip('?')
         kind_never[kind] = kind_never.get(kind, 0) + 1
 
@@ -3549,6 +3583,15 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
                     spec_headings.append((name, i + 1, ln))
         for hit in collisions(now_text, dead_end_headlines, spec_headings, rarity):
             print(f'advisory: {hit}')
+    # --- Advisory: artifacts over the cap ---
+    # The block folds the overflow into the kind counts without a word;
+    # this is the one place the agent hears that a label left the file.
+    art_walk = [(n, k) for n, k in walk if k != 'skip']
+    over = len(artifact_lines(art_walk, live)[0]) - _ARTIFACTS_CAP
+    if over > 0:
+        print(
+            f'advisory: artifacts over the {_ARTIFACTS_CAP}-line cap by {over},'
+            ' folded into the counts')
     # --- Advisory: unstamped ---
     unstamped_entries = [(n, k) for n, k in walk if n not in live and k != 'skip']
     if unstamped_entries:
