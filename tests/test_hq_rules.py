@@ -828,6 +828,31 @@ def test_drain_unfiled_headline_never_ends_inside_an_open_quotation():
     ]
 
 
+def test_drain_unfiled_runs_a_short_label_headline_on_and_still_refuses_none():
+    """The drained headline passes a one- or two-word label but not a bare dot.
+
+    Mutation: the label rule keyed on character length, so 'Never trust
+    mtime!' swallows its body; or the zero-word case allowed to run on,
+    so '- decision: . rest' gains a headline and the no-headline refusal
+    never fires.
+    Oracle: hand-counted words - 'Cycle 26.' has two, 'Never trust
+    mtime!' three, '.' none - against hand-split headlines.
+    """
+    cursor = (
+        '## Task\nx\n\n## Unfiled\n'
+        '- dead-end: Cycle 26. Reading the gain showed nothing. Done.\n'
+        '- constraint: Never trust mtime! It lies on network mounts.\n')
+    items, _, refusal = hq.drain_unfiled(cursor)
+    assert refusal is None
+    assert items == [
+        ('dead-end', 'Cycle 26. Reading the gain showed nothing.', 'Done.'),
+        ('constraint', 'Never trust mtime!', 'It lies on network mounts.'),
+    ]
+    _, _, refusal = hq.drain_unfiled(
+        '## Task\nx\n\n## Unfiled\n- decision: . rest of the thing\n')
+    assert refusal == "Unfiled bullet has no headline: '- decision: . rest of the thing'"
+
+
 def test_collisions_ignore_a_capital_at_sentence_start():
     """Verify a capitalized word opening a sentence is not a Now-step term.
 

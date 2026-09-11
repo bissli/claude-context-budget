@@ -469,8 +469,9 @@ as typed bullets, one per item, the headline first:
 ```
 
 A bullet with no bold span takes its first sentence as the headline,
-never cut inside an open quotation. `finish` drains `## Unfiled` into
-`standing.md` and removes the
+never cut inside an open quotation; a first sentence of one or two
+words, `Cycle 26.`, is a label, and the headline runs on to the next
+sentence. `finish` drains `## Unfiled` into `standing.md` and removes the
 section. An unprefixed bullet is a hard fail: `finish` prints
 `hq finish: untyped Unfiled bullet: '<line>'` and writes nothing; the
 section

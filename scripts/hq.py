@@ -716,10 +716,16 @@ def split_headline(content: str) -> tuple[str, str]:
     - A candidate that leaves a double quote open is skipped: a quoted
       sentence end is the quotation's, not the item's. A closing quote
       may follow the punctuation, ``later."``.
+    - A candidate of one or two words with text after it is a label,
+      ``Cycle 26.``, not the item, so the headline runs on to the next
+      sentence; a candidate with no word at all is returned as is, so
+      the caller's no-headline refusal still fires.
     """
     for m in re.finditer(r'[.!?]"?(?=\s|$)', content):
         head, rest = content[:m.end()], content[m.end():]
         if head.count('"') % 2:
+            continue
+        if rest.strip() and len(re.findall(r'\w+', head)) in {1, 2}:
             continue
         return head.strip(), rest.strip()
     return content.strip(), ''
@@ -885,8 +891,8 @@ def drain_unfiled(
     - Accepted prefixes: ``- decision: ``, ``- constraint: ``,
       ``- dead-end: ``.
     - The headline is the bold span if present, else the first sentence
-      as ``split_headline`` reads it, never ending inside an open
-      quotation.
+      as ``split_headline`` reads it: never ending inside an open
+      quotation, and past a one- or two-word label such as ``Cycle 26.``.
     - An indented line continues the bullet above it, joined by one space,
       as ``adopt`` joins a wrapped standing bullet.
     - Any other bullet, and any unindented line that is no bullet, is the

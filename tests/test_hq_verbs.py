@@ -1366,6 +1366,37 @@ def test_adopt_headline_never_ends_inside_an_open_quotation(
     ]
 
 
+def test_adopt_runs_a_two_word_label_headline_on_to_the_next_sentence(
+        tmp_path, monkeypatch):
+    """A first sentence of one or two words is a label, not the headline.
+
+    Mutation: the label rule dropped, so seven dead ends render as
+    'Cycle 26.' in the Standing block; or the rule keyed on character
+    length, so 'A pid in the lock.' swallows its body too.
+    Oracle: hand-computed - 'Cycle 26.' has two words and runs on to the
+    next sentence end; a colon is no sentence end, so the colon item is
+    already whole; the five-word control keeps its split.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    _conforming(folder, 2, '## Task\nx\n\n## Dead ends\n'
+                '- Cycle 26. Reading the batch gain showed the loader still'
+                ' drops rows. Not again.\n'
+                '- Cycles 1-15: every attempt to shrink the batch raised'
+                ' memory instead.\n'
+                '- A pid in the lock. Meaningless across hosts.\n\n## Log\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    items, _ = hq._parse_standing((folder / 'standing.md').read_text())
+    assert [(i['headline'], i['body']) for i in items] == [
+        ('Cycle 26. Reading the batch gain showed the loader still drops rows.',
+         'Not again.'),
+        ('Cycles 1-15: every attempt to shrink the batch raised memory instead.',
+         ''),
+        ('A pid in the lock.', 'Meaningless across hosts.'),
+    ]
+
+
 def test_key_files_group_labels_grade_and_loose_lines_go_unfiled(
         tmp_path, monkeypatch):
     """Read now: and Reference only: lines grade the bullets below them.
