@@ -2343,7 +2343,9 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     #   reading it as a pointer would name a file `Read` and cost the
     #   bullets under it their grade.
     # - A label line, bare, as a heading, or as a bullet, grades every
-    #   pointer below it until the next label, nesting included.
+    #   pointer below it until the next label, nesting included; a
+    #   label whose clause wraps onto further lines grades once the
+    #   lines are joined, at the point the loose item closes.
     # - `-`, `*`, and `+` open a pointer bullet when the first token is
     #   a path: backticked, `~`/`/`/`.` prefixed, holding `/`, or ending
     #   in an extension. A bullet whose first token is a plain
@@ -2374,12 +2376,19 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         return (folder / clean).exists() or (folder.parent.parent / clean).exists()
 
     def _close_loose() -> None:
-        """File the open loose item under Unfiled.
+        """File the open loose item under Unfiled, grading when it is a label.
         """
-        nonlocal kf_loose_current
-        if kf_loose_current:
-            kf_loose.append(kf_loose_current)
-            kf_loose_current = ''
+        nonlocal kf_group, kf_loose_current
+        if not kf_loose_current:
+            return
+        # A label wrapped at the column matches only once its lines are
+        # joined; it grades the bullets below like one written on a
+        # single line, and its clause is filed as such a clause is.
+        joined_m = _KF_LABEL_PAT.match(kf_loose_current)
+        if joined_m:
+            kf_group = joined_m.group(1).lower()
+        kf_loose.append(kf_loose_current)
+        kf_loose_current = ''
 
     for line in sections_raw.get('Key files', []):
         gm = _KF_LABEL_PAT.match(line)

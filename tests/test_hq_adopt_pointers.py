@@ -300,6 +300,40 @@ def test_an_unindented_paragraph_under_key_files_or_the_header_is_one_bullet(
     assert 'conservation: every original line carried' in capsys.readouterr().out
 
 
+def test_a_label_wrapped_over_two_lines_grades_the_bullets_below_it(
+        tmp_path, monkeypatch, capsys):
+    """A `Read now, <clause>` label wrapped onto a second line still grades.
+
+    Mutation: the loose item filed without re-testing the label pattern
+    on the joined text, so a wrapped label grades nothing and the pointer
+    under it keeps the grade above; or the joined label dropped from
+    Unfiled, so its clause leaves the file.
+    Oracle: hand-computed - 'Read now' grades always, so the one pointer
+    under it is always while the one above stays edit; the two physical
+    lines are one Unfiled bullet holding both halves; conservation
+    reports every line carried.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'notes-reg.md').write_text('# Reg\n')
+    (folder / 'notes-old.md').write_text('# Old\n')
+    _handoff(folder, key_files=(
+        'Reference only:\n\n- `notes-old.md` the old notes\n\n'
+        'Read now, because the register template is the open work,\n'
+        'and the billing item follows it:\n\n'
+        '- `notes-reg.md` the register notes\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['notes-reg.md']['read_before'] == 'always'
+    assert rows['notes-old.md']['read_before'] == 'edit'
+    text = (folder / 'HANDOFF.md').read_text()
+    assert [ln for ln in text.splitlines() if ln.startswith('- unfiled: ')] == [
+        '- unfiled: Read now, because the register template is the open work,'
+        ' and the billing item follows it:']
+    assert 'conservation: every original line carried' in capsys.readouterr().out
+
+
 # --- The conservation witness ---
 
 

@@ -698,7 +698,8 @@ Converge the form, destroy no content, in this order:
    sections `adopt` reads itself; keep each under its own heading,
    wording unchanged: `## Key files`, its bullets under a `Read now:`
    line and a `Reference only:` line - a clause after the label is fine,
-   `Read now, under x/ unless noted:` - with a path first on each bullet
+   `Read now, under x/ unless noted:`, wrapped over several lines or
+   not - with a path first on each bullet
    and its text on the same line or an indented line below (`adopt`
    grades them into the ledger and the read block; a pointer may name
    lines after a colon, `mod.py:96-115,157`, and the ledger stores the
