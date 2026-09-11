@@ -1752,8 +1752,15 @@ def resolve_work_dir(folder: pathlib.Path) -> tuple[str, list[str]]:
       hold what the thread makes. Only a pin naming no directory prints.
     - A bad pin is reported and passed over, never fatal: begin and
       finish must still run on one.
+    - A directory under the pin's name is such a pin: the walk skips the
+      reserved name, so a file put there is invisible until it moves.
     """
     pin = folder / _WORK_PIN_NAME
+    if pin.is_dir():
+        return '', [
+            f'{HANDOFF_DIRNAME}/{folder.name}/{_WORK_PIN_NAME} is a directory'
+            ' - the pin is a one-line file; move the folder under specs/,'
+            ' drafts/, notes/, or outputs/']
     if not pin.is_file():
         return '', []
     value = ''
@@ -4833,9 +4840,9 @@ def _verb_work_dir(folder: pathlib.Path, argv: argparse.Namespace) -> int:
     -------
     int
         0 with the resolved line, once the pin is written, or once it is
-        cleared; 1 when the token is refused or the pin on disk fails
-        its check, with nothing written; 2 when ``dir`` and ``--clear``
-        are both given.
+        cleared; 1 when the token is refused, the pin on disk fails its
+        check, or a directory sits under the pin's name, with nothing
+        written; 2 when ``dir`` and ``--clear`` are both given.
 
     Notes
     -----
@@ -4846,10 +4853,18 @@ def _verb_work_dir(folder: pathlib.Path, argv: argparse.Namespace) -> int:
     """
     token = getattr(argv, 'dir', None)
     pin = folder / _WORK_PIN_NAME
-    if getattr(argv, 'clear', False):
-        if token is not None:
-            print('hq work-dir: --clear takes no directory - pass one or the other')
-            return 2
+    clear = getattr(argv, 'clear', False)
+    if clear and token is not None:
+        print('hq work-dir: --clear takes no directory - pass one or the other')
+        return 2
+    # A directory under the pin's name can be neither pinned over nor
+    # cleared; the resolve line names the move, and the bare print
+    # below carries it with the ruling.
+    if pin.is_dir() and (clear or token is not None):
+        for line in resolve_work_dir(folder)[1]:
+            print(line)
+        return 1
+    if clear:
         pin.unlink(missing_ok=True)
         print(work_dir_line(folder, ''))
         return 0

@@ -295,6 +295,45 @@ def test_clear_removes_the_pin_and_a_bad_pin_is_reported_never_fatal(
         (folder / 'work-dir').chmod(0o600)
 
 
+def test_a_directory_under_the_pins_name_is_named_by_every_surface(
+        tmp_path, monkeypatch, capsys):
+    """A folder made where the pin file belongs is named with its move by
+    the verb, a pin or clear attempt, begin, and finish; none writes, and
+    the cycle runs on.
+
+    Mutation: the is_dir test dropped, so the verb prints the default
+    ruling with exit 0, a pin or clear attempt dies in the generic OSError
+    handler naming no move, and begin and finish stay silent while the
+    spec inside the folder goes ungated and unlisted.
+    Oracle: the hand-written line on each surface, the exit codes, and
+    the folder with its file still on disk afterward.
+    """
+    root = _root(tmp_path, monkeypatch)
+    folder = root / '.handoff' / _SLUG
+    (root / 'lab').mkdir()
+    assert hq.main(['begin', _SLUG]) == 0
+    (folder / 'work-dir').mkdir()
+    (folder / 'work-dir' / 'SPEC.md').write_text('# Spec\n')
+    dir_line = (
+        f'.handoff/{_SLUG}/work-dir is a directory - the pin is a one-line file;'
+        ' move the folder under specs/, drafts/, notes/, or outputs/')
+    capsys.readouterr()
+    assert hq.main(['work-dir', _SLUG]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        dir_line, f'work dir: .handoff/{_SLUG}/{_DEFAULT_TAIL}']
+    assert hq.main(['work-dir', _SLUG, 'lab']) == 1
+    assert capsys.readouterr().out == dir_line + '\n'
+    assert hq.main(['work-dir', _SLUG, '--clear']) == 1
+    assert capsys.readouterr().out == dir_line + '\n'
+    _cursor(folder)
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+    assert dir_line in capsys.readouterr().out
+    monkeypatch.setenv('HQ_CYCLE', '2')
+    assert hq.main(['begin', _SLUG]) == 0
+    assert dir_line in capsys.readouterr().out
+    assert (folder / 'work-dir' / 'SPEC.md').is_file()
+
+
 def test_a_kind_folder_sets_the_kind_and_the_walk_lists_its_files(
         tmp_path, monkeypatch, capsys):
     """A file one level under specs/, drafts/, notes/, or outputs/ takes the
