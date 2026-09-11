@@ -970,7 +970,9 @@ def conservation(
     Notes
     -----
     - Union membership uses substring containment, so a wrapped bullet
-      stored as one line in standing.md still passes.
+      stored as one line in standing.md still passes, and so does a line
+      the union wraps onto indented continuation lines: they join back
+      onto the line above before the comparison.
     - Whitespace runs collapse on both sides, so a line re-spaced in the
       union still passes.
     - ``labels`` may carry any extra union text; adoption passes the
@@ -1019,10 +1021,26 @@ def conservation(
             r'^(\S+)\s+(?:read now|reference only)\s*:?\s*', r'\1 ', s,
             flags=re.IGNORECASE)
 
+    def _joined(part: str) -> list[str]:
+        """Return the part's lines with each indented line joined on the one above.
+        """
+        out_lines: list[str] = []
+        for raw in part.splitlines():
+            if not raw.strip():
+                continue
+            if raw[:1].isspace() and out_lines:
+                out_lines[-1] += ' ' + raw.strip()
+            else:
+                out_lines.append(raw)
+        return out_lines
+
+    # A line the rewrite wrapped at the column joins back before the
+    # comparison, as a Log item or a standing bullet does; the raw lines
+    # stay in the union too, so nothing that passed before fails.
     union_text = '\n'.join(
         _normalize(ln)
         for part in [cursor, standing] + labels
-        for ln in part.splitlines()
+        for ln in part.splitlines() + _joined(part)
         if ln.strip())
 
     # Build per-section content index for heading coverage checks.

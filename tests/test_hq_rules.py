@@ -1082,6 +1082,35 @@ def test_conservation_reports_a_line_missing_after_a_blank_line():
     assert hq.conservation(original, '## Task\nDo.\n## State\n', '', []) == ['Tail fact.']
 
 
+def test_conservation_passes_a_rewrap_and_still_flags_a_drop():
+    """A bullet rewrapped onto an indented line is carried; a cut is not.
+
+    Mutation: the union built from the raw lines alone, so a bullet the
+    rewrite wrapped at the column is reported not carried though every
+    word survived; or the join applied to unindented lines too, so two
+    separate items glue into one and a heading ends up inside a line.
+    Oracle: the hand-written pair - the rewrap holds every word of the
+    original contiguously once its continuation joins, the truncation
+    does not; the two-bullet cursor keeps both bullets apart.
+    """
+    bullet = (
+        '- Rework the loader to use batch reads instead of one read per row,'
+        ' and add a pool to cut latency.')
+    original = f'## Plan\n{bullet}\n- Then ship it.\n'
+    rewrapped = (
+        '## Plan\n'
+        '- Rework the loader to use batch reads instead of one read per row,\n'
+        '  and add a pool to cut latency.\n'
+        '- Then ship it.\n')
+    truncated = '## Plan\n- Rework the loader to use batch reads.\n- Then ship it.\n'
+    assert hq.conservation(original, rewrapped, '', []) == []
+    assert hq.conservation(original, truncated, '', []) == [bullet]
+    glued = '## Plan\n- Rework the loader to use batch reads instead of one read per row,'
+    assert hq.conservation(f'{glued}\n', rewrapped, '', []) == []
+    assert hq.conservation('- Then ship it. - Rework the loader\n', rewrapped, '', []) == [
+        '- Then ship it. - Rework the loader']
+
+
 def test_render_standing_bodies_headings_and_the_eighty_line_boundary():
     """Constraint bodies print, other kinds print headlines, each kind has
     its heading, and the cap bites at 81 lines and not at 80.
