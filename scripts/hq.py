@@ -458,6 +458,10 @@ def resolve_where(
       Equality on the whole token is required, so ``s11`` does not resolve
       to ``# 11b. Proof``. A bare ``S3`` word without a dot or colon is not
       a token. A literal heading match is tried first.
+    - A dotted number is one token: ``s24.4`` names ``### 24.4 The
+      decision`` and ``s24`` does not. The title alone lands on the first
+      heading of that text, so the dotted form is how a sub-heading whose
+      title repeats is named.
     - A letter-led id, one or two letters then ``<d>[<letter>]`` followed
       by ``.``, ``:``, or `` - ``, is a token too: ``F65``, ``f65``, and
       ``sF65`` all resolve ``## F65. Title``. The letters count, so ``F7``
@@ -472,16 +476,23 @@ def resolve_where(
     for i, line in enumerate(file_lines):
         if line.startswith('#'):
             level = len(line) - len(line.lstrip('#'))
+            # The dotted branch leads so `24.4` is one token and never
+            # the integer `24` with `.4` left over.
             token_m = re.match(
-                r'^#+\s*(?:(\d+[a-z])(?:[.:]|\s+-(?=\s))|(\d+)[.:]?'
-                r'|([a-z]{1,2})(\d+[a-z]?)(?:[.:]|\s+-(?=\s)))(?=\s|$)',
+                r'^#+\s*(?:(?P<dotted>\d+(?:\.\d+)+)[.:]?'
+                r'|(?P<numlet>\d+[a-z])(?:[.:]|\s+-(?=\s))|(?P<num>\d+)[.:]?'
+                r'|(?P<letters>[a-z]{1,2})(?P<iddigits>\d+[a-z]?)'
+                r'(?:[.:]|\s+-(?=\s)))(?=\s|$)',
                 line, re.IGNORECASE)
             tokens: set[str] = set()
             if token_m:
-                letters, id_digits = token_m.group(3), token_m.group(4)
+                letters = token_m.group('letters')
                 if letters is None:
-                    tokens.add((token_m.group(1) or token_m.group(2)).lower())
+                    tokens.add((
+                        token_m.group('dotted') or token_m.group('numlet')
+                        or token_m.group('num')).lower())
                 else:
+                    id_digits = token_m.group('iddigits')
                     tokens.add((letters + id_digits).lower())
                     # `s4:` numbers the heading 4 as `4.` does.
                     if letters.lower() == 's':
@@ -494,7 +505,8 @@ def resolve_where(
         # The s<d> and id forms must be read before normalizing:
         # _norm_heading strips the very token that names the section.
         anchor_keys: list[str] = []
-        section_m = re.fullmatch(r's(\d+[a-z]?)', part.strip(), re.IGNORECASE)
+        section_m = re.fullmatch(
+            r's(\d+(?:\.\d+)*[a-z]?)', part.strip(), re.IGNORECASE)
         if section_m:
             anchor_keys.append(section_m.group(1).lower())
         ident_m = re.fullmatch(r's?([a-z]+\d+[a-z]?)', part.strip(), re.IGNORECASE)

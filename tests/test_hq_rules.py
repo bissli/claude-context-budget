@@ -949,6 +949,41 @@ def test_resolve_where_maps_a_section_reference_to_its_numbered_heading():
     assert hq.resolve_where(text, ['s5']) == ([], ['s5'])
 
 
+def test_resolve_where_names_a_dotted_sub_heading_by_its_whole_number():
+    """An 's<d>.<d>' anchor resolves the sub-heading numbered d.d alone.
+
+    Mutation: the section token holding one integer only, so a dotted
+    sub-heading has no anchor of its own and two sub-headings sharing a
+    title both resolve to the first - a read block pointed at the wrong
+    span with no '?' to show it; or the dotted token cut at its first
+    dot, so 's24' lands on '### 24.4 ...'.
+    Oracle: hand-computed - '### 24.4 The decision' is line 3 and the
+    next same-level heading is line 7, so the span is 3-6; '### 31.2
+    The decision' is 7-9; 's24' finds nothing; a version such as
+    '## v2.0 notes' carries no dotted token; the bare title lands on the
+    first heading of that text, which is why the dotted form exists.
+    """
+    text = (
+        '# Doc\n'
+        '\n'
+        '### 24.4 The decision\n'
+        '\n'
+        'A\n'
+        '\n'
+        '### 31.2 The decision\n'
+        '\n'
+        'B\n'
+        '## v2.0 notes\n'
+        'C\n'
+    )
+    assert hq.resolve_where(text, ['s24.4']) == ([(3, 6)], [])
+    assert hq.resolve_where(text, ['s31.2']) == ([(7, 9)], [])
+    assert hq.resolve_where(text, ['S31.2']) == ([(7, 9)], [])
+    assert hq.resolve_where(text, ['s24']) == ([], ['s24'])
+    assert hq.resolve_where(text, ['s2.0']) == ([], ['s2.0'])
+    assert hq.resolve_where(text, ['The decision']) == ([(3, 6)], [])
+
+
 # --- mutation survivors, 2026-09-09 ---------------------------------------
 
 
