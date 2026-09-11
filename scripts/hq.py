@@ -81,7 +81,8 @@ _STOPWORDS = {
     'there', 'their', 'these', 'those', 'have', 'has', 'had', 'not',
     'but', 'are', 'was', 'were', 'been', 'being', 'will', 'would', 'should',
     'could', 'must', 'may', 'can', 'its', 'our', 'your', 'they', 'them',
-    'step', 'next', 'first', 'last', 'now', 'here',
+    'step', 'next', 'first', 'last', 'now', 'here', 'state', 'build',
+    'phase',
     }
 _DEFAULT_STATE = pathlib.Path.home() / '.claude' / 'cache' / 'claude-handoff'
 
@@ -1482,7 +1483,11 @@ def _extract_terms(text: str) -> set[str]:
     # - A backticked `2` or `ka` is a marker in prose, not a term worth
     #   a collision line: three characters and a letter are its floor.
     # - A plain word needs four characters and must not be a stopword,
-    #   so `The` and `Step` at the head of a Now step stay quiet.
+    #   so `The` and `Step` at the head of a Now step stay quiet, and
+    #   so do `State`, `Build`, and `Phase` mid-sentence.
+    # - A word opening a line, a bullet, an enumerator, a heading, or a
+    #   quote is capitalized by position, so it reads as a sentence
+    #   start whatever character precedes it.
     terms.update(
         m.group(1) for m in re.finditer(r'`([^`]+)`', text)
         if len(m.group(1)) >= 3 and not m.group(1).isdigit())
@@ -1493,7 +1498,10 @@ def _extract_terms(text: str) -> set[str]:
     ):
         term = m.group(1)
         before = stripped[:m.start()].rstrip()
-        sentence_start = not before or before[-1] in '.!?'
+        line_head = re.fullmatch(
+            r'\s*(?:[-*+]|\d+[.)]|#+|>)?\s*',
+            stripped[stripped.rfind('\n', 0, m.start()) + 1:m.start()])
+        sentence_start = not before or before[-1] in '.!?' or bool(line_head)
         if re.fullmatch(r'[A-Z][a-z]{2,}', term) and sentence_start:
             continue
         if len(term) < 4 or term.lower() in _STOPWORDS:

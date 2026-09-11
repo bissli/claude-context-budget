@@ -252,6 +252,21 @@ def test_collisions_ignore_stopwords_and_short_tokens():
     assert hq._extract_terms('the `Warmup` bucket') == {'Warmup'}
 
 
+def test_extract_terms_drops_the_common_now_step_words():
+    """State, Build, and Phase are Now-step furniture, not terms.
+
+    Mutation: the stopword list missing the words a Now step always
+    carries, so 'Phase 0' mid-sentence collides with any heading that
+    holds the word 'phase'.
+    Oracle: hand-computed - the bare words return no term, the backticked
+    form still returns the token.
+    """
+    assert hq._extract_terms('Then build it, Phase 0.') == set()
+    assert hq._extract_terms('Update the State machine.') == set()
+    assert hq._extract_terms('Run the Build step.') == set()
+    assert hq._extract_terms('Update the `State` machine.') == {'State'}
+
+
 # --- final review round ------------------------------------------------------
 
 

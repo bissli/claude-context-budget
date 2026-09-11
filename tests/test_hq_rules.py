@@ -823,6 +823,27 @@ def test_collisions_ignore_a_capital_at_sentence_start():
     assert 'Delta' in hits[0]
 
 
+def test_collisions_ignore_a_capital_opening_a_list_item():
+    """A capital at the head of a Now bullet or heading is position, not a term.
+
+    Mutation: the sentence-start test reading only the character before
+    the word, so a bullet marker or a heading mark leaves 'Lattice'
+    looking mid-sentence and every Now step that opens a bullet with an
+    ordinary verb collides.
+    Oracle: hand-computed - no hit for the bullet-led and heading-led
+    word, one hit for the same word mid-sentence, and the CamelCase form
+    still hits at a bullet head.
+    """
+    headings = [('SPEC.md', 3, 'Lattice section')]
+    assert hq.collisions('- Lattice must hold.', [], headings, {'Lattice': 1}) == []
+    assert hq.collisions('### Lattice next', [], headings, {'Lattice': 1}) == []
+    assert hq.collisions('1. Lattice first.', [], headings, {'Lattice': 1}) == []
+    assert len(hq.collisions('Fix the Lattice path.', [], headings, {'Lattice': 1})) == 1
+    cam = [('SPEC.md', 9, 'LatticeCache is frozen')]
+    assert len(hq.collisions(
+        '- LatticeCache was renamed.', [], cam, {'LatticeCache': 1})) == 1
+
+
 def test_artifacts_render_trusts_row_status_for_abs_rows():
     """Verify an abs row renders from its status, not from the folder walk.
 
