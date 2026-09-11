@@ -3476,7 +3476,9 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
     for r in rows:
         path_all_rows.setdefault(r['path'], []).append(r)
     for p_key, row_list in path_all_rows.items():
-        if len(row_list) < 2:
+        # A shortening is judged once, at the finish of the cycle that
+        # re-stamped the row; the ledger keeps both rows for good.
+        if len(row_list) < 2 or row_list[-1]['cycle'] != str(anch['cycle']):
             continue
         prev_label = row_list[-2].get('label', '-')
         curr_label = row_list[-1].get('label', '-')

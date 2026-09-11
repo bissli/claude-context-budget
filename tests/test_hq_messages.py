@@ -476,3 +476,28 @@ def test_the_example_file_in_the_skill_is_the_scripts_own_output(
 
     assert _normalize(handoff.read_text()).rstrip('\n').splitlines() == \
         _normalize(example).splitlines()
+
+
+def test_shorter_label_advisory_fires_only_in_the_cycle_that_shortened_it(
+        tmp_path, monkeypatch):
+    """A label shortened in one cycle is reported at that finish alone.
+
+    Mutation: the cycle guard dropped, so the latest row is compared with
+    its predecessor at every later finish and a deliberate shortening is
+    re-reported for the life of the ledger.
+    Oracle: the finish that follows the shortening prints the advisory;
+    the next cycle's finish, with no new row for the path, does not.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    _run(['begin', _SLUG])
+    _spec(folder)
+    assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'a long spec label here'])[0] == 0
+    assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'short'])[0] == 0
+    rc, out, _ = _run(['finish', _SLUG, '--log', 'one'])
+    assert rc == 0
+    assert 'advisory: label shorter than predecessor: SPEC.md' in out.splitlines()
+    assert _run(['begin', _SLUG])[0] == 0
+    rc, out, _ = _run(['finish', _SLUG, '--log', 'two'])
+    assert rc == 0
+    assert 'label shorter' not in out
+    assert 'label dropped' not in out

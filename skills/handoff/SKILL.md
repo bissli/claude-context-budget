@@ -633,10 +633,12 @@ Run these steps in order:
    shape of a heading wrapped onto a second `##` line, which Markdown
    reads as a new heading; anchor the last wrapped line, or join the
    heading where the file may be edited), `advisory:
-   label shorter than predecessor: <path>` (check the new label kept
-   every backticked token and `s<n>` reference the old one carried;
-   otherwise ignore it), `advisory: label dropped {...}: <path>` (one
-   of those tokens is gone; put it back or accept the loss), and
+   label shorter than predecessor: <path>` (a row re-stamped this cycle
+   with a shorter label; check the new label kept every backticked token
+   and `s<n>` reference the old one carried; otherwise ignore it - the
+   line comes once, at this finish), `advisory: label dropped {...}:
+   <path>` (one of those tokens is gone; put it back or accept the
+   loss), and
    `advisory: collides: <term> <- <where> "<text>"`, where `<where>` is
    `<file>:<line>` for a spec heading and a standing id such as `x01`
    for a dead-end headline: a term in the Now step also names a dead
