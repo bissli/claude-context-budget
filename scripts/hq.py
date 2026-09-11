@@ -58,6 +58,9 @@ _LEDGER_HEADER = '\t'.join(LEDGER_FIELDS)
 _MANIFEST_HEADER = '\t'.join(MANIFEST_FIELDS)
 _SKIP_NAMES = {'HANDOFF.md', 'ledger.tsv', 'standing.md', 'cycles', '.hq.lock'}
 HANDOFF_DIRNAME = '.handoff'
+# The directories earlier plugin versions kept the folder under; a
+# path written under one of them names where a folder used to be.
+_FORMER_HANDOFF_DIRNAMES = ('working', 'scratch')
 _HEADER_PAT = re.compile(r'Written:\s*.+?\s*\|\s*Cycle:\s*(\d+)')
 # Notes:
 # - A grading label under Key files may be written as its own heading;
@@ -3941,22 +3944,25 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
             if old_spans and new_spans and old_spans != new_spans:
                 print(f'span moved: {row["path"]} {old_spans} -> {new_spans}')
     # Notes:
-    # - A `<dir>/<slug>/` mention whose directory is not the one the
-    #   folder lives under names a place the folder is not: the agent
-    #   wrote the path before a rename or a move, and no sha or row
-    #   check reads that prose.
+    # - A `<dir>/<slug>/` mention under a directory an earlier plugin
+    #   version used names where the folder was: the agent wrote the
+    #   path before the rename, and no sha or row check reads prose.
+    # - The scan is bound to those directory names: a source tree
+    #   named after the slug, `src/<slug>/`, is a real place, and a
+    #   stub left at the old location keeps the old directory on disk.
     # - Only the cursor and standing.md are scanned: the generated
     #   blocks are rewritten from standing.md at finish, and a notes
     #   sibling may quote where work used to live.
-    stale_pat = re.compile(r'([\w.-]+)/' + re.escape(folder.name) + r'/')
+    stale_pat = re.compile(
+        r'(' + '|'.join(re.escape(d) for d in _FORMER_HANDOFF_DIRNAMES) + r')/'
+        + re.escape(folder.name) + r'/')
     for name, scanned in (
         ('HANDOFF.md', parsed.get('cursor', '')),
         ('standing.md', sb.decode('utf-8', 'replace')),
     ):
         counts: dict[str, int] = {}
         for m in stale_pat.finditer(scanned):
-            if m.group(1) != HANDOFF_DIRNAME:
-                counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+            counts[m.group(1)] = counts.get(m.group(1), 0) + 1
         for dirname in sorted(counts):
             print(
                 f'stale folder path in {name}:'

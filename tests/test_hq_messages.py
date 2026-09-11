@@ -537,12 +537,13 @@ def test_supersede_prints_the_item_it_drops_from_the_block(tmp_path, monkeypatch
 def test_open_names_a_folder_path_under_another_directory(tmp_path, monkeypatch):
     """open reports cursor and standing text naming the folder outside .handoff/.
 
-    Mutation: HANDOFF.md scanned and not standing.md, the .handoff
-    exclusion dropped so a current path reports too, or one line printed
-    per mention instead of one per directory.
+    Mutation: HANDOFF.md scanned and not standing.md, the scan widened to
+    any directory so a source tree named after the slug reports as a
+    moved folder, or one line printed per mention instead of one per
+    directory.
     Oracle: hand-seeded text - two 'working/<slug>/' mentions in the
-    cursor, one in standing.md, and one '.handoff/<slug>/' mention that
-    must not print.
+    cursor, one in standing.md, and a '.handoff/<slug>/', a 'src/<slug>/'
+    and a 'tests/<slug>/' mention that must not print.
     """
     folder = _root(tmp_path, monkeypatch)
     _run(['begin', _SLUG])
@@ -555,6 +556,8 @@ def test_open_names_a_folder_path_under_another_directory(tmp_path, monkeypatch)
         f'- Current: .handoff/{_SLUG}/\n', 1))
     _run(['note', _SLUG, 'constraint', '--headline', 'Keep the crew notes',
           f'Under working/{_SLUG}/notes-crew.md.'])
+    _run(['note', _SLUG, 'constraint', '--headline', 'Keep the grammar',
+          f'It lives in src/{_SLUG}/ and its tests in tests/{_SLUG}/.'])
     rc, out, _ = _run(['open', _SLUG])
     assert rc == 0
     assert [ln for ln in out.splitlines() if 'stale folder path' in ln] == [

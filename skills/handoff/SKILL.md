@@ -843,11 +843,11 @@ Resume: kill this session, start a fresh one, run
    - `span moved: <path> [...] -> [...]` - the read block's line
      numbers are stale; the printed spans are current.
    - `stale folder path in <file>: <dir>/<slug>/ x<n>` - the cursor or
-     a standing item names the folder under a directory other than
-     `.handoff/`, so the folder moved and the text points at where it
-     was. Run `grep -rl '<dir>/<slug>/'` over the repo, correct the
-     cursor at the next write, and re-note plus supersede each standing
-     item that carries the old path.
+     a standing item names the folder under a directory an earlier
+     plugin version used, `working/` or `scratch/`, so the text points
+     at where the folder was. Run `grep -rl '<dir>/<slug>/'` over the
+     repo, correct the cursor at the next write, and re-note plus
+     supersede each standing item that carries the old path.
 3. Read `HANDOFF.md`. Then, for each line of the `## Read first` block,
    run `hq read <slug> <path>`, the path in any spelling `stamp`
    accepts - the block's `~` form or its expansion: it prints the

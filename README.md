@@ -220,7 +220,7 @@ session chose.)
 untracked. Versions before 0.3.0 wrote to `working/`, and before 0.2.2
 to `scratch/`; move each old folder to `.handoff/<task-name>/` once.
 After the move, `hq open` names every cursor line and standing item
-that still says `working/<task-name>/`.
+that still says `working/<task-name>/` or `scratch/<task-name>/`.
 
 ## What you see
 
