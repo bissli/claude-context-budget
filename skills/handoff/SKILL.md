@@ -705,8 +705,11 @@ Converge the form, destroy no content, in this order:
    the next label, and a line ending in `:` that is neither label ends
    the group and opens an ungraded one, whose pointers seed `mention`
    so their labels stay in view - with a path first on each bullet
-   and its text on the same line or an indented line below (`adopt`
-   grades them into the ledger and the read block; a pointer may name
+   and its text on the same line or an indented line below. Every
+   pointer names a real path: `adopt` resolves no shorthand such as an
+   alias declared in prose, and a pointer it cannot find on disk seeds
+   a `missing` row and prints `Key files pointer not on disk: <path>`
+   (`adopt` grades them into the ledger and the read block; a pointer may name
    lines after a colon, `mod.py:96-115,157`, and the ledger stores the
    bare path with the line numbers leading the label; several paths on
    one bullet, separated by a comma or `and`, each take a row sharing
