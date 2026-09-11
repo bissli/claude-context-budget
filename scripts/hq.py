@@ -2313,17 +2313,31 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             tok_where = '-'
             if where_val != '-':
                 candidates = list(dict.fromkeys(where_val.split(';')))
-                unresolved = candidates
+                kept: list[str] = []
+                dropped = list(candidates)
                 if path_obj.is_file():
                     try:
                         pointed_text = path_obj.read_text(
                             encoding='utf-8', errors='replace')
                     except OSError:
                         pointed_text = ''
-                    _, unresolved = resolve_where(pointed_text, candidates)
-                tok_where = ';'.join(
-                    a for a in candidates if a not in unresolved) or '-'
-                for anchor in unresolved:
+                    dropped = []
+                    for anchor in candidates:
+                        # A dotted number the file does not carry falls
+                        # back to its parent section, the span the
+                        # sub-point sits in.
+                        parent_m = re.fullmatch(r's(\d+)\.[\d.]+', anchor)
+                        choices = [anchor] + (
+                            [f's{parent_m.group(1)}'] if parent_m else [])
+                        found = [
+                            c for c in choices
+                            if not resolve_where(pointed_text, [c])[1]]
+                        if not found:
+                            dropped.append(anchor)
+                        elif found[0] not in kept:
+                            kept.append(found[0])
+                tok_where = ';'.join(kept) or '-'
+                for anchor in dropped:
                     if (stored, anchor) not in where_dropped:
                         where_dropped.append((stored, anchor))
             label = tok_free.strip() or '-'

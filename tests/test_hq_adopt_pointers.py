@@ -636,6 +636,34 @@ def test_where_seed_keeps_a_dotted_section_number_whole(tmp_path, monkeypatch):
     assert rows['DESIGN.md']['where'] == 's24.4;s7'
 
 
+def test_where_seed_falls_back_to_the_parent_section_of_a_dotted_number(
+        tmp_path, monkeypatch, capsys):
+    """'section 3.2' seeds 's3' when the file numbers only '## 3.'.
+
+    Mutation: the dotted anchor dropped outright when no heading carries
+    it, so a pointer that used to read at its parent section loses its
+    span and the read block falls back to the whole file.
+    Oracle: ledger where field 's3' against a file with '## 3. Retry'
+    and no '3.2' heading, no 'where dropped' line; the same label
+    against a file that has '### 3.2 Backoff' seeds 's3.2'.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'DESIGN.md').write_text(
+        '# Design\n\n## 3. Retry\n\nbody\n\n## 4. Other\n\nx\n')
+    (folder / 'notes-b.md').write_text(
+        '# Notes\n\n## 3. Retry\n\n### 3.2 Backoff\n\nbody\n')
+    _handoff(folder, key_files=(
+        '- `DESIGN.md` the retry rule, see section 3.2\n'
+        '- `notes-b.md` the backoff, see section 3.2\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['DESIGN.md']['where'] == 's3'
+    assert rows['notes-b.md']['where'] == 's3.2'
+    assert 'where dropped' not in capsys.readouterr().out
+
+
 def test_where_seed_plain_number_unchanged(tmp_path, monkeypatch):
     """'section 5' still seeds 's5' when no trailing letter is present.
 
