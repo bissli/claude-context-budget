@@ -1342,6 +1342,30 @@ def test_adopt_headline_ends_at_a_sentence_not_a_dot(tmp_path, monkeypatch):
     ]
 
 
+def test_adopt_headline_never_ends_inside_an_open_quotation(
+        tmp_path, monkeypatch):
+    """A sentence end inside a quotation does not end a plain item's headline.
+
+    Mutation: the quote-balance check dropped, so the headline ends at
+    the period inside the quotation and standing.md carries a bold span
+    with one unmatched quote mark.
+    Oracle: hand-computed - the quotation closes before the split, so the
+    headline holds both quote marks and the body is the sentence after.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    _conforming(folder, 2, '## Task\nx\n\n## Decisions\n'
+                '- User, verbatim: "keep the old format, which is fine.'
+                ' Migrate later." Filed as is.\n\n## Log\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    items, _ = hq._parse_standing((folder / 'standing.md').read_text())
+    assert [(i['headline'], i['body']) for i in items] == [
+        ('User, verbatim: "keep the old format, which is fine. Migrate later."',
+         'Filed as is.'),
+    ]
+
+
 def test_key_files_group_labels_grade_and_loose_lines_go_unfiled(
         tmp_path, monkeypatch):
     """Read now: and Reference only: lines grade the bullets below them.

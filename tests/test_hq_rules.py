@@ -807,6 +807,27 @@ def test_stem_rule_leaves_a_newer_stem_mate_alone():
     assert result.get('SPEC.pre-x.md') == 'SPEC.md'
 
 
+def test_drain_unfiled_headline_never_ends_inside_an_open_quotation():
+    """A drained headline runs to a sentence end outside any quotation.
+
+    Mutation: the quote-balance check dropped, so 'fine.' inside the
+    quotation ends the headline; or the drain path left on a sentence end
+    with no lookahead, so 'v1.2' splits at its dot.
+    Oracle: hand-split headline and body for a quoted item and for a
+    version number mid-sentence.
+    """
+    cursor = (
+        '## Task\nx\n\n## Unfiled\n'
+        '- decision: User said "the old format is fine. Keep it." Filed.\n'
+        '- constraint: Pin v1.2 for now. Bump later.\n')
+    items, _, refusal = hq.drain_unfiled(cursor)
+    assert refusal is None
+    assert items == [
+        ('decision', 'User said "the old format is fine. Keep it."', 'Filed.'),
+        ('constraint', 'Pin v1.2 for now.', 'Bump later.'),
+    ]
+
+
 def test_collisions_ignore_a_capital_at_sentence_start():
     """Verify a capitalized word opening a sentence is not a Now-step term.
 

@@ -694,6 +694,37 @@ def _join_headline_body(headline: str, body: str) -> str:
     return f'{headline}{joiner}{body}'
 
 
+def split_headline(content: str) -> tuple[str, str]:
+    """Split one plain item's text into its headline and the body after it.
+
+    Parameters
+    ----------
+    content : str
+        The item's text with its marker and any ``kind:`` prefix removed,
+        holding no bold span.
+
+    Returns
+    -------
+    tuple[str, str]
+        The headline and the body, both stripped; the body is empty when
+        the headline is the whole text.
+
+    Notes
+    -----
+    - A sentence ends at ``.``, ``!``, or ``?`` followed by a space or
+      the end, so a dot inside a file name or a version does not split.
+    - A candidate that leaves a double quote open is skipped: a quoted
+      sentence end is the quotation's, not the item's. A closing quote
+      may follow the punctuation, ``later."``.
+    """
+    for m in re.finditer(r'[.!?]"?(?=\s|$)', content):
+        head, rest = content[:m.end()], content[m.end():]
+        if head.count('"') % 2:
+            continue
+        return head.strip(), rest.strip()
+    return content.strip(), ''
+
+
 def render_standing(
     items: list[dict],
     superseded_ids: set[str],
@@ -853,7 +884,9 @@ def drain_unfiled(
     -----
     - Accepted prefixes: ``- decision: ``, ``- constraint: ``,
       ``- dead-end: ``.
-    - The headline is the bold span if present, else the first sentence.
+    - The headline is the bold span if present, else the first sentence
+      as ``split_headline`` reads it, never ending inside an open
+      quotation.
     - An indented line continues the bullet above it, joined by one space,
       as ``adopt`` joins a wrapped standing bullet.
     - Any other bullet, and any unindented line that is no bullet, is the
@@ -897,9 +930,7 @@ def drain_unfiled(
             headline = bold.group(1)
             body = content[bold.end():].strip()
         else:
-            se = re.search(r'[.!?]', content)
-            headline = content[:se.end()].strip() if se else content.strip()
-            body = content[se.end():].strip() if se else ''
+            headline, body = split_headline(content)
         if not re.search(r'\w', headline):
             return [], cursor_text, f'Unfiled bullet has no headline: {stripped!r}'
         items.append((kind, headline, body.replace('\n', ' ')))
@@ -2412,11 +2443,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             if bold_m:
                 headline, body = bold_m.group(1).strip(), bold_m.group(2).strip()
             else:
-                # A sentence ends at . ! or ? followed by space or end,
-                # so a dot inside a file name or version does not split.
-                se = re.search(r'[.!?](?=\s|$)', content)
-                headline = content[:se.end()].strip() if se else content
-                body = content[se.end():].strip() if se else ''
+                headline, body = split_headline(content)
             _do_note(folder, anch, current_kind, headline, body)
 
         # An item starts at any unindented non-empty line, whatever its
