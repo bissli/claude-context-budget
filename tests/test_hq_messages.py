@@ -572,9 +572,13 @@ def test_shorter_label_advisory_fires_only_in_the_cycle_that_shortened_it(
 
     Mutation: the cycle guard dropped, so the latest row is compared with
     its predecessor at every later finish and a deliberate shortening is
-    re-reported for the life of the ledger.
+    re-reported for the life of the ledger; or the comparand taken as the
+    positional predecessor, so two re-stamps in one cycle hide a
+    shortening against the last cycle's label.
     Oracle: the finish that follows the shortening prints the advisory;
-    the next cycle's finish, with no new row for the path, does not.
+    the next cycle's finish, with no new row for the path, does not; a
+    cycle that re-stamps twice, 'a' then 'ab', is judged against the
+    earlier cycle's 'short' and prints it.
     """
     folder = _root(tmp_path, monkeypatch)
     _run(['begin', _SLUG])
@@ -589,3 +593,9 @@ def test_shorter_label_advisory_fires_only_in_the_cycle_that_shortened_it(
     assert rc == 0
     assert 'label shorter' not in out
     assert 'label dropped' not in out
+    assert _run(['begin', _SLUG])[0] == 0
+    assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'a'])[0] == 0
+    assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'ab'])[0] == 0
+    rc, out, _ = _run(['finish', _SLUG, '--log', 'three'])
+    assert rc == 0
+    assert 'advisory: label shorter than predecessor: SPEC.md' in out.splitlines()

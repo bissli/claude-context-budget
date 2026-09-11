@@ -3749,11 +3749,19 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
     for r in rows:
         path_all_rows.setdefault(r['path'], []).append(r)
     for p_key, row_list in path_all_rows.items():
-        # A shortening is judged once, at the finish of the cycle that
-        # re-stamped the row; the ledger keeps both rows for good.
-        if len(row_list) < 2 or row_list[-1]['cycle'] != str(anch['cycle']):
+        # Notes:
+        # - A shortening is judged once, at the finish of the cycle that
+        #   re-stamped the row; the ledger keeps both rows for good.
+        # - The comparand is the last row of an earlier cycle, so two
+        #   re-stamps in one cycle are judged against what the previous
+        #   cycle left; with none, against the earlier re-stamp.
+        cycle_now = str(anch['cycle'])
+        if len(row_list) < 2 or row_list[-1]['cycle'] != cycle_now:
             continue
-        prev_label = row_list[-2].get('label', '-')
+        prev_row = next(
+            (r for r in reversed(row_list[:-1]) if r['cycle'] != cycle_now),
+            row_list[-2])
+        prev_label = prev_row.get('label', '-')
         curr_label = row_list[-1].get('label', '-')
         if curr_label == '-' or prev_label == '-':
             continue
