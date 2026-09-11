@@ -446,7 +446,11 @@ line (`--batch -` is accepted too); a line that fails prints `hq note:
 batch line N not parsed: <line>`, the rest still run, exit 2.
 `supersede` takes two ids of one kind; `hq supersede: ids must share a
 prefix ('d17' vs 'c04')` and `hq supersede: 'd99' not found in
-standing.md` are its refusals (exit 1).
+standing.md` are its refusals (exit 1). A successful `supersede` prints
+`dropped from the block: [d17] (c3) **<headline>** <body>`, the item as
+`standing.md` holds it, on its way out of the rendered block; a ruling
+inside that text which still holds takes one more `hq note` to record
+it under a new id.
 
 ```
 hq note <slug> decision \

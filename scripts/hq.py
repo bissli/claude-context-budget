@@ -3516,6 +3516,9 @@ def _verb_supersede(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) 
     Notes
     -----
     - Appends one line to standing.md; writes nothing on refusal.
+    - Prints the superseded item as standing.md holds it: the block
+      renders a decision or a dead end by its headline alone, so a
+      ruling still live inside the body would otherwise leave unseen.
     """
     old_id = getattr(argv, 'old_id', '')
     new_id = getattr(argv, 'new_id', '')
@@ -3534,6 +3537,13 @@ def _verb_supersede(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) 
         return 1
     line = f'- (c{anch["cycle"]}) {old_id} -> {new_id}'
     _append_lines(standing_path, [line])
+    # The block shows a decision or a dead end by its headline alone, so
+    # a ruling still live inside the body would leave unseen; the item
+    # is echoed as standing.md holds it on its way out.
+    old_item = next(item for item in items if item['id'] == old_id)
+    pfx = f'(c{old_item["cycle"]}) ' if old_item['cycle'] else ''
+    shown = f'[{old_id}] {pfx}**{old_item["headline"]}** {old_item["body"]}'
+    print(f'dropped from the block: {shown.rstrip()}')
     return 0
 
 

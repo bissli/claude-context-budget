@@ -510,6 +510,30 @@ def test_finish_advises_when_the_artifacts_block_is_over_its_cap(
     assert sum('  other  mention  ' in ln for ln in block.splitlines()) == 40
 
 
+def test_supersede_prints_the_item_it_drops_from_the_block(tmp_path, monkeypatch):
+    """supersede echoes the superseded item's stored line as it leaves the block.
+
+    Mutation: the echo dropped, the new id's item echoed instead of the
+    old one, or the headline echoed without the body a decision never
+    shows in the block.
+    Oracle: the standing.md line note wrote for d01, read back from the
+    file and compared with the echo minus its prefix.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    _run(['begin', _SLUG])
+    _run(['note', _SLUG, 'decision', '--headline', 'Ship order fixed',
+          'Release the parser first. The crew owns retention.'])
+    _run(['note', _SLUG, 'decision', '--headline', 'Ship order reversed',
+          'Release the sweeper first.'])
+    rc, out, _ = _run(['supersede', _SLUG, 'd01', 'd02'])
+    assert rc == 0
+    assert out.splitlines() == [
+        'dropped from the block: [d01] (c1) **Ship order fixed**'
+        ' Release the parser first. The crew owns retention.']
+    stored = (folder / 'standing.md').read_text().splitlines()[0]
+    assert out.split(': ', 1)[1].rstrip('\n') == stored[2:]
+
+
 def test_shorter_label_advisory_fires_only_in_the_cycle_that_shortened_it(
         tmp_path, monkeypatch):
     """A label shortened in one cycle is reported at that finish alone.

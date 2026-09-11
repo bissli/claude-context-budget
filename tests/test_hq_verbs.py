@@ -2195,6 +2195,7 @@ def test_standing_verb_shows_unsuperseded_items(tmp_path, monkeypatch, capsys):
     hq.main(['note', _SLUG, 'decision',
              '--headline', 'Revised approach', 'Second decision body.'])
     hq.main(['supersede', _SLUG, 'd01', 'd02'])
+    capsys.readouterr()
 
     ret = hq.main(['standing', _SLUG])
     assert ret == 0
