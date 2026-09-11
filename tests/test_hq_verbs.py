@@ -1355,6 +1355,63 @@ def test_adopt_files_a_lead_in_sentence_above_the_first_bullet_under_unfiled(
     assert 'conservation: every original line carried' in capsys.readouterr().out
 
 
+def test_adopt_joins_a_wrapped_lead_in_sentence_into_one_unfiled_bullet(
+        tmp_path, monkeypatch):
+    """A lead-in sentence wrapped over two lines is one Unfiled bullet.
+
+    Mutation: each unindented line before the first bullet filed as its
+    own lead-in, so a wrapped sentence becomes two half-sentence bullets
+    to retype; or the blank-line reset dropped, so two lead-in
+    paragraphs merge.
+    Oracle: hand-counted - the two-line sentence is one bullet, the
+    paragraph after the blank line is another, and the bullet below is
+    the section's only item.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    _conforming(folder, 2, '## Task\nx\n\n## Decisions\n'
+                'These rulings govern the loader and survive every rewrite of\n'
+                'the fetch path, so read them before touching it.\n\n'
+                'Newer rulings sit below.\n'
+                '- Keep the retry ceiling at four attempts.\n\n'
+                '## Log\n- 2026-09-01: started\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    items, _ = hq._parse_standing((folder / 'standing.md').read_text())
+    assert [i['headline'] for i in items] == ['Keep the retry ceiling at four attempts.']
+    text = (folder / 'HANDOFF.md').read_text()
+    assert [ln for ln in text.splitlines() if ln.startswith('- unfiled: ')] == [
+        '- unfiled: These rulings govern the loader and survive every rewrite'
+        ' of the fetch path, so read them before touching it.',
+        '- unfiled: Newer rulings sit below.',
+    ]
+
+
+def test_adopt_keeps_the_marker_a_header_tail_line_already_carries(
+        tmp_path, monkeypatch):
+    """A header tail line that opens with a dash is filed with one marker.
+
+    Mutation: a bullet marker prefixed to every tail line, so a tail
+    written as a dash list lands under ## Environment as '- - text'.
+    Oracle: the fixture's two tail lines read back under ## Environment
+    exactly as written, one marker each.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {_SLUG}\n\n'
+        'Written: 2026-09-01 | Cycle: 3 | loader-svc @ aaa1111\n'
+        '- parser-lib @ bbb2222 dirty 4\n'
+        '- render-kit @ ccc3333\n\n'
+        '## Task\nx\n\n## Log\n- 2026-09-01: started\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    text = (folder / 'HANDOFF.md').read_text()
+    env = text.split('## Environment\n', 1)[1].split('\n\n## ', 1)[0]
+    assert env == '- parser-lib @ bbb2222 dirty 4\n- render-kit @ ccc3333'
+
+
 def test_adopt_files_the_wrapped_header_tail_under_environment(
         tmp_path, monkeypatch, capsys):
     """The lines continuing a wrapped header land under ## Environment too.

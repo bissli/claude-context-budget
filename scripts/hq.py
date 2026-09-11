@@ -2611,9 +2611,12 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             _do_note(folder, anch, current_kind, headline, body)
 
         # An item starts at any unindented non-empty line, whatever its
-        # marker; an indented line continues the item above it.
+        # marker; an indented line continues the item above it. A
+        # lead-in wrapped at the column joins as a paragraph does.
+        lead_in_open = False
         for idx, line in enumerate(section_lines):
             if not line.strip():
+                lead_in_open = False
                 continue
             if line.startswith(' ') and bullet_lines:
                 bullet_lines.append(line)
@@ -2622,7 +2625,11 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             bullet_lines = []
             if (first_bullet is not None and idx < first_bullet
                     and not item_marker.match(line)):
-                lead_ins.append(line.strip())
+                if lead_in_open:
+                    lead_ins[-1] += ' ' + line.strip()
+                else:
+                    lead_ins.append(line.strip())
+                lead_in_open = True
                 continue
             bullet_lines = [line]
         _flush_bullet(bullet_lines)
@@ -2638,7 +2645,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         # finish rewrites the header, so the cursor is its live home and
         # the manifest note its archive.
         if h == 'Environment' and header_tail:
-            tail_body = '\n'.join(f'- {ln}' for ln in header_tail)
+            tail_body = '\n'.join(
+                ln if re.match(r'^[-*+]\s', ln) else f'- {ln}' for ln in header_tail)
             body = f'{body}\n{tail_body}' if body else tail_body
         cursor_parts.append(f'## {h}\n{body}' if body else f'## {h}')
 
