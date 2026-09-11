@@ -708,7 +708,8 @@ Converge the form, destroy no content, in this order:
    `always` under either; a label grades every bullet below it until
    the next label, and a line ending in `:` that is neither label ends
    the group and opens an ungraded one, whose pointers seed `mention`
-   so their labels stay in view - with a path first on each bullet
+   (a spec or draft still stays `always`) so their labels stay in view
+   - with a path first on each bullet
    and its text on the same line or an indented line below. Every
    pointer names a real path: `adopt` resolves no shorthand such as an
    alias declared in prose, and a pointer it cannot find on disk seeds

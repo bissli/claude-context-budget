@@ -2200,11 +2200,17 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     kf_path_token = ''
     kf_free_text = ''
     kf_raw_text = ''
-    # A list runs on `, path`, `and path`, or `, and path`; a separator
-    # is never optional, so ` - the two stacks` is text, and `and` needs
-    # its trailing space, so `android.yaml` is a path.
+    # Notes:
+    # - A list runs on `, path`, `and path`, or `, and path`; a
+    #   separator is never optional, so ` - the two stacks` is text,
+    #   and `and` needs its trailing space, so `android.yaml` is a path.
+    # - A bare token may carry a comma-separated range list; that form
+    #   is tried first, so the comma inside `mod.py:12-40,57` does not
+    #   end the token, and any other bare token still ends at a comma.
     kf_more_path = re.compile(
-        r'^\s*(?:,\s*(?:and\s+)?|and\s+)(`[^`]+`|[^\s,]+)(.*)$', re.DOTALL)
+        r'^\s*(?:,\s*(?:and\s+)?|and\s+)'
+        r'([^\s,:]+:\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*|`[^`]+`|[^\s,]+)(.*)$',
+        re.DOTALL)
     where_dropped: list[tuple[str, str]] = []
 
     def _flush_kf_pointer(path_tok: str, free: str, group: str, raw: str) -> None:
@@ -2249,9 +2255,12 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             free = free[inline_m.end():]
         grade = (inline_m.group(1) if inline_m else group).lower()
         rb_over: str | None = None
-        if 'read now' in grade:
+        # The tests are exact: an ungraded group carries its header's
+        # whole text as the grade, and 'read now' inside that text is
+        # prose, not the label.
+        if grade == 'read now':
             rb_over = 'always'
-        elif 'reference only' in grade:
+        elif grade == 'reference only':
             # edit lands on a notes file; the seeding branches turn it
             # into mention for any other ungated kind.
             rb_over = 'edit'
@@ -2329,6 +2338,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
                     rb_merged: str | None = 'always'
                 elif 'edit' in {prev_rb, rb_over}:
                     rb_merged = 'edit'
+                elif 'mention' in {prev_rb, rb_over}:
+                    rb_merged = 'mention'
                 else:
                     rb_merged = None
                 anchors_seen = [p for p in prev_where.split(';') if p and p != '-']

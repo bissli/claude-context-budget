@@ -409,6 +409,83 @@ def test_reference_only_grades_a_non_notes_row_mention_so_its_label_shows(
     assert rows['probes']['read_before'] == 'never'
 
 
+def test_an_ungraded_header_that_mentions_a_label_word_still_grades_mention(
+        tmp_path, monkeypatch):
+    """A colon line holding 'read now' mid-sentence is no label and grades mention.
+
+    Mutation: the grade test a substring match, so the header text an
+    ungraded group carries as its grade matches 'read now' or 'reference
+    only' inside it and gates or edit-grades the pointers below.
+    Oracle: hand-computed - only an exact label grades always or edit;
+    the two pointers under the two mid-sentence headers read mention.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    for name in ('alpha.md', 'stack.yaml', 'notes-beta.md'):
+        (folder / name).write_text('x\n')
+    _handoff(folder, key_files=(
+        'Read now:\n\n- `alpha.md` the loader\n\n'
+        'Files to read now, before touching the gateway:\n\n'
+        '- `stack.yaml` the config\n\n'
+        'Kept here for reference only:\n\n'
+        '- `notes-beta.md` the notes\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['alpha.md']['read_before'] == 'always'
+    assert rows['stack.yaml']['read_before'] == 'mention'
+    assert rows['notes-beta.md']['read_before'] == 'mention'
+
+
+def test_a_bare_multi_range_pointer_after_a_separator_keeps_its_ranges(
+        tmp_path, monkeypatch):
+    """A bare `mod.py:12-40,57` reached through a list keeps its whole range.
+
+    Mutation: the list's bare token cut at the first comma, so the second
+    range leaks into the shared label as '57 the ranges' and the first
+    path's label opens with it.
+    Oracle: hand-computed - the same labels the backticked spelling gives:
+    'lines 12-40,57; the ranges' on the ranged path, 'the ranges' on the
+    other.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'zeta.md').write_text('x\n')
+    (folder / 'mod.py').write_text('x = 1\n')
+    _handoff(folder, key_files=(
+        'Read now:\n- `zeta.md`, mod.py:12-40,57 the ranges\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['mod.py']['label'] == 'lines 12-40,57; the ranges'
+    assert rows['zeta.md']['label'] == 'the ranges'
+
+
+def test_two_bullets_to_one_path_under_an_ungraded_group_merge_to_mention(
+        tmp_path, monkeypatch):
+    """Two bullets naming one path under an ungraded group keep the mention grade.
+
+    Mutation: the merge carrying always and edit only, so two mention
+    grades collapse to none and the merged row reads never with its label
+    folded into a count.
+    Oracle: hand-computed - the once-named path and the twice-named path
+    both read mention, the latter with the two labels joined.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'zeta.md').write_text('x\n')
+    (folder / 'stack.yaml').write_text('a: 1\n')
+    _handoff(folder, key_files=(
+        'Gateway notes:\n\n- `zeta.md` the loader\n- `zeta.md` also the cache\n'
+        '- `stack.yaml` the config\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['stack.yaml']['read_before'] == 'mention'
+    assert (rows['zeta.md']['read_before'], rows['zeta.md']['label']) == (
+        'mention', 'the loader; also the cache')
+
+
 # --- The conservation witness ---
 
 
