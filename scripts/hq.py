@@ -2189,7 +2189,11 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     kf_path_token = ''
     kf_free_text = ''
     kf_raw_text = ''
-    kf_more_path = re.compile(r'^\s*,\s*(`[^`]+`|[^\s,]+)(.*)$', re.DOTALL)
+    # A list runs on `, path`, `and path`, or `, and path`; a separator
+    # is never optional, so ` - the two stacks` is text, and `and` needs
+    # its trailing space, so `android.yaml` is a path.
+    kf_more_path = re.compile(
+        r'^\s*(?:,\s*(?:and\s+)?|and\s+)(`[^`]+`|[^\s,]+)(.*)$', re.DOTALL)
     where_dropped: list[tuple[str, str]] = []
 
     def _flush_kf_pointer(path_tok: str, free: str, group: str, raw: str) -> None:
@@ -2215,8 +2219,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         # handed back to the list walk below.
         if path_tok.endswith(','):
             free = ',' + free
-        # Several paths on one bullet share its text: `, path` repeats
-        # while the next token names a file.
+        # Several paths on one bullet share its text: `, path` or
+        # `and path` repeats while the next token names a file.
         path_toks = [path_tok.rstrip(',')]
         more = kf_more_path.match(free)
         while more and _is_pointer(more.group(1).rstrip(',')):

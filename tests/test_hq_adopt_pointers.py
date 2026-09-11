@@ -192,6 +192,38 @@ def test_multi_range_pointer_seeds_the_bare_path_with_the_ranges_in_its_label(
     assert '- unfiled:' not in (folder / 'HANDOFF.md').read_text()
 
 
+def test_paths_joined_by_and_each_take_a_row_sharing_the_text(
+        tmp_path, monkeypatch):
+    """Two paths joined by `and` on one bullet seed two rows with one label.
+
+    Mutation: the list continued on a comma alone, so the second path
+    takes no row and stays inside the first path's label as
+    'and `stack-b.yaml` - both stacks'; or the separator made optional,
+    so the prose bullet splits at 'and parser'.
+    Oracle: hand-computed - two paths under one 'Read now:' bullet, so
+    two always rows sharing the bullet text; the prose bullet keeps one
+    row and its whole label; the ', and' spelling seeds the same rows.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    for name in ('stack-a.yaml', 'stack-b.yaml', 'notes-x.md', 'one.md', 'two.md'):
+        (folder / name).write_text('x\n')
+    _handoff(folder, key_files=(
+        'Read now:\n'
+        '- `stack-a.yaml` and `stack-b.yaml` - both stacks\n'
+        '- `notes-x.md` - the loader and parser notes\n'
+        '- `one.md`, and `two.md` the pair\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert [rows[p]['read_before'] for p in ('stack-a.yaml', 'stack-b.yaml')] == [
+        'always', 'always']
+    assert [rows[p]['label'] for p in ('stack-a.yaml', 'stack-b.yaml')] == [
+        'both stacks', 'both stacks']
+    assert rows['notes-x.md']['label'] == 'the loader and parser notes'
+    assert [rows[p]['label'] for p in ('one.md', 'two.md')] == ['the pair', 'the pair']
+
+
 # --- The conservation witness ---
 
 
