@@ -557,6 +557,12 @@ Run these steps in order:
      genuinely gone takes `stamp --successor` or `stamp --archive
      --reason`, which drops it from the read block; `--defer` for a
      non-gated kind.
+   - `missing: <path> - stamp --status live if it is back, or
+     --successor / --archive --reason` - a row the ledger stores as
+     missing, a `Key files` pointer `adopt` found nowhere. A spec or
+     draft row takes `--read-before always` beside the status; a pointer
+     stored wrong is stamped at the path that exists and this row is
+     archived.
    - `successor missing: <path> -> <successor>` - the successor left
      the disk; name a new one or archive the row.
    - `conflicted copy: <name>` - a sync duplicate; resolve it by hand.

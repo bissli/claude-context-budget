@@ -2921,7 +2921,7 @@ def _take_lock(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
 
 
 def _print_worklist(folder: pathlib.Path, anch: dict) -> None:
-    """Print unstamped files, sha-moved rows, missing live rows, deferred rows.
+    """Print unstamped files, sha-moved, missing, and deferred rows.
 
     Parameters
     ----------
@@ -2976,6 +2976,17 @@ def _print_worklist(folder: pathlib.Path, anch: dict) -> None:
         print(f'  missing live: {path} - hq when {folder.name} {path}')
     if len(missing_live) > 5:
         print(f'  ... and {len(missing_live) - 5} more')
+    # A row the ledger stores as missing - a Key files pointer adopt
+    # found nowhere - is otherwise a count inside the Artifacts block; a
+    # plain re-stamp carries the status forward, so the line names the
+    # move that clears it.
+    missing_rows = [p for p, r in live.items() if r['status'] == 'missing']
+    for path in missing_rows[:5]:
+        print(
+            f'  missing: {path} - stamp --status live if it is back,'
+            ' or --successor / --archive --reason')
+    if len(missing_rows) > 5:
+        print(f'  ... and {len(missing_rows) - 5} more')
     dangling = dangling_successors(folder, live)
     for path, successor in dangling[:5]:
         print(f'  successor missing: {path} -> {successor}')

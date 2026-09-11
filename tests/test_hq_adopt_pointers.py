@@ -356,6 +356,40 @@ def test_where_seed_keeps_only_anchors_the_file_resolves(
 # --- Pointers not on disk ---
 
 
+def test_begin_names_each_row_adopt_seeded_as_missing(
+        tmp_path, monkeypatch, capsys):
+    """begin lists every ledger row stored as missing, with its move.
+
+    Mutation: the work list reading status='live' rows alone, so a Key
+    files pointer adopt seeded as missing is never named again and the
+    agent meets it only as a count inside the Artifacts block; or the
+    class never clearing, so an archived row is still listed.
+    Oracle: hand-computed - two pointers off disk seed two missing rows,
+    so begin prints two 'missing:' lines naming those paths; archiving
+    one leaves one line at the next begin.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    _handoff(folder, key_files=(
+        'Read now:\n\n- `SPEC-widget.md` - the lane spec\n'
+        '- `docs/ghost-notes.md` - background\n'))
+    assert hq.main(['adopt', _SLUG]) == 0
+    capsys.readouterr()
+
+    assert hq.main(['begin', _SLUG]) == 0
+
+    move = 'stamp --status live if it is back, or --successor / --archive --reason'
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if 'missing:' in ln]
+    assert lines == [
+        f'  missing: SPEC-widget.md - {move}',
+        f'  missing: docs/ghost-notes.md - {move}',
+    ]
+    assert hq.main(['stamp', _SLUG, 'docs/ghost-notes.md', '--archive',
+                    '--reason', 'never written']) == 0
+    assert hq.main(['begin', _SLUG]) == 0
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if 'missing:' in ln]
+    assert lines == [f'  missing: SPEC-widget.md - {move}']
+
+
 def test_missing_draft_pointer_stays_missing_never_and_finish_passes(
         tmp_path, monkeypatch, capsys):
     """A `.py` pointer not on disk is seeded `draft missing never`, not gated.
