@@ -612,6 +612,45 @@ def test_open_names_a_folder_path_under_another_directory(tmp_path, monkeypatch)
         ]
 
 
+def test_open_stops_counting_a_stale_path_once_its_item_is_superseded(
+        tmp_path, monkeypatch):
+    """Open counts an old folder path only in standing items still in force.
+
+    Mutation: the superseded set ignored, so the append-only file keeps
+    the count at x2 after each re-note and no move ever clears the line;
+    or the wrong id skipped, so the live re-note that still names the old
+    path as history goes uncounted.
+    Oracle: hand-staged supersessions - two items name the old path (x2);
+    superseding the first by a re-note that still names it leaves x1;
+    superseding that by one naming only the new path prints no line.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    _run(['begin', _SLUG])
+    _run(['note', _SLUG, 'constraint', '--headline', 'Keep the crew notes',
+          f'Under working/{_SLUG}/notes-crew.md.'])
+    _run(['note', _SLUG, 'constraint', '--headline', 'Keep the ledger',
+          f'Under working/{_SLUG}/ledger.tsv.'])
+    def stale(out):
+        return [ln for ln in out.splitlines() if 'stale folder path' in ln]
+
+    assert stale(_run(['open', _SLUG])[1]) == [
+        f'stale folder path in standing.md: working/{_SLUG}/ x2']
+    _run(['note', _SLUG, 'constraint', '--headline', 'Keep the crew notes',
+          f'Under .handoff/{_SLUG}/notes-crew.md, moved from working/{_SLUG}/.'])
+    assert _run(['supersede', _SLUG, 'c01', 'c03'])[0] == 0
+    assert stale(_run(['open', _SLUG])[1]) == [
+        f'stale folder path in standing.md: working/{_SLUG}/ x2']
+    _run(['note', _SLUG, 'constraint', '--headline', 'Keep the ledger',
+          f'Under .handoff/{_SLUG}/ledger.tsv.'])
+    assert _run(['supersede', _SLUG, 'c02', 'c04'])[0] == 0
+    assert stale(_run(['open', _SLUG])[1]) == [
+        f'stale folder path in standing.md: working/{_SLUG}/ x1']
+    _run(['note', _SLUG, 'constraint', '--headline', 'Keep the crew notes',
+          f'Under .handoff/{_SLUG}/notes-crew.md.'])
+    assert _run(['supersede', _SLUG, 'c03', 'c05'])[0] == 0
+    assert stale(_run(['open', _SLUG])[1]) == []
+
+
 def test_shorter_label_advisory_fires_only_in_the_cycle_that_shortened_it(
         tmp_path, monkeypatch):
     """A label shortened in one cycle is reported at that finish alone.

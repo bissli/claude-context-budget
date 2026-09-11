@@ -4038,12 +4038,23 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     # - Only the cursor and standing.md are scanned: the generated
     #   blocks are rewritten from standing.md at finish, and a notes
     #   sibling may quote where work used to live.
+    # - A superseded standing item is skipped: the file is append-only,
+    #   so the old wording stays on disk after the re-note, and counting
+    #   it would leave the line with no move that clears it.
     stale_pat = re.compile(
         r'(' + '|'.join(re.escape(d) for d in _FORMER_HANDOFF_DIRNAMES) + r')/'
         + re.escape(folder.name) + r'/')
+    standing_text = sb.decode('utf-8', 'replace')
+    _, superseded_ids = _parse_standing(standing_text)
+    standing_live_lines: list[str] = []
+    for line in standing_text.splitlines():
+        id_m = re.match(r'\s*- \[([dcx]\d+)\]', line)
+        if id_m and id_m.group(1) in superseded_ids:
+            continue
+        standing_live_lines.append(line)
     for name, scanned in (
         ('HANDOFF.md', parsed.get('cursor', '')),
-        ('standing.md', sb.decode('utf-8', 'replace')),
+        ('standing.md', '\n'.join(standing_live_lines)),
     ):
         counts: dict[str, int] = {}
         for m in stale_pat.finditer(scanned):
