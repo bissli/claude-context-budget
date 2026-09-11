@@ -86,7 +86,9 @@ _TEMP_DIRS = (
 _KIND_DIRS = {'specs': 'spec', 'drafts': 'draft', 'notes': 'notes', 'outputs': 'other'}
 _GATE_RB = {'always', 'edit'}
 _FULL_RB = {'always', 'edit', 'mention'}
-_ARTIFACTS_CAP = 40
+# The tier a gated kind seeds: a spec is the contract, read at every
+# resume; a draft is read at the write that changes it.
+_TIER_SEED = {'spec': 'always', 'draft': 'edit'}
 _TWO_HOURS = 7200
 HELP_TOPICS: dict[str, str] = {
     'anchors': """\
@@ -140,27 +142,47 @@ Kind inference, first match wins:
   HANDOFF*.md at the folder's top level                snapshot   never
   name contains cycle<digits>                          snapshot   never
   a directory                                          probe-dir  never
-  a file one level under specs/ or drafts/             spec/draft always
+  a file one level under specs/                        spec       always
+  a file one level under drafts/                       draft      edit
   a file one level under notes/                        notes      never
   a file one level under outputs/                      other      never
   SPEC*, DESIGN*, PROPOSAL*, *-DECLARATION*            spec       always
   notes-*, REVIEW*                                     notes      never
   todo*, TODO*                                         todo       never
   first heading starts Spec/Design, any level          spec       always
-  *.py *.sql *.js *.ts *.ps1 at the folder's top level draft      always
+  *.py *.sql *.js *.ts *.ps1 at the folder's top level draft      edit
   anything else, a nested or outside file included     other      never
 
+read_before is a tier - when the file is loaded, and what belongs there:
+
+  grade    means                      loaded when
+  always   the contract               every resume, Read first
+  edit     read before you change it  the gate, at a write to it
+  mention  know it exists             on demand, hq read
+  never    on the record              hq artifacts, hq when
+
+- always holds spec sections and anchored notes; edit holds drafts,
+  code, tests, and templates; mention holds notes, evidence, and
+  reviews; never holds outputs, snapshots, and superseded rows.
+- always requires an anchor: a stamp that would leave a live always
+  row with no --where is refused, new row and re-stamp alike, whatever
+  the kind, and the receipt row records it; the file's headings print
+  under the refusal, one per line. A spec needed whole is anchored at
+  its title heading, and its size prints beside it in the Read first
+  block. A file with no headings cannot be always.
 - The kind folder sets the kind of a file one level under it, whatever
   the name but a snapshot-shaped one (*.bak, *.orig.*, *.prev.*,
   *.pre-*, cycle<N>), which stays a snapshot; probes/, like any other
   directory, is one probe-dir entry, stamped as a unit or recorded by
   the rows of its files. drafts/ holds the candidate that will land,
-  gated always; a throwaway script goes to probes/. A thread pinned
+  gated edit; a throwaway script goes to probes/. A thread pinned
   with hq work-dir keeps the specs, drafts, and outputs it makes in
   that directory instead (hq work-dir --help).
 - Outside the folder only the draft rule lapses: a SPEC*-shaped name
   or a Spec/Design first heading still infers spec; any other outside
-  file infers other/never - pass --kind spec or --kind draft to gate it.
+  file infers other/never - pass --kind spec to gate it always or
+  --kind draft to gate it edit; the writer grades a note the cursor
+  points at mention or edit.
 - When a stem (SPEC) has several members, adopt and begin gate only
   the newest spec-kind file; every older stem-mate is stamped
   superseded/never pointing at the newest.
@@ -175,33 +197,50 @@ Kind inference, first match wins:
   read_before=never and requires --reason. --defer writes kind=other
   read_before=never reason=deferred so the file reappears in the next
   work list; it is refused for a spec or draft.
+- Read first block: one line per live always row with the size of
+  what hq read prints - specs/SPEC.md:11-13  (320 tok)  label for an
+  anchored row, notes/x.md  (186 lines, 8.2k tok)  label for a whole
+  file an older cycle left; a file that is not UTF-8 text shows bytes,
+  (35 KB), and a directory (N files). Tokens are len(text) // 4.
 - Artifacts block: rows with read_before in {always, edit, mention}
-  print in full, up to 40 lines; read_before=never rows and the
-  overflow collapse to counts by kind; rows no longer live collapse
-  to superseded/archived/missing counts.
+  print in full, no cap; read_before=never rows collapse to counts by
+  kind; rows no longer live collapse to superseded/archived/missing
+  counts. In both blocks an absolute path under the root prints
+  relative to it and one under the pinned work dir relative to the
+  pin, and the block's first line names each base in use - root
+  ~/code/proj; work dir ~/code/proj-wt. The ledger and hq artifacts
+  keep the path as stamped.
 - Standing block: constraints print in full, decisions and dead ends
-  as headlines, up to 80 lines; the cut takes from the longest kind
-  first. Ids are d decision, c constraint, x dead end; (cN) is the
+  as headlines, no cap; hq standing <slug> <id> prints an item in
+  full. Ids are d decision, c constraint, x dead end; (cN) is the
   cycle that recorded the item.""",
     'rules': """\
 hq help rules - what the script refuses and why
 
 R1  A row whose inferred kind is spec or draft, or whose stored or
-    --kind kind is, may not lower read_before from always, leave
-    live, or change kind, unless its successor - passed or carried
-    forward - names a file on disk other than itself, or --archive
-    --reason is given (--status archived --reason is the same). An
-    explicit --successor whose own current row is not live is
-    refused, so two specs cannot name each other; a successor with no
-    row yet is accepted and the next begin lists it as unstamped. A
-    path that has ever been spec or draft stays gated: its only way
-    back to live is with read_before always. The refusal lines, each
-    printed after 'hq stamp: ':
-      refused: R1: <kind> read_before must stay always without --successor or --archive
+    --kind kind is, keeps its tier - a spec read_before always, a
+    draft edit or always - and may not leave live or change kind,
+    unless its successor - passed or carried forward - names a file
+    on disk other than itself, or --archive --reason is given
+    (--status archived --reason is the same). An explicit --successor
+    whose own current row is not live is refused, so two specs cannot
+    name each other; a successor with no row yet is accepted and the
+    next begin lists it as unstamped. A path that has ever been spec
+    or draft stays gated: its way back to live is always for a spec
+    and edit for a draft. The refusal lines, each printed after
+    'hq stamp: ':
+      refused: R1: spec read_before must stay always without --successor or --archive
+      refused: R1: draft read_before must stay edit or always without --successor or --archive
       refused: R1: <kind> status must stay live without --successor or --archive
       refused: R1: <kind> kind must stay spec or draft without --successor or --archive
       refused: R1: successor <path> is <status>, not live
       refused: --defer not allowed for inferred <kind>
+    A live always row needs an anchor, whatever its kind: a stamp
+    that would leave where at '-' is refused, new row and re-stamp
+    alike, and the file's headings print under the line:
+      refused: <path> always with no anchor - N lines read whole at every
+        resume; stamp --where <heading> or --read-before edit
+    begin lists every live always row with no anchor the same way.
 R2  A refused stamp still appends a row: the previous fields with
     reason set to 'refused: <why>'; with no previous row, the kind
     table's seed and the file's sha and line count. The attempt is
@@ -354,6 +393,8 @@ def infer_kind(
     - First match wins; order follows the section 4 table.
     - ``cycle<digits>`` uses regex; all other patterns use ``fnmatchcase``.
     - Draft detection applies at the top level, per ``top_level``.
+    - A spec seeds ``always`` and a draft ``edit``, per ``_TIER_SEED``;
+      every other kind seeds ``never``.
     - ``HANDOFF*.md`` is snapshot only at the top level; a nested or
       outside ``HANDOFF.md`` is not this folder's handoff and falls
       through to ``other``.
@@ -371,7 +412,7 @@ def infer_kind(
         return ('probe-dir', 'never')
     if kind_dir:
         kind = _KIND_DIRS[kind_dir]
-        return (kind, 'always' if kind in {'spec', 'draft'} else 'never')
+        return (kind, _TIER_SEED.get(kind, 'never'))
     for pat in _SPEC_PATS:
         if fnmatch.fnmatchcase(name, pat):
             return ('spec', 'always')
@@ -385,7 +426,7 @@ def infer_kind(
     if re.match(r'^#+ *(Spec|Design)\b', first_heading):
         return ('spec', 'always')
     if top_level and pathlib.Path(name).suffix in _DRAFT_EXTS:
-        return ('draft', 'always')
+        return ('draft', 'edit')
     return ('other', 'never')
 
 
@@ -477,7 +518,7 @@ def check_r1(
     gate_kind: str,
     successor_on_disk: bool,
 ) -> str | None:
-    """Check R1: a gated artifact may not be demoted without a successor.
+    """Check R1: a gated artifact may not leave its tier without a successor.
 
     Parameters
     ----------
@@ -495,6 +536,12 @@ def check_r1(
     -------
     str | None
         Refusal text, or ``None`` when the stamp is allowed.
+
+    Notes
+    -----
+    - A spec keeps ``read_before`` ``always``; a draft keeps ``edit`` or
+      ``always``; both keep ``live`` and their kind. A path once spec or
+      draft finds its way back to ``live`` at that same tier.
     """
     if gate_kind not in {'spec', 'draft'}:
         return None
@@ -503,8 +550,9 @@ def check_r1(
         return None
     if successor_on_disk:
         return None
-    if new_row.get('read_before', 'always') != 'always':
-        return f'R1: {gate_kind} read_before must stay always without --successor or --archive'
+    kept = 'always' if gate_kind == 'spec' else 'edit or always'
+    if new_row.get('read_before', 'always') not in kept.split(' or '):
+        return f'R1: {gate_kind} read_before must stay {kept} without --successor or --archive'
     if new_row.get('status', 'live') != 'live':
         return f'R1: {gate_kind} status must stay live without --successor or --archive'
     if new_row.get('kind', gate_kind) not in {'spec', 'draft'}:
@@ -757,44 +805,58 @@ def block_sha(heading_and_body: str) -> str:
 def render_read(
     rows: list[Row],
     spans: dict[str, list[tuple[int, int] | None]],
-    lines: dict[str, int],
+    sizes: dict[str, str],
+    shown: dict[str, tuple[str, str]] | None = None,
 ) -> str:
     """Render the hq:read block body.
 
     Parameters
     ----------
     rows : list[Row]
-        Live rows with ``read_before='always'``, sorted by kind then path.
+        Live rows with ``read_before='always'``.
     spans : dict[str, list[tuple[int, int] | None]]
         Resolved spans per path; ``None`` for an unresolved anchor.
-    lines : dict[str, int]
-        Line count per path, used when ``where`` is ``'-'``.
+    sizes : dict[str, str]
+        Size text per path, as ``read_first_data`` returns it.
+    shown : dict[str, tuple[str, str]] | None, default None
+        Display path and base phrase per stored path, as ``shown_paths``
+        returns it; a path absent from it prints as stored.
 
     Returns
     -------
     str
-        Block body; one line per row.
+        One line per row, sorted by kind then path:
+        ``path:11-13  (320 tok)  label`` for an anchored row and
+        ``path  (186 lines, 8.2k tok)  label`` for a whole file. When a
+        row prints relative to the root or the pin, a first line names
+        each base in use.
     """
     out = []
+    bases: set[str] = set()
     for row in sorted(rows, key=lambda r: (r['kind'], r['path'])):
         path = row['path']
+        display, base = (shown or {}).get(path, (path, ''))
+        if base:
+            bases.add(base)
+        size = sizes.get(path, '-')
         label = row['label']
         if row['where'] == '-':
-            n = lines.get(path, 0)
-            out.append(f'{path} ({n} lines)  {label}')
+            out.append(f'{display}  ({size})  {label}')
         else:
-            span_list = spans.get(path, [])
             parts = [
                 '?' if span is None else f'{span[0]}-{span[1]}'
-                for span in span_list
+                for span in spans.get(path, [])
                 ]
-            out.append(f'{path}:{",".join(parts) or "?"}  {label}')
+            out.append(f'{display}:{",".join(parts) or "?"}  ({size})  {label}')
+    if bases:
+        out.insert(0, '; '.join(sorted(bases)))
     return '\n'.join(out)
 
 
 def artifact_lines(
     walk: list[tuple[str, str]],
     rows: dict[str, Row],
+    shown: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[list[str], dict[str, int], dict[str, int]]:
     """Sort artifacts into full lines, a never count, and a non-live count.
 
@@ -806,6 +868,9 @@ def artifact_lines(
     rows : dict[str, Row]
         Latest ledger row per path, with the caller's ``missing`` marks
         already applied; the disk is never consulted.
+    shown : dict[str, tuple[str, str]] | None, default None
+        Display path per stored path, as ``shown_paths`` returns it; a
+        path absent from it prints as stored.
 
     Returns
     -------
@@ -844,8 +909,9 @@ def artifact_lines(
         if status != 'live':
             non_live[status] = non_live.get(status, 0) + 1
         elif rb in _FULL_RB:
+            display = (shown or {}).get(path, (path, ''))[0]
             full_lines.append(
-                f'{path}  {row["kind"]}  {rb}  c{row["cycle"]}  {row["label"]}')
+                f'{display}  {row["kind"]}  {rb}  c{row["cycle"]}  {row["label"]}')
         else:
             kind_never[row['kind']] = kind_never.get(row['kind'], 0) + 1
 
@@ -866,6 +932,7 @@ def render_artifacts(
     walk: list[tuple[str, str]],
     rows: dict[str, Row],
     slug: str,
+    shown: dict[str, tuple[str, str]] | None = None,
 ) -> str:
     """Render the hq:artifacts block body.
 
@@ -879,21 +946,27 @@ def render_artifacts(
         already applied; the renderer never consults the disk.
     slug : str
         Handoff slug for the hq command in count lines.
+    shown : dict[str, tuple[str, str]] | None, default None
+        Display path and base phrase per stored path, as ``shown_paths``
+        returns it; a path absent from it prints as stored.
 
     Returns
     -------
     str
-        Block body lines joined with newlines: at most ``_ARTIFACTS_CAP``
-        full lines, the overflow folded into the never counts by kind,
-        then the count lines.
+        Block body lines joined with newlines: every live row graded
+        always, edit, or mention as a full line, then the never rows
+        counted by kind and the rows no longer live counted by status.
+        When a full line prints relative to the root or the pin, a first
+        line names each base in use.
     """
-    full_lines, kind_never, non_live = artifact_lines(walk, rows)
-    capped = full_lines[:_ARTIFACTS_CAP]
-    for line in full_lines[_ARTIFACTS_CAP:]:
-        kind = line.split('  ')[1].rstrip('?')
-        kind_never[kind] = kind_never.get(kind, 0) + 1
-
-    out = list(capped)
+    full_lines, kind_never, non_live = artifact_lines(walk, rows, shown)
+    bases = {
+        base for path, (_, base) in (shown or {}).items()
+        if path in rows and rows[path]['status'] == 'live'
+        and rows[path]['read_before'] in _FULL_RB
+        }
+    out = ['; '.join(sorted(bases))] if bases else []
+    out += full_lines
     if kind_never:
         parts = '  '.join(f'{k} x{v}' for k, v in sorted(kind_never.items()))
         out.append(f'{parts}  - hq artifacts {slug}')
@@ -987,23 +1060,20 @@ def render_standing(
     superseded_ids : set[str]
         Item ids targeted by a supersession line.
     slug : str
-        Handoff slug for the hq command in overflow lines.
+        Handoff slug for the hq command in the superseded line.
 
     Returns
     -------
     str
-        Block body; at most 80 lines, the overflow line and the
-        superseded count included.
-
-    Notes
-    -----
-    - Past the cap the cut takes from the longest kind first, max-min
-      fair across the kinds present, so every kind keeps its heading and
-      a share of the lines and the overflow line counts what was cut.
+        Block body: every live constraint in full and every live
+        decision and dead end as a headline, each kind under its heading,
+        then ``superseded N  - hq standing <slug>`` when any item was
+        superseded. No cap: the body of a decision or a dead end is the
+        one thing behind ``hq standing <slug> <id>``.
     """
     live = [i for i in items if i['id'] not in superseded_ids]
     sup_count = len(items) - len(live)
-    groups: list[tuple[str, list[str]]] = []
+    out: list[str] = []
     for prefix, heading, include_body in (
         ('c', '### Constraints', True),
         ('d', '### Decisions', False),
@@ -1012,35 +1082,16 @@ def render_standing(
         group = [i for i in live if i['prefix'] == prefix]
         if not group:
             continue
-        rendered: list[str] = []
+        out.append(heading)
         for item in group:
             pfx = f'(c{item["cycle"]}) ' if item.get('cycle') else ''
             line = f'[{item["id"]}] {pfx}**{item["headline"]}**'
             if include_body:
                 line = _join_headline_body(line, item.get('body', ''))
-            rendered.append(line.rstrip())
-        groups.append((heading, rendered))
-    tail = [f'superseded {sup_count}  - hq standing {slug}'] if sup_count else []
-    if sum(1 + len(rendered) for _, rendered in groups) + len(tail) <= 80:
-        out = [ln for heading, rendered in groups for ln in (heading, *rendered)]
-        return '\n'.join(out + tail)
-    # The headings and the overflow line always print; what is left is
-    # shared out shortest kind first, so a kind that fits whole keeps
-    # every line and the longest kind absorbs the rest of the cut.
-    left = max(80 - len(tail) - 1 - len(groups), 0)
-    keep: dict[str, int] = {}
-    by_size = sorted(groups, key=lambda g: len(g[1]))
-    for i, (heading, rendered) in enumerate(by_size):
-        keep[heading] = min(len(rendered), left // (len(groups) - i))
-        left -= keep[heading]
-    out: list[str] = []
-    n_more = 0
-    for heading, rendered in groups:
-        out.append(heading)
-        out.extend(rendered[:keep[heading]])
-        n_more += len(rendered) - keep[heading]
-    out.append(f'... {n_more} more  - hq standing {slug}')
-    return '\n'.join(out + tail)
+            out.append(line.rstrip())
+    if sup_count:
+        out.append(f'superseded {sup_count}  - hq standing {slug}')
+    return '\n'.join(out)
 
 
 def render_log(manifest: list[dict], n: int = 3) -> str:
@@ -2369,6 +2420,146 @@ def _dirty_str(dirty: list[str]) -> str:
     return f' | dirty: {", ".join(dirty)}'
 
 
+def shown_paths(
+    folder: pathlib.Path,
+    live: dict[str, Row],
+) -> dict[str, tuple[str, str]]:
+    """Map each stored path under the root or the pin to how a block prints it.
+
+    Parameters
+    ----------
+    folder : pathlib.Path
+        Handoff folder; the root is its grandparent and the pin its
+        ``work-dir`` file.
+    live : dict[str, Row]
+        Latest ledger row per path.
+
+    Returns
+    -------
+    dict[str, tuple[str, str]]
+        Keyed by stored path, for each ``abs`` row under the pinned work
+        dir or the root: the path relative to that base, and the base
+        phrase a block's first line names - ``root ~/code/proj`` or
+        ``work dir ~/code/proj-wt``. Every other row is absent and
+        prints as stored.
+
+    Notes
+    -----
+    - The pin is tried first: a pin inside the root is the more specific
+      base, and a thread's made files print as their neighbors are named.
+    - A base prints by ``~`` under home, else absolutely, the spelling
+      ``hq work-dir`` uses.
+    """
+    home = pathlib.Path(os.path.abspath(os.path.expanduser('~')))
+    root = pathlib.Path(os.path.abspath(folder.parent.parent))
+    pin_value, _ = resolve_work_dir(folder)
+    bases: list[tuple[str, pathlib.Path]] = []
+    if pin_value:
+        pin = (
+            pathlib.Path(os.path.normpath(os.path.expanduser(pin_value)))
+            if pin_value.startswith(('/', '~'))
+            else pathlib.Path(os.path.normpath(root / pin_value)))
+        bases.append(('work dir', pin))
+    bases.append(('root', root))
+    shown: dict[str, tuple[str, str]] = {}
+    for path, row in live.items():
+        if row['base'] != 'abs':
+            continue
+        target = pathlib.Path(os.path.normpath(os.path.expanduser(path)))
+        for name, base in bases:
+            if base not in target.parents:
+                continue
+            try:
+                rel = base.relative_to(home).as_posix()
+                base_shown = '~' if rel == '.' else f'~/{rel}'
+            except ValueError:
+                base_shown = str(base)
+            shown[path] = (target.relative_to(base).as_posix(), f'{name} {base_shown}')
+            break
+    return shown
+
+
+def read_first_data(
+    folder: pathlib.Path,
+    live: dict[str, Row],
+) -> tuple[
+    list[Row],
+    dict[str, list[tuple[int, int] | None]],
+    dict[str, str],
+    dict[str, int],
+]:
+    """Resolve what ``hq read`` prints for each live ``always`` row.
+
+    Parameters
+    ----------
+    folder : pathlib.Path
+        Handoff folder that folder-base paths are relative to.
+    live : dict[str, Row]
+        Latest ledger row per path, with any ``missing`` marks applied.
+
+    Returns
+    -------
+    tuple
+        ``(rows, spans, sizes, tokens)``: the live ``always`` rows; per
+        anchored path, one span per anchor, ``None`` for one that matches
+        no heading; per path, the size text of the read - ``320 tok`` or
+        ``1.2k tok`` for an anchored row, ``186 lines, 8.2k tok`` for a
+        whole file,
+        ``35 KB`` for a file that is not UTF-8 text, ``3 files`` for a
+        directory; and per path the tokens of the read, ``len(text) // 4``.
+
+    Notes
+    -----
+    - A row whose anchors all miss is read whole, so it sizes as a whole
+      file.
+    - A file gone from disk sizes by the ledger's line count and counts
+      no tokens; bytes and files count none either.
+    """
+    rows = [
+        r for r in live.values()
+        if r['status'] == 'live' and r['read_before'] == 'always'
+        ]
+    spans: dict[str, list[tuple[int, int] | None]] = {}
+    sizes: dict[str, str] = {}
+    tokens: dict[str, int] = {}
+    for row in rows:
+        path = row['path']
+        fp = pathlib.Path(path).expanduser() if row['base'] == 'abs' else folder / path
+        tokens[path] = 0
+        if fp.is_dir():
+            sizes[path] = f'{_line_count(fp)} files'
+            continue
+        try:
+            raw = fp.read_bytes()
+        except OSError:
+            sizes[path] = f'{row["lines"]} lines'
+            continue
+        try:
+            text = raw.decode('utf-8')
+        except UnicodeDecodeError:
+            sizes[path] = f'{-(-len(raw) // 1024)} KB'
+            continue
+        if row['where'] != '-':
+            anchor_list = _split_where(row['where'])
+            resolved, unresolved = resolve_where(text, anchor_list)
+            bad = set(unresolved)
+            resolved_iter = iter(resolved)
+            spans[path] = [
+                None if a in bad else next(resolved_iter) for a in anchor_list]
+            if resolved:
+                file_lines = text.splitlines()
+                tokens[path] = sum(
+                    len('\n'.join(file_lines[a - 1:b])) for a, b in resolved) // 4
+                sizes[path] = ''
+        if path not in sizes:
+            tokens[path] = len(text) // 4
+            sizes[path] = f'{raw.count(b"\n")} lines, '
+        # Under a thousand the count itself reads better than 0.3k.
+        tok = tokens[path]
+        sizes[path] += f'{tok / 1000:.1f}k tok' if tok >= 1000 else f'{tok} tok'
+    return rows, spans, sizes, tokens
+
+
 def _assemble_handoff(
     folder: pathlib.Path,
     cursor_text: str,
@@ -2402,38 +2593,16 @@ def _assemble_handoff(
     str
         Complete HANDOFF.md text.
     """
-    always_rows = [
-        r for r in live.values()
-        if r['status'] == 'live' and r['read_before'] == 'always'
-        ]
-    read_spans: dict[str, list[tuple[int, int] | None]] = {}
-    read_lines: dict[str, int] = {}
-    for row in always_rows:
-        if row['base'] == 'abs':
-            fp = pathlib.Path(row['path']).expanduser()
-        else:
-            fp = folder / row['path']
-        file_text = (
-            fp.read_text(encoding='utf-8', errors='replace') if fp.is_file() else '')
-        if row['where'] != '-':
-            anchor_list = _split_where(row['where'])
-            resolved, unresolved = resolve_where(file_text, anchor_list)
-            bad = set(unresolved)
-            resolved_iter = iter(resolved)
-            read_spans[row['path']] = [
-                None if a in bad else next(resolved_iter)
-                for a in anchor_list
-                ]
-        lines_str = row['lines']
-        read_lines[row['path']] = int(lines_str) if lines_str not in {'-', ''} else 0
-    read_body = render_read(always_rows, read_spans, read_lines)
+    always_rows, read_spans, read_sizes, _ = read_first_data(folder, live)
+    shown = shown_paths(folder, live)
+    read_body = render_read(always_rows, read_spans, read_sizes, shown)
     _rh = '## Read first\n' + read_body
     read_block = (
         f'<!-- hq:read {block_sha(_rh)} -->\n'
         f'## Read first\n{read_body}\n<!-- /hq:read -->'
     )
     art_walk = [(n, k) for n, k in walk if k != 'skip']
-    artifacts_body = render_artifacts(art_walk, live, folder.name)
+    artifacts_body = render_artifacts(art_walk, live, folder.name, shown)
     _ah = '## Artifacts\n' + artifacts_body
     artifacts_block = (
         f'<!-- hq:artifacts {block_sha(_ah)} -->\n'
@@ -3530,6 +3699,15 @@ def _print_worklist(folder: pathlib.Path, anch: dict) -> None:
         shown = ', '.join(deferred[:5])
         tail = f' ... and {len(deferred) - 5} more' if len(deferred) > 5 else ''
         print(f'  deferred x{len(deferred)}: {shown}{tail} - stamp each when decided')
+    # An always row with no anchor is a whole file read at every
+    # resume; stamp refuses its next re-stamp until it conforms, so an
+    # older thread converges as its files are touched.
+    for path, row in live.items():
+        if (row['status'] == 'live' and row['read_before'] == 'always'
+                and row['where'] == '-'):
+            print(
+                f'  {path} always with no anchor, {row["lines"]} lines'
+                ' - stamp --where <heading> or --read-before edit')
     wd_value, wd_lines = resolve_work_dir(folder)
     for line in wd_lines:
         print(line)
@@ -3608,6 +3786,9 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
     - A refusal appends a receipt row; a successful stamp appends the
       row; a ``--defer`` stamps with kind ``other`` and reason
       ``deferred``.
+    - A row that would sit live at ``always`` with no ``--where`` is
+      refused whatever its kind, and the file's headings print under
+      the refusal so the next stamp can anchor it.
     """
     path = getattr(argv, 'path', '') or ''
     if not path:
@@ -3731,8 +3912,7 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
     if refusal_reason is None and not defer:
         kind = getattr(argv, 'kind', None) or prev.get('kind', inferred_kind)
         explicit_rb = getattr(argv, 'read_before', None)
-        rb = explicit_rb or prev.get(
-            'read_before', 'always' if gate_kind in {'spec', 'draft'} else 'never')
+        rb = explicit_rb or prev.get('read_before', _TIER_SEED.get(gate_kind, 'never'))
         explicit_status = getattr(argv, 'status', None)
         status = explicit_status or prev.get('status', 'live')
         # --status archived and --archive are the same demotion and
@@ -3748,11 +3928,10 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
         # A reason explains the state it was given with; it carries
         # only while kind, status, and read_before hold. A transition
         # needs its own reason.
-        default_rb = 'always' if gate_kind in {'spec', 'draft'} else 'never'
         state_holds = (kind, status, rb) == (
             prev.get('kind', inferred_kind),
             prev.get('status', 'live'),
-            prev.get('read_before', default_rb))
+            prev.get('read_before', _TIER_SEED.get(gate_kind, 'never')))
         reason = getattr(argv, 'reason', None) or (
             carried_reason if state_holds else '-')
     label = getattr(argv, 'label', None) or prev.get('label', '-')
@@ -3770,6 +3949,10 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
         r1_result = check_r1(new_row, gate_kind, successor_on_disk)
         if r1_result:
             refusal_reason = f'refused: {r1_result}'
+        elif status == 'live' and rb == 'always' and where == '-':
+            # always is an anchored span read at every resume; a whole
+            # file at that tier is an edit row read too early.
+            refusal_reason = f'refused: {stored_path} always with no anchor'
     if refusal_reason:
         # Notes:
         # - A receipt verifies nothing: it keeps the previous sha so
@@ -3792,10 +3975,22 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
             'label': prev.get('label', '-'),
             }
         _append_tsv(ledger_path, LEDGER_FIELDS, refused_row, _LEDGER_HEADER)
-        print(
-            f'hq stamp: {refusal_reason}'
-            ' - supply a live --successor or --archive --reason,'
-            ' or leave the row gated')
+        if refusal_reason.endswith('always with no anchor'):
+            print(
+                f'hq stamp: {refusal_reason} - {n_lines} lines read whole at'
+                ' every resume; stamp --where <heading> or --read-before edit')
+            try:
+                for ln in path_obj.read_text(
+                        encoding='utf-8', errors='replace').splitlines():
+                    if ln.startswith('#'):
+                        print(f'  {ln.rstrip()}')
+            except OSError:
+                pass
+        else:
+            print(
+                f'hq stamp: {refusal_reason}'
+                ' - supply a live --successor or --archive --reason,'
+                ' or leave the row gated')
         return 1
     if defer:
         new_row = {
@@ -4190,17 +4385,6 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
             print(
                 f'advisory: {hit}'
                 ' - check that the Now step does not retry a rejected idea')
-    # --- Advisory: artifacts over the cap ---
-    # The block folds the overflow into the kind counts without a word;
-    # this is the one place the agent hears that a label left the file.
-    art_walk = [(n, k) for n, k in walk if k != 'skip']
-    over = len(artifact_lines(art_walk, live)[0]) - _ARTIFACTS_CAP
-    if over > 0:
-        print(
-            f'advisory: artifacts over the {_ARTIFACTS_CAP}-line cap by {over},'
-            ' folded into the counts'
-            ' - re-grade or supersede rows, or read them all with'
-            f' hq artifacts {folder.name}')
     # --- Advisory: unstamped ---
     unstamped_entries = [
         (n, k) for n, k in walk if not is_recorded(n, live) and k != 'skip']
@@ -4443,6 +4627,13 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
     print(
         f'{handoff_path}  {cursor_lines} cursor lines  {payload_tokens} tokens'
         f' (cursor {len(cursor_clean) // 4}, {token_split})')
+    rf_rows, rf_spans, _, rf_tokens = read_first_data(folder, live)
+    anchored = sum(
+        1 for r in rf_rows
+        if any(s is not None for s in rf_spans.get(r['path'], [])))
+    print(
+        f'read first: {len(rf_rows)} rows, {sum(rf_tokens.values())} tok'
+        f' ({anchored} anchored, {len(rf_rows) - anchored} whole)')
     print(f'resume: /handoff {folder.name}')
     return 0
 
@@ -4516,6 +4707,7 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
                 f' stored {stored_sha} computed {computed}'
                 ' - a hand edit; trust hq artifacts and hq standing, not the block')
     # Re-resolved spans: report anchors that moved or became unresolved.
+    shown = shown_paths(folder, live)
     for row in live.values():
         if row.get('status') != 'live' or row.get('read_before') != 'always':
             continue
@@ -4535,15 +4727,14 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
                 f'unresolved anchor in {row["path"]}: {anchor_str!r}'
                 ' - read the whole file; at write time re-stamp with a --where'
                 ' that resolves (hq help anchors), then re-run open')
-        # Report spans that moved since the stored read block.
+        # Report spans that moved since the stored read block, which
+        # prints a path under the root or the pin relative to it.
         read_block_body = parsed.get('blocks', {}).get('read', '')
+        display = shown.get(row['path'], (row['path'], ''))[0]
         for line in read_block_body.splitlines():
-            if not line.startswith(row['path'] + ':'):
+            if not line.startswith(display + ':'):
                 continue
-            m2 = re.match(
-                re.escape(row['path']) + r':([0-9?,\-]+)',
-                line,
-                )
+            m2 = re.match(re.escape(display) + r':([0-9?,\-]+)', line)
             if not m2:
                 continue
             # An unresolved anchor prints ? in its slot; only resolved
@@ -4798,7 +4989,7 @@ def _verb_artifacts(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) 
 
 
 def _verb_standing(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int:
-    """Run standing: print unsuperseded items (or all with --all).
+    """Run standing: print unsuperseded items, all with --all, or named ids.
 
     Parameters
     ----------
@@ -4807,22 +4998,53 @@ def _verb_standing(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -
     anch : dict
         Anchors dict from ``anchors()``; unused but required by dispatch.
     argv : argparse.Namespace
-        Parsed standing arguments; ``--all`` includes superseded items.
+        Parsed standing arguments; ``ids`` names items to print in full,
+        ``--all`` includes superseded items in the listing.
 
     Returns
     -------
     int
-        0 always; prints one line per item.
+        0 with no id, one line per item; with ids, 0 once every id
+        printed and 1 when any id is not in standing.md.
+
+    Notes
+    -----
+    - The block renders a decision or a dead end by its headline alone;
+      the id form is where its body is read, a superseded item carrying
+      its successor and the cycle that superseded it.
     """
     standing_path = folder / 'standing.md'
     text = standing_path.read_text(encoding='utf-8') if standing_path.exists() else ''
     items, superseded_ids = _parse_standing(text)
+    successors = {
+        m.group(2): (m.group(3), m.group(1))
+        for m in re.finditer(
+            r'^\s*- \(c(\d+)\)\s+([dcx]\d+)\s*->\s*([dcx]\d+)', text, re.MULTILINE)
+        }
     show_all = getattr(argv, 'all', False)
+    wanted = list(getattr(argv, 'ids', None) or [])
+    by_id = {item['id']: item for item in items}
+    rc = 0
+    for item_id in wanted:
+        if item_id not in by_id:
+            print(
+                f'hq standing: {item_id} not in standing.md'
+                f' - hq standing {folder.name} lists the ids')
+            rc = 1
     for item in items:
-        if show_all or item['id'] not in superseded_ids:
+        if wanted:
+            if item['id'] not in wanted:
+                continue
+            sup = ''
+            if item['id'] in successors:
+                new_id, cycle = successors[item['id']]
+                sup = f' [superseded by {new_id} in c{cycle}]'
+        elif show_all or item['id'] not in superseded_ids:
             sup = ' [superseded]' if item['id'] in superseded_ids else ''
-            print(f'[{item["id"]}] (c{item["cycle"]}) **{item["headline"]}** {item["body"]}{sup}')
-    return 0
+        else:
+            continue
+        print(f'[{item["id"]}] (c{item["cycle"]}) **{item["headline"]}** {item["body"]}{sup}')
+    return rc
 
 
 def _verb_work_dir(folder: pathlib.Path, argv: argparse.Namespace) -> int:
@@ -5036,7 +5258,9 @@ def _build_parser() -> argparse.ArgumentParser:
         'a ~ path, an absolute path - is stored whole and gated the same way;\n'
         'there is no search of the working directory, and a first stamp of a\n'
         'relative token the folder does not hold exits 2. An outside .py/.sql/\n'
-        '.js/.ts/.ps1 infers other/never: pass --kind draft to gate it.\n'
+        '.js/.ts/.ps1 infers other/never: pass --kind draft to gate it at edit.\n'
+        'A live always row needs --where: a stamp that would leave one with\n'
+        "no anchor is refused and prints the file's headings.\n"
         '--kind, --read-before, --status, --where, and --label default to the\n'
         "previous row's value; omit them on a re-stamp to carry them forward.\n"
         '--successor P sets status=superseded read_before=never; --archive\n'
@@ -5161,13 +5385,17 @@ def _build_parser() -> argparse.ArgumentParser:
     ).add_argument('slug')
 
     _standing_epilog = (
-        'Every unsuperseded item in full; --all adds the superseded ones.'
+        'Every unsuperseded item in full; --all adds the superseded ones.\n'
+        'With ids, the named items in full, a superseded one with its\n'
+        'successor - [d18] ... [superseded by d21 in c5]; an id not in\n'
+        'standing.md prints hq standing: <id> not in standing.md and exits 1.'
     )
     st = sub.add_parser(
         'standing',
         epilog=_standing_epilog,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     st.add_argument('slug')
+    st.add_argument('ids', nargs='*')
     st.add_argument('--all', action='store_true')
 
     _list_epilog = (

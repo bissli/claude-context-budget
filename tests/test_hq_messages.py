@@ -215,7 +215,7 @@ def test_stamp_refusals_and_usage_errors_print_their_documented_lines(
     assert (rc, out.strip()) == (
         2, "hq stamp: --reason may not start with 'refused: ', the receipt prefix")
     monkeypatch.setattr('sys.stdin', io.StringIO(
-        'SPEC.md --label "first row"\nSPEC.md --bogus\n'))
+        'SPEC.md --where Spec --label "first row"\nSPEC.md --bogus\n'))
     rc, out, _ = _run(['stamp', _SLUG, '--batch'])
     assert rc == 2
     assert 'hq stamp: batch line 2 not parsed: SPEC.md --bogus' in out
@@ -276,7 +276,7 @@ def test_finish_blocking_lines_name_the_class_that_fired(tmp_path, monkeypatch):
     folder = _root(tmp_path, monkeypatch)
     _run(['begin', _SLUG])
     _spec(folder)
-    assert _run(['stamp', _SLUG, 'SPEC.md'])[0] == 0
+    assert _run(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec'])[0] == 0
     _lock(folder, 'other-session', '2026-09-09T11:00:00')
     rc, out, _ = _run(['finish', _SLUG, '--log', 'x'])
     assert (rc, out.strip()) == (
@@ -300,7 +300,7 @@ def test_finish_blocking_lines_name_the_class_that_fired(tmp_path, monkeypatch):
     _spec(folder, '# Spec\n\nchanged\n')
     rc, out, _ = _run(['finish', _SLUG, '--log', 'x'])
     assert (rc, out.strip()) == (1, 'R3: SPEC.md sha moved; re-stamp before finish')
-    assert _run(['stamp', _SLUG, 'SPEC.md'])[0] == 0
+    assert _run(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec'])[0] == 0
     handoff = folder / 'HANDOFF.md'
     handoff.write_text(handoff.read_text().replace(
         '## Open questions', '## Open questions\n\n## Unfiled\n- foo bar', 1))
@@ -327,7 +327,7 @@ def test_finish_success_and_advisory_lines_have_their_documented_shape(
     _spec(folder)
     (folder / 'notes-x.md').write_text('# Notes\n')
     assert _run(
-        ['stamp', _SLUG, 'SPEC.md', '--label', 'a long spec label here'])[0] == 0
+        ['stamp', _SLUG, 'SPEC.md', '--where', 'Spec', '--label', 'a long spec label here'])[0] == 0
     assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'short'])[0] == 0
     rc, out, _ = _run(['finish', _SLUG, '--log', 'one'])
     assert rc == 0
@@ -340,7 +340,8 @@ def test_finish_success_and_advisory_lines_have_their_documented_shape(
         in lines)
     assert re.fullmatch(
         r'\S+/HANDOFF\.md  \d+ cursor lines  \d+ tokens'
-        r' \(cursor \d+, read \d+, artifacts \d+, standing \d+\)', lines[-2])
+        r' \(cursor \d+, read \d+, artifacts \d+, standing \d+\)', lines[-3])
+    assert lines[-2] == 'read first: 1 rows, 6 tok (1 anchored, 0 whole)'
     assert lines[-1] == f'resume: /handoff {_SLUG}'
 
 
@@ -355,7 +356,7 @@ def test_open_reports_each_drift_class_by_its_documented_line(tmp_path, monkeypa
     folder = _root(tmp_path, monkeypatch)
     _run(['begin', _SLUG])
     _spec(folder)
-    assert _run(['stamp', _SLUG, 'SPEC.md'])[0] == 0
+    assert _run(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec'])[0] == 0
     rc, out, _ = _run(['open', _SLUG])
     assert rc == 0
     assert out.strip() == (
@@ -363,7 +364,7 @@ def test_open_reports_each_drift_class_by_its_documented_line(tmp_path, monkeypa
         ' - the file may be behind its stamps; report it')
     assert _run(['finish', _SLUG, '--log', 'one'])[0] == 0
     assert _run(['open', _SLUG])[1] == ''
-    _spec(folder, '# Spec\n\nchanged\n')
+    _spec(folder, '# Spec\n\n## 1. Scope\n\nchanged\n')
     assert _run(['open', _SLUG])[1].strip() == (
         'sha moved since stamp: SPEC.md'
         ' - read the file, not the span alone')
@@ -526,39 +527,28 @@ def test_the_reference_example_file_is_the_scripts_own_output(
         _normalize(example).splitlines()
 
 
-def test_finish_advises_when_the_artifacts_block_is_over_its_cap(
+def test_the_artifacts_block_prints_every_full_row_with_no_cap(
         tmp_path, monkeypatch):
-    """Finish names the rows the 40-line Artifacts cap folds into the counts.
+    """Finish renders all 41 mention rows in full and prints no cap advisory.
 
-    Mutation: the advisory computed off the capped list rather than the
-    full one, so it never fires; or the cap read differently in finish
-    and in the renderer, so it fires one row early or late.
-    Oracle: hand-counted - 41 mention rows over a 40-line cap leave one
-    folded; 40 rows leave none and print no advisory; the block itself
-    still prints exactly 40 full lines.
+    Mutation: a line cap on the full rows, folding the overflow into the
+    kind counts; or a finish advisory counting rows over such a cap.
+    Oracle: hand-counted - 41 mention rows render 41 full lines and no
+    count line; finish prints no 'advisory: artifacts' line.
     """
     folder = _root(tmp_path, monkeypatch)
     _run(['begin', _SLUG])
-    for i in range(40):
+    for i in range(41):
         (folder / f'note-{i:02d}.md').write_text('# N\n')
         assert _run(['stamp', _SLUG, f'note-{i:02d}.md', '--read-before', 'mention',
                      '--label', 'a note'])[0] == 0
-    rc, out, _ = _run(['finish', _SLUG, '--log', 'forty'])
-    assert rc == 0
-    assert 'advisory: artifacts' not in out
-    _run(['begin', _SLUG])
-    (folder / 'note-40.md').write_text('# N\n')
-    assert _run(['stamp', _SLUG, 'note-40.md', '--read-before', 'mention',
-                 '--label', 'a note'])[0] == 0
     rc, out, _ = _run(['finish', _SLUG, '--log', 'forty-one'])
     assert rc == 0
-    assert (
-        'advisory: artifacts over the 40-line cap by 1, folded into the counts'
-        ' - re-grade or supersede rows, or read them all with'
-        f' hq artifacts {_SLUG}'
-        in out.splitlines())
+    assert 'advisory: artifacts' not in out
     block = hq.split_handoff((folder / 'HANDOFF.md').read_text())['blocks']['artifacts']
-    assert sum('  other  mention  ' in ln for ln in block.splitlines()) == 40
+    full = [ln for ln in block.splitlines() if '  other  mention  ' in ln]
+    assert len(full) == 41
+    assert not any(' - hq artifacts ' in ln for ln in block.splitlines())
 
 
 def test_finish_names_each_previous_cursor_line_nothing_now_carries(
@@ -730,7 +720,7 @@ def test_shorter_label_advisory_fires_only_in_the_cycle_that_shortened_it(
     _run(['begin', _SLUG])
     _spec(folder)
     assert _run(
-        ['stamp', _SLUG, 'SPEC.md', '--label', 'a long spec label here'])[0] == 0
+        ['stamp', _SLUG, 'SPEC.md', '--where', 'Spec', '--label', 'a long spec label here'])[0] == 0
     assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'short'])[0] == 0
     rc, out, _ = _run(['finish', _SLUG, '--log', 'one'])
     assert rc == 0

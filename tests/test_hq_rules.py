@@ -84,11 +84,11 @@ def test_kind_inference_over_a_representative_name_set():
         ('ARCH-DECLARATION.md', False, '', ('spec', 'always')),
         ('overview.md', False, '# Spec', ('spec', 'always')),
         ('guide.md', False, '# Design', ('spec', 'always')),
-        ('report.py', False, '', ('draft', 'always')),
-        ('loader.sql', False, '', ('draft', 'always')),
-        ('bundle.js', False, '', ('draft', 'always')),
-        ('types.ts', False, '', ('draft', 'always')),
-        ('deploy.ps1', False, '', ('draft', 'always')),
+        ('report.py', False, '', ('draft', 'edit')),
+        ('loader.sql', False, '', ('draft', 'edit')),
+        ('bundle.js', False, '', ('draft', 'edit')),
+        ('types.ts', False, '', ('draft', 'edit')),
+        ('deploy.ps1', False, '', ('draft', 'edit')),
         ('notes-backlog.md', False, '', ('notes', 'never')),
         ('notes-build-plan.md', False, '', ('notes', 'never')),
         ('notes-api-design.md', False, '', ('notes', 'never')),
@@ -574,24 +574,24 @@ def test_artifacts_block_lists_an_unpointed_file():
 
 
 def test_a_stamped_spec_enters_the_read_block_with_its_span():
-    """Verify render_read prints the gated spec's spans, and its line count
-    when the row names no anchor.
+    """Verify render_read prints the gated spec's spans and every row's size.
 
     Mutation: the whole-file branch dropped, so a row with no anchor costs
-    the reader an unpriced whole-file read; or an unresolved anchor
-    rendered as a span rather than '?'.
+    the reader an unpriced whole-file read; an unresolved anchor rendered
+    as a span rather than '?'; or the size column dropped.
     Oracle: hand-computed - one row with two anchors, one resolved and one
-    not, and one row with where='-' carrying a 205-line count.
+    not, sized 1.4k tok, and one row with where='-' sized as a whole file.
     """
     rows = [
         _row(path='SPEC.md', kind='spec', where='s4;Ghost', label='cache warmup'),
         _row(path='poller.py', kind='draft', where='-', label='drafted rewrite'),
         ]
     spans = {'SPEC.md': [(759, 814), None]}
-    result = hq.render_read(rows, spans, {'poller.py': 205})
+    sizes = {'SPEC.md': '1.4k tok', 'poller.py': '205 lines, 2.1k tok'}
+    result = hq.render_read(rows, spans, sizes)
     assert result.splitlines() == [
-        'poller.py (205 lines)  drafted rewrite',
-        'SPEC.md:759-814,?  cache warmup',
+        'poller.py  (205 lines, 2.1k tok)  drafted rewrite',
+        'SPEC.md:759-814,?  (1.4k tok)  cache warmup',
         ]
 
 
@@ -654,21 +654,22 @@ def test_artifacts_block_collapses_never_rows_and_caps_at_40():
         line for line in result_always.splitlines()
         if '  spec  ' in line and '  always  ' in line
     ]
-    assert len(full_always) == 40
-    assert result_always.splitlines()[-1] == 'spec x1  - hq artifacts slug'
+    assert len(full_always) == 41
+    assert ' - hq artifacts ' not in result_always
 
 
 # --- render_standing --------------------------------------------------
 
 
-def test_standing_block_omits_superseded_and_caps_at_80():
-    """Verify superseded items appear only as a count
-    and the 80-line cap fires.
+def test_standing_block_omits_superseded_and_prints_every_live_item():
+    """Verify superseded items appear only as a count and no cap cuts the rest.
 
-    Mutation: any block growing with cycles - printing superseded items in
-    full makes the block proportional to total decisions since project start.
+    Mutation: printing superseded items in full, so the block grows with
+    every ruling since the thread began; or a line cap folding live
+    decisions into a '... N more' line, which drops a ruling the reader
+    must not undo.
     Oracle: hand-computed - d02 is superseded so 'Superseded decision' is
-    absent; 82 unsuperseded decisions overflow the 80-line cap to exactly 80.
+    absent; 82 unsuperseded decisions render 82 headline lines.
     """
     items = [
         {'id': 'c01', 'prefix': 'c', 'cycle': '1',
@@ -693,9 +694,9 @@ def test_standing_block_omits_superseded_and_caps_at_80():
     ]
     result2 = hq.render_standing(many, set(), 'slug2')
     content_lines = [line for line in result2.splitlines() if line.strip()]
-    assert len(content_lines) == 80
-    assert '4 more' in result2
-    assert 'hq standing slug2' in result2
+    assert len(content_lines) == 83
+    assert sum(ln.startswith('[d') for ln in content_lines) == 82
+    assert 'more' not in result2
 
 
 # --- render_log -------------------------------------------------------
@@ -930,13 +931,13 @@ def test_non_live_count_line_has_a_fixed_order():
     assert 'superseded 1  archived 1  missing 1  - hq when slug <path>' in result
 
 
-def test_standing_cap_keeps_the_superseded_line():
-    """Verify the 80-line cap never drops the superseded count.
+def test_standing_renders_every_live_constraint_and_keeps_the_superseded_line():
+    """Verify no cap cuts the constraints and the superseded count closes the block.
 
-    Mutation: the superseded line appended before truncation, so overflow
-    cuts it with the items.
-    Oracle: hand-computed - 86 constraints with one superseded render as at
-    most 80 lines that still carry 'superseded 1' and an overflow line.
+    Mutation: a line cap that truncates the constraints; the superseded
+    line appended before the items, or dropped.
+    Oracle: hand-computed - 86 constraints with one superseded render as
+    87 lines: the heading, 85 items in full, and 'superseded 1'.
     """
     items = [
         {'id': f'c{n:02d}', 'prefix': 'c', 'cycle': '1',
@@ -944,22 +945,21 @@ def test_standing_cap_keeps_the_superseded_line():
         for n in range(1, 87)
     ]
     result = hq.render_standing(items, {'c86'}, 'slug').splitlines()
-    assert len(result) <= 80
+    assert len(result) == 87
     assert result[-1] == 'superseded 1  - hq standing slug'
-    assert result[-2].startswith('... ')
-    assert 'more' in result[-2]
+    assert result[-2] == '[c85] (c1) **rule 85** body'
+    assert '[c86]' not in '\n'.join(result)
 
 
-def test_the_standing_cut_takes_from_the_longest_kind_first():
-    """The 80-line cut spreads across kinds, longest first, and keeps headings.
+def test_every_kind_renders_whole_under_its_heading():
+    """Every constraint, decision, and dead end prints under its heading.
 
-    Mutation: the list truncated from the end, so the cut lands on the
-    dead ends alone - x13 to x26 gone in the first fixture and the whole
-    Dead ends heading gone in the second; or the budget arithmetic off
-    by the heading count, so the block runs past 80 lines.
-    Oracle: hand-computed max-min allocation - room 80 - 1 - 3 = 76 over
-    needs 26/38/26 gives 25/26/25 with 14 dropped; 90 constraints and 5
-    dead ends keep all five dead ends and their heading.
+    Mutation: a budget shared out across the kinds, so the longest kind
+    loses items to a '... N more' line; or a kind's heading dropped when
+    its items are few.
+    Oracle: hand-computed - 26 constraints, 38 decisions, and 26 dead ends
+    render 93 lines, three headings and every item, no overflow line; 90
+    constraints and 5 dead ends keep all five dead ends and their heading.
     """
     def _items(prefix, n, body):
         return [
@@ -969,14 +969,14 @@ def test_the_standing_cut_takes_from_the_longest_kind_first():
 
     items = _items('c', 26, 'why it holds') + _items('d', 38, '') + _items('x', 26, '')
     lines = hq.render_standing(items, set(), 'widget-alpha').splitlines()
-    assert len(lines) == 80
+    assert len(lines) == 93
     headings = ('### Constraints', '### Decisions', '### Dead ends')
     assert [lines.count(h) for h in headings] == [1, 1, 1]
-    assert [sum(ln.startswith(f'[{p}') for ln in lines) for p in 'cdx'] == [25, 26, 25]
-    assert lines[-1] == '... 14 more  - hq standing widget-alpha'
+    assert [sum(ln.startswith(f'[{p}') for ln in lines) for p in 'cdx'] == [26, 38, 26]
+    assert not any(ln.startswith('... ') for ln in lines)
     lines = hq.render_standing(
         _items('c', 90, 'b') + _items('x', 5, ''), set(), 'widget-alpha').splitlines()
-    assert len(lines) == 80
+    assert len(lines) == 97
     assert '### Dead ends' in lines
     assert sum(ln.startswith('[x') for ln in lines) == 5
 
@@ -1188,5 +1188,5 @@ def test_render_standing_bodies_headings_and_the_eighty_line_boundary():
     assert not lines[-1].startswith('... ')
     more = many + [{'id': 'c80', 'prefix': 'c', 'cycle': '1', 'headline': 'r80', 'body': 'b'}]
     lines = hq.render_standing(more, set(), 'slug').splitlines()
-    assert len(lines) == 80
-    assert lines[-1] == '... 2 more  - hq standing slug'
+    assert len(lines) == 81
+    assert lines[-1] == '[c80] (c1) **r80** b'

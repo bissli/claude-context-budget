@@ -58,7 +58,7 @@ def test_every_spelling_of_one_in_folder_file_shares_one_ledger_key(
 
     for token in ('SPEC.md', './SPEC.md', 'sub/../SPEC.md',
                   str(folder / 'SPEC.md')):
-        assert hq.main(['stamp', _SLUG, token]) == 0, token
+        assert hq.main(['stamp', _SLUG, token, '--where', 'Spec']) == 0, token
 
     rows = _rows(folder)
     assert [(r['path'], r['base']) for r in rows] == [('SPEC.md', 'folder')] * 4
@@ -146,7 +146,7 @@ def test_a_kind_once_declared_spec_keeps_gating_after_an_archive(
     folder = _root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'plan.txt').write_text('# Plan\n\nBody.\n')
-    assert hq.main(['stamp', _SLUG, 'plan.txt', '--kind', 'spec']) == 0
+    assert hq.main(['stamp', _SLUG, 'plan.txt', '--kind', 'spec', '--where', 'Plan']) == 0
     assert hq.main([
         'stamp', _SLUG, 'plan.txt', '--archive', '--reason', 'parked',
         '--kind', 'other']) == 0
@@ -366,7 +366,7 @@ def test_a_ledger_whose_last_newline_was_lost_does_not_glue_the_next_row(
     folder = _root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n\nOne.\n')
-    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'first']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec', '--label', 'first']) == 0
     ledger = folder / 'ledger.tsv'
     ledger.write_text(ledger.read_text().rstrip('\n'))
 
@@ -392,7 +392,7 @@ def test_an_absolute_token_inside_the_folder_is_stored_relative(
     (folder / 'sub').mkdir()
     (folder / 'sub' / 'DESIGN.md').write_text('# Design\n\nOne.\n')
 
-    assert hq.main(['stamp', _SLUG, 'sub/DESIGN.md', '--label', 'sub']) == 0
+    assert hq.main(['stamp', _SLUG, 'sub/DESIGN.md', '--where', 'Design', '--label', 'sub']) == 0
     assert hq.main([
         'stamp', _SLUG, os.path.join(str(folder), 'sub', 'DESIGN.md')]) == 0
 
@@ -421,7 +421,7 @@ def test_read_and_when_find_a_row_by_any_spelling_of_its_path(
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
     assert hq.main(['stamp', _SLUG, '~/repo/auth.py']) == 0
-    assert hq.main(['stamp', _SLUG, 'SPEC.md']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec']) == 0
     expanded = str(home / 'repo' / 'auth.py')
     capsys.readouterr()
 
@@ -467,7 +467,7 @@ def test_a_first_stamp_of_a_path_the_folder_lacks_is_a_usage_error(
     assert out.startswith(f'hq stamp: docs/SPEC-b.md: no such file under {folder}')
     assert '~ or absolute path' in out
     assert _rows(folder) == []
-    assert hq.main(['stamp', _SLUG, str(repo_file)]) == 0
+    assert hq.main(['stamp', _SLUG, str(repo_file), '--where', 'Spec']) == 0
     assert hq.main([
         'stamp', _SLUG, 'gone.md', '--status', 'missing', '--label', 'gone']) == 0
     assert hq.main(['stamp', _SLUG, 'old-SPEC.md', '--successor', 'SPEC2.md']) == 0

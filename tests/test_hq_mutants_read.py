@@ -131,17 +131,17 @@ def test_block_sha_rstrips_not_lstrips_each_line():
 # ------------------------------------------------------------------
 
 
-def test_render_read_missing_path_shows_zero_lines():
-    """render_read uses 0 as the default line count when path is absent.
+def test_render_read_unsized_path_shows_a_dash():
+    """render_read prints '-' for a row the caller could not size.
 
-    Mutation: x_render_read__mutmut_25 changes lines.get(path, 0) to
-    lines.get(path, ) which returns None, producing '(None lines)';
-    x_render_read__mutmut_26 changes the default to 1, producing '(1 lines)'.
-    Oracle: hand-computed output for a path absent from the lines dict.
+    Mutation: sizes[path] in place of sizes.get(path, '-'), so a row
+    absent from the size map raises KeyError and finish dies; or the
+    default changed, so the line misreports a size.
+    Oracle: hand-computed output for a path absent from the sizes dict.
     """
     rows = [_row(where='-', path='notes.md', label='the notes')]
-    result = hq.render_read(rows, spans={}, lines={})
-    assert result == 'notes.md (0 lines)  the notes'
+    result = hq.render_read(rows, spans={}, sizes={})
+    assert result == 'notes.md  (-)  the notes'
 
 
 def test_render_read_missing_span_path_uses_empty_list():
@@ -149,11 +149,11 @@ def test_render_read_missing_span_path_uses_empty_list():
 
     Mutation: x_render_read__mutmut_32 changes spans.get(path, []) to
     spans.get(path, ) which returns None; iterating None raises TypeError.
-    Oracle: a path absent from spans dict renders as 'path:?  label'.
+    Oracle: a path absent from spans dict renders as 'path:?  (size)  label'.
     """
     rows = [_row(where='SomeSection', path='spec.md', label='the spec')]
-    result = hq.render_read(rows, spans={}, lines={})
-    assert result == 'spec.md:?  the spec'
+    result = hq.render_read(rows, spans={}, sizes={'spec.md': '12 tok'})
+    assert result == 'spec.md:?  (12 tok)  the spec'
 
 
 # ------------------------------------------------------------------
@@ -161,22 +161,19 @@ def test_render_read_missing_span_path_uses_empty_list():
 # ------------------------------------------------------------------
 
 
-def test_render_artifacts_overflow_strips_trailing_question_mark():
-    """Overflow kind extraction strips the trailing '?' from unstamped lines.
+def test_render_artifacts_prints_every_unstamped_entry_with_no_cap():
+    """Forty-one unstamped entries render forty-one lines and no count line.
 
-    Mutation: x_render_artifacts__mutmut_71 uses lstrip('?') instead of
-    rstrip('?'); 'spec?' has no leading '?', so lstrip leaves 'spec?' as the
-    kind key and the count is stored under 'spec?' rather than 'spec'.
-    Oracle: with 41 unstamped entries, the overflow summary line uses 'spec'.
+    Mutation: a cap on the full lines that folds the overflow into a
+    kind count, so the forty-first entry leaves the block as 'spec x1'.
+    Oracle: hand-counted - 41 walk entries with no row give 41 lines of
+    the form 'file  spec?  unstamped' and nothing else.
     """
     walk = [(f'file{i:02d}.md', 'spec') for i in range(41)]
     rows: dict = {}
-    result = hq.render_artifacts(walk, rows, slug='demo')
-    lines = result.splitlines()
-    # First 40 lines are the capped full list; last line is the summary.
-    summary = lines[-1]
-    assert 'spec x1' in summary, f'Expected spec (not spec?) in summary: {summary!r}'
-    assert 'spec?' not in summary
+    lines = hq.render_artifacts(walk, rows, slug='demo').splitlines()
+    assert len(lines) == 41
+    assert all(ln.endswith('  spec?  unstamped') for ln in lines)
 
 
 # ------------------------------------------------------------------
@@ -193,30 +190,23 @@ def _make_items(n: int, prefix: str = 'c') -> list[dict]:
         ]
 
 
-def test_render_standing_overflow_threshold_counts_tail():
-    """render_standing counts the tail line in the 80-line budget.
+def test_render_standing_prints_every_live_item_and_the_superseded_tail():
+    """Eighty constraints with one superseded render every live one and a tail.
 
-    Mutation: x_render_standing__mutmut_53 changes len(out) + len(tail) to
-    len(out) - len(tail), raising the threshold by 2*len(tail); with one
-    superseded item, the overflow fires at 82 instead of 80.
-    Oracle: 80 constraint items + 1 superseded item -> truncation with
-    '... N more' line and a 'superseded 1' tail; total lines = 80.
+    Mutation: a line cap that cuts items and prints '... N more'; or the
+    superseded tail dropped, so the block never says a ruling left it.
+    Oracle: hand-counted - 79 live items under one heading plus the tail
+    'superseded 1  - hq standing demo' make 81 lines, [c80] absent.
     """
     items = _make_items(80, 'c')
-    # Mark the last item superseded so tail has 1 entry.
     superseded_ids = {items[-1]['id']}
-    result = hq.render_standing(items, superseded_ids, slug='demo')
-    lines = result.splitlines()
-    assert len(lines) == 80, f'Expected 80 output lines, got {len(lines)}'
-    assert any('more' in ln for ln in lines), 'Expected truncation line'
-    assert lines[-1].startswith('superseded 1'), (
-        f'Expected superseded tail, got {lines[-1]!r}'
-    )
-
-
-# ------------------------------------------------------------------
-# _read_tsv
-# ------------------------------------------------------------------
+    lines = hq.render_standing(items, superseded_ids, slug='demo').splitlines()
+    assert len(lines) == 81
+    assert lines[0] == '### Constraints'
+    assert sum(ln.startswith('[c') for ln in lines) == 79
+    assert not any(ln.startswith('... ') for ln in lines)
+    assert '[c80]' not in '\n'.join(lines)
+    assert lines[-1] == 'superseded 1  - hq standing demo'
 
 
 def test_read_tsv_continues_past_empty_line(tmp_path):

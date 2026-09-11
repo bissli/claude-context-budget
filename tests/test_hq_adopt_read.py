@@ -653,12 +653,13 @@ def test_when_prints_thirty_rows_oldest_first_then_names_the_cut(
 # --- item 15: the artifacts overflow count ----------------------------
 
 
-def test_artifacts_overflow_counts_by_kind_not_by_read_before():
-    """43 full rows render 40 lines and one count line naming the kind.
+def test_artifacts_block_prints_every_full_row_with_no_cap():
+    """43 full rows render 43 lines and no count line.
 
-    Mutation: the cap moved to 42, or the overflow keyed on split('  ')[2],
-    which counts the read_before word instead of the kind.
-    Oracle: hand-counted - 43 live always spec rows leave 3 over the cap.
+    Mutation: a cap on the full lines, folding the rows past it into a
+    kind count the reader never sees a label for.
+    Oracle: hand-counted - 43 live always spec rows give 43 full lines
+    and no '- hq artifacts' count line.
     """
     walk = [(f'SPEC-{i:02d}.md', 'spec') for i in range(43)]
     rows = {
@@ -666,12 +667,9 @@ def test_artifacts_overflow_counts_by_kind_not_by_read_before():
         for i in range(43)
         }
     body = hq.render_artifacts(walk, rows, 'demo').splitlines()
-    assert len(body) == 41
-    assert sum(1 for ln in body if '  spec  always  ' in ln) == 40
-    assert body[-1] == 'spec x3  - hq artifacts demo'
-
-
-# --- item 16: the walk ------------------------------------------------
+    assert len(body) == 43
+    assert sum(1 for ln in body if '  spec  always  ' in ln) == 43
+    assert not any(' - hq artifacts ' in ln for ln in body)
 
 
 def test_walk_skips_dotfiles_and_infers_a_spec_from_its_heading(

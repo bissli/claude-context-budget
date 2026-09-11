@@ -229,7 +229,7 @@ def test_finish_checks_r3_before_a_missing_gated_row(tmp_path, monkeypatch):
     assert _run(['begin', _SLUG])[0] == 0
     (folder / 'SPEC.md').write_text('# Spec\n\nOne.\n')
     (folder / 'poller.py').write_text('a = 1\n')
-    assert _run(['stamp', _SLUG, 'SPEC.md'])[0] == 0
+    assert _run(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec'])[0] == 0
     assert _run(['stamp', _SLUG, 'poller.py'])[0] == 0
     (folder / 'SPEC.md').write_text('# Spec\n\nTwo.\n')
     (folder / 'poller.py').unlink()
@@ -305,7 +305,7 @@ def test_acknowledge_names_the_broken_witness_and_records_it(
     folder = _new_root(tmp_path, monkeypatch)
     assert _run(['begin', _SLUG])[0] == 0
     (folder / 'SPEC.md').write_text('# Spec\n')
-    assert _run(['stamp', _SLUG, 'SPEC.md'])[0] == 0
+    assert _run(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec'])[0] == 0
     assert _run(['finish', _SLUG, '--log', 'one'])[0] == 0
     assert _run(['begin', _SLUG])[0] == 0
     ledger = folder / 'ledger.tsv'

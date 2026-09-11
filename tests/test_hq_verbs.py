@@ -339,7 +339,7 @@ def test_restamp_after_refusal_skips_the_receipt_reason(tmp_path, monkeypatch):
     folder = _new_root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
-    hq.main(['stamp', _SLUG, 'SPEC.md'])
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec'])
     assert hq.main(['stamp', _SLUG, 'SPEC.md', '--read-before', 'never']) == 1
 
     assert hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'again']) == 0
@@ -364,7 +364,7 @@ def test_successor_with_explicit_status_keeps_that_status(
     (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
     (folder / 'NEXT.md').write_text('# Next\n')
     assert hq.main([
-        'stamp', _SLUG, 'SPEC.md', '--successor', 'NEXT.md',
+        'stamp', _SLUG, 'SPEC.md', '--successor', 'NEXT.md', '--where', 'Spec',
         '--status', 'live', '--read-before', 'always']) == 0
 
     lines = (folder / 'ledger.tsv').read_text().splitlines()
@@ -412,7 +412,7 @@ def test_directory_or_self_is_not_a_successor(tmp_path, monkeypatch):
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
     (folder / 'drafts').mkdir()
-    hq.main(['stamp', _SLUG, 'SPEC.md'])
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec'])
 
     assert hq.main(['stamp', _SLUG, 'SPEC.md', '--successor', 'drafts']) == 1
     assert hq.main(['stamp', _SLUG, 'SPEC.md', '--successor', 'SPEC.md']) == 1
@@ -437,7 +437,7 @@ def test_refused_stamp_does_not_clear_r3(tmp_path, monkeypatch):
     folder = _new_root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
-    hq.main(['stamp', _SLUG, 'SPEC.md'])
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec'])
     (folder / 'SPEC.md').write_text('# Spec\n\nChanged.\n')
     assert hq.main(['finish', _SLUG, '--log', 'probe']) == 1
 
@@ -483,7 +483,7 @@ def test_stale_reason_does_not_excuse_status_archived(tmp_path, monkeypatch):
     folder = _new_root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
-    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--reason', 'wip note']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec', '--reason', 'wip note']) == 0
     before = (folder / 'ledger.tsv').read_bytes()
 
     ret = hq.main([
@@ -526,7 +526,7 @@ def test_tab_and_newline_in_free_text_become_spaces(tmp_path, monkeypatch):
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
 
-    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'a\tb\nc']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec', '--label', 'a\tb\nc']) == 0
 
     lines = (folder / 'ledger.tsv').read_text().splitlines()
     assert len(lines) == 2
@@ -628,20 +628,25 @@ def test_finish_renders_a_directory_and_undecodable_file_at_always(
 
     Mutation: the read block reading every always row with strict utf-8
     and no directory guard, so finish dies with a traceback after the
-    Unfiled drain already wrote standing.md.
-    Oracle: exit 0, one standing item, and the directory's line-count form
-    in the read block.
+    Unfiled drain already wrote standing.md; or the two sized as text.
+    Oracle: rows an older cycle left, seeded straight into the ledger
+    since stamp now refuses an always row with no anchor; exit 0, one
+    standing item, the directory sized as one file and the binary as
+    one kilobyte in the read block.
     """
     folder = _new_root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'probes').mkdir()
     (folder / 'probes' / 'a.md').write_text('# a\n')
     (folder / 'bad.md').write_bytes(b'# Notes\n\xff\xfe not utf8\n')
-    assert hq.main([
-        'stamp', _SLUG, 'probes', '--read-before', 'always',
-        '--label', 'the probe subtree']) == 0
-    assert hq.main([
-        'stamp', _SLUG, 'bad.md', '--kind', 'notes', '--read-before', 'always']) == 0
+    for path, kind, label in (('probes', 'probe-dir', 'the probe subtree'),
+                              ('bad.md', 'notes', 'a binary note')):
+        hq._append_tsv(folder / 'ledger.tsv', hq.LEDGER_FIELDS, {
+            'cycle': '1', 'ts': '2026-09-09T12:00:00', 'path': path,
+            'base': 'folder', 'kind': kind, 'status': 'live',
+            'read_before': 'always', 'successor': '-', 'where': '-',
+            'sha12': '-', 'lines': '1', 'reason': '-', 'label': label,
+            }, '\t'.join(hq.LEDGER_FIELDS))
     _cursor_with(
         folder, 'Unfiled', '- constraint: **Stdlib only** no third-party deps.')
 
@@ -649,7 +654,9 @@ def test_finish_renders_a_directory_and_undecodable_file_at_always(
 
     standing = (folder / 'standing.md').read_text().splitlines()
     assert [ln for ln in standing if 'Stdlib only' in ln] == [standing[0]]
-    assert 'probes (1 lines)  the probe subtree' in (folder / 'HANDOFF.md').read_text()
+    text_lines = (folder / 'HANDOFF.md').read_text().splitlines()
+    assert 'probes  (1 files)  the probe subtree' in text_lines
+    assert 'bad.md  (1 KB)  a binary note' in text_lines
 
 
 def test_subdirectory_row_on_disk_does_not_block_finish(tmp_path, monkeypatch):
@@ -948,7 +955,7 @@ def test_artifacts_verb_prints_live_rows_only(tmp_path, monkeypatch, capsys):
     folder = _new_root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n')
-    hq.main(['stamp', _SLUG, 'SPEC.md'])
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec'])
     assert hq.main(['stamp', _SLUG, 'SPEC.md', '--archive', '--reason', 'old']) == 0
     capsys.readouterr()
 
@@ -1012,7 +1019,8 @@ def test_r3_fires_for_a_gated_row_in_a_subdirectory(tmp_path, monkeypatch, capsy
     hq.main(['begin', _SLUG])
     (folder / 'sub').mkdir()
     (folder / 'sub' / 'DESIGN.md').write_text('# Design\n\noriginal body\n')
-    assert hq.main(['stamp', _SLUG, 'sub/DESIGN.md', '--label', 'sub spec']) == 0
+    assert hq.main(['stamp', _SLUG, 'sub/DESIGN.md', '--where', 'Design',
+                    '--label', 'sub spec']) == 0
     (folder / 'sub' / 'DESIGN.md').write_text('# Design\n\nedited body\n')
     capsys.readouterr()
 
@@ -1564,7 +1572,7 @@ def test_absent_abs_row_is_an_advisory_not_r3(tmp_path, monkeypatch, capsys):
     outside = folder.parent.parent / 'outside.md'
     outside.write_text('# Outside\n')
     assert hq.main([
-        'stamp', _SLUG, str(outside), '--read-before', 'always',
+        'stamp', _SLUG, str(outside), '--read-before', 'always', '--where', 'Outside',
         '--label', 'outside notes']) == 0
     outside.unlink()
     capsys.readouterr()
@@ -1902,9 +1910,10 @@ def test_read_block_line_shapes(tmp_path, monkeypatch):
     Mutation: unresolved anchor silently omitted; two-space column separator
     collapsed to one; label dropped from the line.
     Oracle: SPEC.md stamped with 'Render pass;Ghost Section' - 'Render pass'
-    resolves to span 3-7, 'Ghost Section' is absent, so the line is
-    'SPEC.md:3-7,?  -'; NOTES.md stamped with single missing anchor gives
-    'NOTES.md:?  -'.
+    resolves to span 3-7, 39 characters hand-counted so 9 tokens, and
+    'Ghost Section' is absent, so the line is 'SPEC.md:3-7,?  (9 tok)  -';
+    NOTES.md stamped with a single missing anchor is read whole, 3 lines
+    and 15 characters, giving 'NOTES.md:?  (3 lines, 3 tok)  -'.
     """
     folder = _new_root(tmp_path, monkeypatch, cycle='1')
     hq.main(['begin', _SLUG])
@@ -1930,8 +1939,8 @@ def test_read_block_line_shapes(tmp_path, monkeypatch):
 
     handoff_text = (folder / 'HANDOFF.md').read_text()
     text_lines = handoff_text.splitlines()
-    assert 'SPEC.md:3-7,?  -' in text_lines
-    assert 'NOTES.md:?  -' in text_lines
+    assert 'SPEC.md:3-7,?  (9 tok)  -' in text_lines
+    assert 'NOTES.md:?  (3 lines, 3 tok)  -' in text_lines
 
 
 def test_untyped_unfiled_bullet_blocks_and_names_the_line(
@@ -1994,7 +2003,7 @@ def test_abs_path_resolved_once_and_absence_is_advisory(tmp_path, monkeypatch):
     """
     folder = _new_root(tmp_path, monkeypatch, cycle='1')
     hq.main(['begin', _SLUG])
-    abs_path = '/nonexistent/path/to/SPEC.md'
+    abs_path = '/nonexistent/path/to/notes.md'
 
     original_cwd = os.getcwd()
     try:
@@ -2184,7 +2193,7 @@ def test_when_shows_all_rows_for_path(tmp_path, monkeypatch, capsys):
     folder = _new_root(tmp_path, monkeypatch, cycle='1')
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n\nVersion 1.\n')
-    hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'first stamp'])
+    hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec', '--label', 'first stamp'])
     (folder / 'SPEC.md').write_text('# Spec\n\nVersion 2.\n')
     hq.main(['stamp', _SLUG, 'SPEC.md', '--label', 'second stamp'])
     (folder / 'SPEC.md').write_text('# Spec\n\nVersion 3.\n')
@@ -2335,7 +2344,7 @@ def test_r1_holds_when_the_stored_kind_is_spec_and_the_heading_moved(
     folder = _new_root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'plan.md').write_text('# Spec\n\nContent.\n')
-    assert hq.main(['stamp', _SLUG, 'plan.md']) == 0
+    assert hq.main(['stamp', _SLUG, 'plan.md', '--where', 'Spec']) == 0
     (folder / 'plan.md').write_text('# Plan\n\nContent.\n')
 
     assert hq.main(['stamp', _SLUG, 'plan.md', '--read-before', 'never']) == 1
@@ -2359,7 +2368,7 @@ def test_archive_without_reason_is_usage_and_writes_no_row(tmp_path, monkeypatch
     folder = _new_root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n\nContent.\n')
-    assert hq.main(['stamp', _SLUG, 'SPEC.md']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec']) == 0
     ledger_before = (folder / 'ledger.tsv').read_bytes()
 
     assert hq.main(['stamp', _SLUG, 'SPEC.md', '--archive']) == 2
@@ -2378,7 +2387,7 @@ def test_successor_whose_own_row_is_not_live_is_refused(tmp_path, monkeypatch):
     hq.main(['begin', _SLUG])
     (folder / 'SPEC-A.md').write_text('# Spec\n\nA.\n')
     (folder / 'SPEC-B.md').write_text('# Spec\n\nB.\n')
-    assert hq.main(['stamp', _SLUG, 'SPEC-B.md']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC-B.md', '--where', 'Spec']) == 0
     assert hq.main(['stamp', _SLUG, 'SPEC-A.md', '--successor', 'SPEC-B.md']) == 0
 
     assert hq.main(['stamp', _SLUG, 'SPEC-B.md', '--successor', 'SPEC-A.md']) == 1
@@ -2408,7 +2417,7 @@ def test_a_kind_declared_spec_is_gated_from_that_stamp_on(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'notes-a.md').write_text('# Notes\n\nActually the spec.\n')
 
-    assert hq.main(['stamp', _SLUG, 'notes-a.md', '--kind', 'spec']) == 0
+    assert hq.main(['stamp', _SLUG, 'notes-a.md', '--kind', 'spec', '--where', 'Notes']) == 0
     lines = (folder / 'ledger.tsv').read_text().splitlines()
     row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
     assert (row['kind'], row['status'], row['read_before']) == ('spec', 'live', 'always')
@@ -2469,7 +2478,7 @@ def test_acknowledge_passes_a_witness_break_and_records_the_reason(
     folder = _new_root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n')
-    assert hq.main(['stamp', _SLUG, 'SPEC.md']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec']) == 0
     assert hq.main(['finish', _SLUG, '--log', 'one']) == 0
     hq.main(['begin', _SLUG])
     ledger = folder / 'ledger.tsv'
@@ -2500,7 +2509,7 @@ def test_collisions_skip_a_superseded_spec_and_a_present_abs_row_is_silent(
     (folder / 'OLD-SPEC.md').write_text('# Spec\n\n## Delta section\n')
     (folder / 'SPEC.md').write_text('# Spec\n\n## Plain section\n')
     assert hq.main(['stamp', _SLUG, 'OLD-SPEC.md', '--successor', 'SPEC.md']) == 0
-    assert hq.main(['stamp', _SLUG, 'SPEC.md']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 'Spec']) == 0
     outside = tmp_path / 'outside-note.md'
     outside.write_text('# n\n')
     assert hq.main(['stamp', _SLUG, str(outside)]) == 0
@@ -2528,7 +2537,8 @@ def test_label_dropping_a_backticked_token_alone_is_advised(
     hq.main(['begin', _SLUG])
     (folder / 'SPEC.md').write_text('# Spec\n')
     assert hq.main([
-        'stamp', _SLUG, 'SPEC.md', '--label', 'the `--force` path, s4 spans it']) == 0
+        'stamp', _SLUG, 'SPEC.md', '--where', 'Spec',
+        '--label', 'the `--force` path, s4 spans it']) == 0
     assert hq.main([
         'stamp', _SLUG, 'SPEC.md', '--label', 'the force path now, s4 spans it']) == 0
     capsys.readouterr()
@@ -2590,7 +2600,7 @@ def test_a_kind_declared_draft_is_gated_like_a_spec(tmp_path, monkeypatch):
     assert hq.main(['stamp', _SLUG, 'plan.txt', '--kind', 'draft']) == 0
     lines = (folder / 'ledger.tsv').read_text().splitlines()
     row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
-    assert (row['kind'], row['status'], row['read_before']) == ('draft', 'live', 'always')
+    assert (row['kind'], row['status'], row['read_before']) == ('draft', 'live', 'edit')
     assert hq.main(['stamp', _SLUG, 'plan.txt', '--read-before', 'never']) == 1
 
 
@@ -2631,3 +2641,167 @@ def test_help_with_known_topic_prints_body_and_with_unknown_exits_2(capsys):
     assert 'kinds' in out
     assert 'rules' in out
     assert 'stale-path' in out
+
+
+# --- the read tiers ---------------------------------------------------
+
+
+def test_an_always_row_with_no_anchor_is_refused_with_its_headings(
+        tmp_path, monkeypatch, capsys):
+    """A stamp leaving a live always row unanchored is refused and lists headings.
+
+    Mutation: the anchor check dropped, so a whole spec lands at always
+    and is read whole at every resume; the headings not printed, so the
+    agent cannot pick a --where; or the receipt row skipped, so the
+    attempt leaves no record.
+    Oracle: hand-written refusal line and the file's three headings,
+    each on its own indented line; one receipt row with the reason and
+    the seed tier; the same stamp with --where s1 exits 0.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC.md').write_text('# Spec\n\n## 1. Scope\n\nOne.\n\n## 2. Retry\n')
+    capsys.readouterr()
+    assert hq.main(['stamp', _SLUG, 'SPEC.md']) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert out == [
+        'hq stamp: refused: SPEC.md always with no anchor - 7 lines read whole at'
+        ' every resume; stamp --where <heading> or --read-before edit',
+        '  # Spec',
+        '  ## 1. Scope',
+        '  ## 2. Retry',
+        ]
+    rows = (folder / 'ledger.tsv').read_text().splitlines()
+    receipt = dict(zip(hq.LEDGER_FIELDS, rows[-1].split('\t')))
+    assert (receipt['reason'], receipt['read_before'], receipt['where']) == (
+        'refused: SPEC.md always with no anchor', 'always', '-')
+    assert hq.main(['stamp', _SLUG, 'SPEC.md', '--where', 's1']) == 0
+    rows = (folder / 'ledger.tsv').read_text().splitlines()
+    assert dict(zip(hq.LEDGER_FIELDS, rows[-1].split('\t')))['where'] == 's1'
+
+
+def test_a_draft_keeps_edit_or_always_and_steps_down_from_an_old_always(
+        tmp_path, monkeypatch, capsys):
+    """R1 holds a draft at edit or always; an older always draft may re-stamp edit.
+
+    Mutation: the draft floor kept at always alone, so the step-down an
+    older thread needs is refused; or the floor dropped to any tier, so
+    a draft lands at mention and leaves the gate.
+    Oracle: drafts/x.py seeds edit; --read-before mention exits 1 with
+    the documented draft line; a seeded always row on poller.py
+    re-stamped --read-before edit exits 0 and reads edit.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'drafts').mkdir()
+    (folder / 'drafts' / 'x.py').write_text('x = 1\n')
+    assert hq.main(['stamp', _SLUG, 'drafts/x.py']) == 0
+    rows = (folder / 'ledger.tsv').read_text().splitlines()
+    assert dict(zip(hq.LEDGER_FIELDS, rows[-1].split('\t')))['read_before'] == 'edit'
+    capsys.readouterr()
+    assert hq.main(['stamp', _SLUG, 'drafts/x.py', '--read-before', 'mention']) == 1
+    assert capsys.readouterr().out.startswith(
+        'hq stamp: refused: R1: draft read_before must stay edit or always'
+        ' without --successor or --archive')
+    (folder / 'poller.py').write_text('p = 1\n')
+    hq._append_tsv(folder / 'ledger.tsv', hq.LEDGER_FIELDS, {
+        'cycle': '1', 'ts': _NOW, 'path': 'poller.py', 'base': 'folder',
+        'kind': 'draft', 'status': 'live', 'read_before': 'always',
+        'successor': '-', 'where': '-', 'sha12': hq._sha12_path(folder / 'poller.py'),
+        'lines': '1', 'reason': '-', 'label': 'old draft',
+        }, '\t'.join(hq.LEDGER_FIELDS))
+    assert hq.main(['stamp', _SLUG, 'poller.py', '--read-before', 'edit']) == 0
+    rows = (folder / 'ledger.tsv').read_text().splitlines()
+    assert dict(zip(hq.LEDGER_FIELDS, rows[-1].split('\t')))['read_before'] == 'edit'
+
+
+def test_begin_lists_an_unanchored_always_row_from_an_older_cycle(
+        tmp_path, monkeypatch, capsys):
+    """The work list names each live always row with no anchor and its move.
+
+    Mutation: the tier-break scan dropped, so an older thread never
+    hears which whole files it reads at every resume; or keyed on
+    where != '-', so the anchored row is named and the unanchored one
+    is not.
+    Oracle: two seeded always rows, one anchored; the work list carries
+    the hand-written line for notes-x.md alone.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    (folder / 'notes-x.md').write_text('# X\n\nOne.\n')
+    (folder / 'SPEC.md').write_text('# Spec\n\nOne.\n')
+    for path, where in (('notes-x.md', '-'), ('SPEC.md', 'Spec')):
+        hq._append_tsv(folder / 'ledger.tsv', hq.LEDGER_FIELDS, {
+            'cycle': '1', 'ts': _NOW, 'path': path, 'base': 'folder',
+            'kind': 'other' if where == '-' else 'spec', 'status': 'live',
+            'read_before': 'always', 'successor': '-', 'where': where,
+            'sha12': hq._sha12_path(folder / path), 'lines': '3',
+            'reason': '-', 'label': '-',
+            }, '\t'.join(hq.LEDGER_FIELDS))
+    hq.main(['finish', _SLUG, '--log', 'c1'])
+    monkeypatch.setenv('HQ_CYCLE', '2')
+    capsys.readouterr()
+    assert hq.main(['begin', _SLUG]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert ('  notes-x.md always with no anchor, 3 lines'
+            ' - stamp --where <heading> or --read-before edit') in lines
+    assert not any('SPEC.md always with no anchor' in ln for ln in lines)
+
+
+def test_blocks_print_a_root_path_relative_to_its_base_with_sizes(
+        tmp_path, monkeypatch):
+    """A repo file prints relative to the root, the base named once, sized.
+
+    Mutation: the stored absolute path printed as is; the base line
+    dropped or repeated per row; or the span size dropped from the
+    read line.
+    Oracle: hand-computed - the anchored span is 13 characters, 3
+    tokens; the root is under tmp_path, so its base prints absolutely;
+    the Read first and Artifacts blocks each open with 'root <root>'
+    once and name 'src/app.md'.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    root = folder.parent.parent
+    hq.main(['begin', _SLUG])
+    (root / 'src').mkdir()
+    (root / 'src' / 'app.md').write_text('# App\n\n## Part\n\nbody\n')
+    assert hq.main([
+        'stamp', _SLUG, str(root / 'src' / 'app.md'), '--kind', 'spec',
+        '--where', 'Part']) == 0
+    assert hq.main(['finish', _SLUG, '--log', 'c1']) == 0
+    blocks = hq.split_handoff((folder / 'HANDOFF.md').read_text())['blocks']
+    assert blocks['read'].splitlines() == [
+        '## Read first',
+        f'root {root}',
+        'src/app.md:3-5  (3 tok)  -',
+        ]
+    art = blocks['artifacts'].splitlines()
+    assert art[:2] == ['## Artifacts', f'root {root}']
+    assert 'src/app.md  spec  always  c1  -' in art
+    assert art.count(f'root {root}') == 1
+
+
+def test_standing_by_id_prints_the_body_and_the_superseded_marker(
+        tmp_path, monkeypatch, capsys):
+    """hq standing <slug> <id> prints items in full; an unknown id exits 1.
+
+    Mutation: the successor read from the wrong side of the arrow, so
+    the marker names the old id; the marker dropped for a superseded
+    item; or an unknown id passing silently with exit 0.
+    Oracle: two decisions with d01 superseded by d02 in cycle 1; the
+    hand-written lines for d01 and d02 and the unknown-id line.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    hq.main(['begin', _SLUG])
+    hq.main(['note', _SLUG, 'decision', '--headline', 'Old way', 'Sidecar.'])
+    hq.main(['note', _SLUG, 'decision', '--headline', 'New way', 'In process.'])
+    hq.main(['supersede', _SLUG, 'd01', 'd02'])
+    capsys.readouterr()
+    assert hq.main(['standing', _SLUG, 'd01']) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        '[d01] (c1) **Old way** Sidecar. [superseded by d02 in c1]']
+    assert hq.main(['standing', _SLUG, 'd02', 'zz9']) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        f'hq standing: zz9 not in standing.md - hq standing {_SLUG} lists the ids',
+        '[d02] (c1) **New way** In process.',
+        ]

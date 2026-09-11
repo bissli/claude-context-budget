@@ -845,7 +845,7 @@ def test_do_stamp_kind_carried_from_prev_row(tmp_path, monkeypatch):
     folder = _root(tmp_path, monkeypatch)
     hq.main(['begin', _SLUG])
     (folder / 'doc.md').write_text('# Doc\n\nContent.\n')
-    hq.main(['stamp', _SLUG, 'doc.md', '--kind', 'spec'])
+    hq.main(['stamp', _SLUG, 'doc.md', '--kind', 'spec', '--where', 'Doc'])
     hq.main(['stamp', _SLUG, 'doc.md'])
     rows = _rows(folder)
     assert rows[-1]['kind'] == 'spec'

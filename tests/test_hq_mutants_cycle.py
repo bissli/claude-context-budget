@@ -1169,7 +1169,8 @@ def test_verb_finish_absent_gated_row_blocks(tmp_path, monkeypatch):
     assert rc0 == 0
     # Create and stamp a file as always-read.
     (folder / 'guide.md').write_text('# Guide\n', encoding='utf-8')
-    rc1, _, _ = _run(['stamp', _SLUG, 'guide.md', '--read-before', 'always'])
+    rc1, _, _ = _run(['stamp', _SLUG, 'guide.md', '--read-before', 'always',
+                       '--where', 'Guide'])
     assert rc1 == 0
     # Delete the file before finish.
     (folder / 'guide.md').unlink()
@@ -1588,7 +1589,8 @@ def test_verb_finish_collision_spec_detected(tmp_path, monkeypatch):
     # Create a spec file with a distinctive heading (DESIGN* matches _SPEC_PATS).
     spec = folder / 'DESIGN-alpha.md'
     spec.write_text('# Design\n\n## ZetaPipeline overview\n', encoding='utf-8')
-    rc1, _, _ = _run(['stamp', _SLUG, 'DESIGN-alpha.md', '--read-before', 'always'])
+    rc1, _, _ = _run(['stamp', _SLUG, 'DESIGN-alpha.md', '--read-before', 'always',
+                       '--where', 'Design'])
     assert rc1 == 0
     # Edit HANDOFF to mention the term in the Now section.
     hf = folder / 'HANDOFF.md'
@@ -1619,7 +1621,8 @@ def test_verb_finish_walk_continue_not_break(tmp_path, monkeypatch):
         '# Spec: AlphaEngine\n\n## AlphaEngine overview\n', encoding='utf-8')
     rc1, _, _ = _run(['stamp', _SLUG, 'aaa.md', '--read-before', 'mention'])
     # Spec files require --read-before always.
-    rc2, _, _ = _run(['stamp', _SLUG, 'bbb.md', '--read-before', 'always'])
+    rc2, _, _ = _run(['stamp', _SLUG, 'bbb.md', '--read-before', 'always',
+                       '--where', 'Spec: AlphaEngine'])
     assert rc1 == 0
     assert rc2 == 0
     hf = folder / 'HANDOFF.md'

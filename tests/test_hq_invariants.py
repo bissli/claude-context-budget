@@ -57,12 +57,13 @@ def _rows(folder):
 
 
 def _covered(folder, live, path):
-    """A gated path keeps its obligation, names a successor on disk, or is
-    archived with a reason; a successor's own state is the dangling-link
-    check's business.
+    """A gated path keeps its tier - a spec always, a draft edit or always -
+    names a successor on disk, or is archived with a reason; a successor's
+    own state is the dangling-link check's business.
     """
     row = live.get(path)
-    if row is None or row['status'] == 'live' and row['read_before'] == 'always':
+    tiers = {'always'} if _gate_kind(folder, live, path) == 'spec' else {'edit', 'always'}
+    if row is None or row['status'] == 'live' and row['read_before'] in tiers:
         return True
     if row['status'] == 'archived' and row['reason'] not in {'-', ''}:
         return True
@@ -77,7 +78,7 @@ def _gate_kind(folder, live, path):
                         if ln.startswith('#')), '')
     inferred, _ = hq.infer_kind(path, p.is_dir(), heading)
     stored = live.get(path, {}).get('kind', '')
-    return inferred in _GATED or stored in _GATED
+    return next((k for k in (inferred, stored) if k in _GATED), '')
 
 
 def _check_stamp(folder, before, path, argv, rc, ctx=None):
@@ -136,7 +137,7 @@ def test_every_flag_combination_on_a_fresh_spec_is_covered_or_refused(
     count = 0
     for rb, status, kind, successor, archive, reason, defer in grid:
         (folder / 'ledger.tsv').write_text(header)
-        argv = ['stamp', _SLUG, 'SPEC.md']
+        argv = ['stamp', _SLUG, 'SPEC.md', '--where', 's1']
         for flag, value in (('--read-before', rb), ('--status', status),
                             ('--kind', kind), ('--successor', successor),
                             ('--reason', reason)):
@@ -163,7 +164,7 @@ def test_every_flag_combination_on_a_stamped_spec_is_covered_or_refused(
     hq.main(['begin', _SLUG])
     header = (folder / 'ledger.tsv').read_text()
     priors = {
-        'gated': ['stamp', _SLUG, 'SPEC.md', '--reason', 'wip'],
+        'gated': ['stamp', _SLUG, 'SPEC.md', '--where', 'Spec', '--reason', 'wip'],
         'superseded': ['stamp', _SLUG, 'SPEC.md', '--successor', 'NEXT.md'],
         'archived': ['stamp', _SLUG, 'SPEC.md', '--archive', '--reason', 'old'],
         'edit-with-successor': [
@@ -243,6 +244,8 @@ def test_random_verb_sequences_hold_the_ledger_invariants(tmp_path, monkeypatch)
                     argv += ['--defer']
                 if rng.random() < 0.3:
                     argv += ['--label', f'l{rng.randint(1, 99)}']
+                if rng.random() < 0.3:
+                    argv += ['--where', 's1']
                 rc, _ = _run(argv)
                 _check_stamp(folder, rows_before, path, argv, rc, where)
             elif roll < 0.6:

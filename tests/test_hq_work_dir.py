@@ -368,10 +368,12 @@ def test_a_kind_folder_sets_the_kind_and_the_walk_lists_its_files(
     assert '\n  unstamped snapshot x1: specs/old.bak' in work_list
     assert '\n  unstamped probe-dir x2: probes, drafts/deep - stamp each' in work_list
 
+    anchors = {'specs/auth.md': ['--where', 'Auth'],
+               'specs/HANDOFF-old.md': ['--where', 'Old']}
     for token in ('specs/auth.md', 'specs/HANDOFF-old.md', 'drafts/x.py',
                   'notes/quirks.md', 'outputs/SPEC-chart.md', 'specs/old.bak',
                   'probes/p.py', 'drafts/deep/z.py'):
-        assert hq.main(['stamp', _SLUG, token]) == 0, token
+        assert hq.main(['stamp', _SLUG, token] + anchors.get(token, [])) == 0, token
     capsys.readouterr()
     assert hq.main(['stamp', _SLUG, 'specs']) == 2
     assert capsys.readouterr().out.startswith('hq stamp: specs is a kind folder - ')
@@ -381,7 +383,7 @@ def test_a_kind_folder_sets_the_kind_and_the_walk_lists_its_files(
     assert kinds == {
         'specs/auth.md': ('spec', 'always'),
         'specs/HANDOFF-old.md': ('spec', 'always'),
-        'drafts/x.py': ('draft', 'always'),
+        'drafts/x.py': ('draft', 'edit'),
         'notes/quirks.md': ('notes', 'never'),
         'outputs/SPEC-chart.md': ('other', 'never'),
         'specs/old.bak': ('snapshot', 'never'),
@@ -451,10 +453,11 @@ def test_finish_names_a_made_file_first_stamped_this_cycle_against_the_work_dir(
     (root / 'working' / 'w.py').write_text('w = 1\n')
     assert hq.main(['begin', _SLUG]) == 0
     assert hq.main(['work-dir', _SLUG, 'working']) == 0
+    anchors = {'SPEC-old.md': ['--where', 'Spec'], 'specs/in.md': ['--where', 'In']}
     for token in ('SPEC-old.md', 'proto.py', 'notes-a.md', 'probes',
                   'outputs/table.csv', 'notes/quirks.md', 'reviews/skeptic.md',
                   'specs/in.md', 'drafts/d.py'):
-        assert hq.main(['stamp', _SLUG, token]) == 0, token
+        assert hq.main(['stamp', _SLUG, token] + anchors.get(token, [])) == 0, token
     assert hq.main([
         'stamp', _SLUG, str(root / 'working' / 'w.py'), '--kind', 'draft']) == 0
     _cursor(folder)
@@ -465,7 +468,9 @@ def test_finish_names_a_made_file_first_stamped_this_cycle_against_the_work_dir(
             ' outputs/table.csv, specs/in.md, drafts/d.py'
             ' - move each to working, or under notes/ when it is evidence,'
             " then re-stamp with --successor and the file's ~ or absolute path") in out
-    assert f'{root}/working/w.py  draft  always' in (folder / 'HANDOFF.md').read_text()
+    rendered = (folder / 'HANDOFF.md').read_text()
+    assert f'\nwork dir {root}/working\n' in rendered
+    assert '\nw.py  draft  edit  c1  -\n' in rendered
 
     monkeypatch.setenv('HQ_CYCLE', '2')
     assert hq.main(['work-dir', _SLUG, '--clear']) == 0
@@ -474,8 +479,8 @@ def test_finish_names_a_made_file_first_stamped_this_cycle_against_the_work_dir(
     (folder / 'experiments').mkdir()
     assert hq.main(['begin', _SLUG]) == 0
     assert hq.main(['stamp', _SLUG, 'SPEC-old.md', '--label', 'old, re-stamped']) == 0
-    assert hq.main(['stamp', _SLUG, 'SPEC-new.md']) == 0
-    assert hq.main(['stamp', _SLUG, 'specs/inside.md']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC-new.md', '--where', 'Spec']) == 0
+    assert hq.main(['stamp', _SLUG, 'specs/inside.md', '--where', 'Inside']) == 0
     assert hq.main(['stamp', _SLUG, 'experiments']) == 0
     capsys.readouterr()
     assert hq.main(['finish', _SLUG, '--log', 'c2']) == 0

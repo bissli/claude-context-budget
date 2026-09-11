@@ -350,7 +350,7 @@ def test_unreadable_gated_artifact_is_not_a_moved_sha(
     _begin(_SLUG, folder)
     spec = folder / 'SPEC-x.md'
     spec.write_text('# Spec\n\nBody.\n', encoding='utf-8')
-    assert hq.main(['stamp', _SLUG, 'SPEC-x.md']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC-x.md', '--where', 'Spec']) == 0
     spec.chmod(0o000)
     try:
         hq.main(['open', _SLUG])

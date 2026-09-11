@@ -229,24 +229,31 @@ Rows are dictated through `hq stamp`, `hq note`, and `hq supersede`;
 `stamp` and `note` also take `--batch`, one row per stdin line, the
 same arguments minus the slug.
 
-`stamp` infers kind and `read_before` from the place, then the name
-(`hq help kinds` has the table): a file one level under `specs/`,
-`drafts/`, `notes/`, or `outputs/` takes the folder's kind; at the top
-level `SPEC*`, `DESIGN*`, `PROPOSAL*`, `*-DECLARATION*`, and a file
-whose first heading starts `Spec` or `Design` are spec, and a `*.py`,
-`*.sql`, `*.js`, `*.ts`, or `*.ps1` is draft, both gated `always`;
-everything else is `never`. Outside the folder only the draft rule
-lapses: a `SPEC*` name or a Spec/Design heading still infers spec, and
-anything else infers `other` - pass `--kind spec` or `--kind draft` to
-gate it. Of several `SPEC*` stem-mates only the newest is gated.
+`read_before` is a tier, and `stamp` seeds it from the kind (`hq help
+kinds` has the table): a spec seeds `always`, a draft `edit`, all else
+`never`; `--kind spec` or `--kind draft` gates an outside file. Of
+several `SPEC*` stem-mates only the newest is gated.
+
+| tier | read | when |
+| --- | --- | --- |
+| `always` | the contract | every resume |
+| `edit` | before you change it | the gate, at a write to it |
+| `mention` | on demand | `hq read` |
+| `never` | on the record | `hq artifacts`, `hq when` |
+
+`always` requires an anchor: a stamp that would leave a live `always`
+row with no `--where` is refused and the file's headings print under
+the refusal; a spec needed whole is anchored at its title heading. A
+whole file is never eager: a note or a source file the cursor points
+at is `edit` or `mention`.
 
 Rules the script enforces (`hq help rules` has them in full):
 
-- R1 A spec or draft row - inferred, stored, or by `--kind` - may not
-  lower `read_before` from `always`, leave `live`, or change kind,
+- R1 A spec row keeps `always` and a draft row `edit` or `always` -
+  inferred, stored, or by `--kind`; both keep `live` and their kind,
   unless `--successor` names a live file on disk other than itself, or
   `--archive --reason` is given. A path that has ever been spec or
-  draft stays gated: its only way back to `live` is `always`.
+  draft stays gated: its way back to `live` is that tier.
 - R2 A refused stamp still appends a receipt row, `reason` set to
   `refused: <why>`; the attempt is in the record and clears nothing.
 - R3 A live row graded always or edit whose file sha moved blocks
@@ -266,8 +273,6 @@ hq stamp <slug> notes/idp-quirks.md \
   --read-before edit --label "staging IdP quirks, found the hard way"
 hq stamp <slug> specs/SPEC.md \
   --successor specs/SPEC-v2.md
-hq stamp <slug> drafts/DRAFT.py \
-  --archive --reason "abandoned for the sidecar approach"
 hq stamp <slug> --batch <<'ROWS'
 specs/SPEC.md --where "3. Retry" --label "the contract"
 notes/idp-quirks.md --read-before edit --label "staging IdP quirks"
@@ -372,7 +377,8 @@ Run these steps in order:
    what to check. Then it drains Unfiled, renders the blocks, writes
    the header and Log, archives the file to `cycles/cNN.md`, releases
    the lock, and prints `<path>  N cursor lines  N tokens (cursor a,
-   read b, artifacts c, standing d)` and `resume: /handoff <slug>`. A
+   read b, artifacts c, standing d)`, a `read first:` size line, and
+   `resume: /handoff <slug>`. A
    `<path>:?` in the rendered read block does not block, but the anchor
    is unresolved: re-stamp with a `--where` that resolves.
 
@@ -380,13 +386,8 @@ One whole cycle on the example thread, in order:
 
 ```
 hq begin auth-token-refresh
-hq note auth-token-refresh decision \
-  --headline "Refresh in-process, no sidecar" "One caller; latency is fine."
 hq stamp auth-token-refresh specs/SPEC.md \
   --where "3. Retry" --label "refresh contract; s3 is the retry schedule"
-hq stamp auth-token-refresh ~/code/poller/scripts/auth.py \
-  --kind draft --label "poller; the 401 branch is under edit"
-# rewrite the cursor; spawn the skeptic; apply what survives
 hq finish auth-token-refresh \
   --log "token store and refresh endpoint written"
 ```
@@ -435,14 +436,15 @@ Resume: kill this session, start a fresh one, run
    `git log` to run; a moved sha, an unresolved anchor, or a moved span
    says what to read instead; a `stale folder path` waits for the next
    write.
-3. Read `HANDOFF.md`. Then, for each line of the `## Read first` block,
-   run `hq read <slug> <path>`: it prints the resolved span (or the
-   whole file when the row has no anchor) and records the read; a line
-   printed instead names its move. Then read every todo file the Plan
-   points at. A conforming target with no `ledger.tsv` has no blocks
-   yet: follow its `## Key files` `Read now:` pointers by hand. A
-   target with no conforming header names its own reading order -
-   follow it. Read nothing else.
+3. Read `HANDOFF.md`. Then run `hq read <slug> <path>` on every
+   `## Read first` line that shows a span: it prints the span and
+   records the read; a line printed instead names its move. A
+   whole-file row, an older cycle's, is read when the Now step names
+   its file or the gate names it at a write, never before. Then read
+   every todo file the Plan points at. A conforming
+   target with no `ledger.tsv` has no blocks yet: follow its `## Key
+   files` `Read now:` pointers by hand. A target with no conforming
+   header names its own reading order - follow it. Read nothing else.
 4. Drift check: the header says dirty - run `git status --porcelain`
    and note what is still uncommitted. No sha in the header (written
    outside a repo) or no conforming header - skip the git steps. A
@@ -455,17 +457,21 @@ Resume: kill this session, start a fresh one, run
    follows.
 6. A later bare `/handoff` targets this handoff - write rule 2.
 
-In the generated blocks, `Read first` has one line per live
-`read_before=always` row: `specs/SPEC.md:11-13` is where its anchor
-resolves today, `(N lines)` means no anchor and the whole file is the
-read, `specs/SPEC.md:?` means the anchor matches no heading - read the
-whole file, re-stamp with a `--where` that resolves, re-run `hq open`.
-`Artifacts` prints rows graded always, edit, or mention in full and
-`path spec? unstamped` for a file with no row; the rest collapse to
-counts, and a counted line ends in the command that expands it - `- hq
-artifacts <slug>`, `- hq when <slug> <path>` - run it. `Standing` ids
-are `d` decision, `c` constraint, `x` dead end; a cut ends in `- hq
-standing <slug>`. In `Log`, `+1` counts dirty paths.
+In the generated blocks, `Read first` has one line per live `always`
+row with the size of what `hq read` prints: `specs/SPEC.md:11-13  (320
+tok)` is where its anchor resolves today, `(N lines, T tok)` a whole
+file an older cycle left, `specs/SPEC.md:?` an anchor matching no
+heading - read the whole file, re-stamp with a
+`--where` that resolves, re-run `hq open`. `Artifacts` prints rows
+graded always, edit, or mention in full and `path spec? unstamped` for
+a file with no row; `never` rows collapse to counts, and a counted
+line ends in the command that expands it - `- hq artifacts <slug>`,
+`- hq when <slug> <path>`, `- hq standing <slug>` - run it. A path
+under the root or the pinned work dir prints relative to it; the
+block's first line names the base. `Standing` ids are `d`
+decision, `c` constraint, `x` dead end, a decision or dead end by its
+headline; `hq standing <slug> <id>` prints the body. In `Log`, `+1`
+counts dirty paths.
 
 ## check
 
@@ -484,8 +490,8 @@ target with no conforming header runs the adoption pass and stops.
 `<slug>  <Written date>  c<N>  <done>/<total>  <Task line>`; `list 5`
 caps it at five. Show the user the lines unchanged. `<done>/<total>`
 counts `- [x]` over the checkbox items under `## Plan`, `-` when there
-are none; it tells a live thread from a finished one - `7/7` is done,
-`0/5` never started - where the cycle count says neither.
+are none; it tells a live thread from a finished one where the cycle
+count says neither.
 
 ## when, diff, artifacts, standing
 
@@ -495,7 +501,8 @@ the path, oldest first. `hq diff <slug> <c1> <c2>`: the cursor lines
 that changed between two finished cycles; no output means none.
 `hq artifacts <slug>`: every live row, uncapped, plus unstamped files.
 `hq standing <slug>`: every unsuperseded item in full; `--all` adds
-the superseded ones.
+the superseded ones; `<id> [<id> ...]` prints the named items, a
+superseded one with its successor.
 
 ## The hooks
 
@@ -515,14 +522,13 @@ files it.
 ## Adoption
 
 `hq adopt <slug>` changes nothing, prints the heading inventory, and
-names `reference/adoption.md` beside this file: the conversion that
-converges the form and destroys no content. Follow it, then continue
-at write path step 1; `begin` runs `adopt` and opens cycle 2.
+names `reference/adoption.md` beside this file. Follow it, then
+continue at write path step 1; `begin` runs `adopt` and opens cycle 2.
 
 ## Where the rest lives
 
 `reference/adoption.md` and `reference/example-handoff.md` sit beside
 this file. `hq help anchors`: every `--where` form. `hq help kinds`:
-the kind table, ledger fields, flag values. `hq help rules`: R1 to W2
+kinds, tiers, ledger fields, flag values. `hq help rules`: R1 to W2
 in full. `hq help stale-path`: fixing a folder path under a former
-directory. `hq <verb> --help`: each verb's columns and caps.
+directory. `hq <verb> --help`: each verb's columns.
