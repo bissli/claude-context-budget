@@ -192,9 +192,10 @@ session chose.)
   constraints, and dead ends in `standing.md`, append-only; and every
   finished cycle verbatim under `cycles/`. A small script, `hq.py`,
   which the plugin puts on the agent's PATH as `hq` while it is
-  enabled, writes the ledger, renders the generated blocks of `HANDOFF.md` from
-  it, and refuses the two edits that lose work over many cycles:
-  lowering a spec's read obligation without naming its successor, and
+  enabled, writes the ledger, renders the generated blocks of
+  `HANDOFF.md` from it, and refuses the three edits that lose work over
+  many cycles: lowering a spec's or a draft's tier without naming its
+  successor, grading a whole file as the contract with no anchor, and
   rewriting a recorded line in place. What the thread made sits in the
   thread folder under `specs/`, `drafts/`, `notes/`, or `outputs/`,
   never loose at its top level, and the ledger points at it. A thread
@@ -206,26 +207,46 @@ session chose.)
   rewritten, the plan ticked off, decisions and dead ends appended,
   the previous cycle archived. The read-time payload stays flat - a
   hundred cycles in, the file is the size it was at cycle three -
-  because what is no longer live is counted, not printed.
+  because what is no longer live is counted, not printed, and what is
+  read at resume is a spec's anchored span, its size beside it, never
+  a whole file.
 - Each write ends with a reviewer pass that must reconstruct the task
   from the file alone. Reading starts with `hq open`, which reports
   drift - a moved commit, a gated file edited since its stamp, a
   heading an anchor no longer finds - then reads the spans the ledger
   gates and executes the file's next step without re-litigating
   settled decisions.
-- Two advisory hooks back it. On the first write after a handoff is
-  opened, a PreToolUse hook names each gated file the session has not
-  read, once per session. At the end of a turn, a Stop hook says so when
-  `HANDOFF.md` was written by hand since its last recorded cycle.
-  Neither blocks; `HQ_GATE=0` in the environment turns the first off,
-  and `HQ_GATE_DENY=1` makes it deny the write instead of reporting.
+- Two advisory hooks back it. Once a handoff is opened, at a write in
+  reach - under the project root or the thread's pinned work dir - a
+  PreToolUse hook names each gated file the session has not read: a
+  spec's span at the first such write, a draft at a write to that
+  file, each path once. A read is the Read tool, the path as an
+  argument of the `cat`, `head`, `tail`, `less`, or `sed -n` that
+  names it, or an `hq read` receipt. At the end of a turn, a Stop hook
+  says so when `HANDOFF.md` was written by hand since its last
+  recorded cycle. Neither blocks; `HQ_GATE=0` in the environment turns
+  the first off, and `HQ_GATE_DENY=1` makes it deny the write instead
+  of reporting.
 - Every line `hq` prints that calls for a move names it, and
   `hq help <topic>` (anchors, kinds, rules, stale-path) and
   `hq <verb> --help` carry the reference detail the skill file points
   at, so the skill stays short enough to survive a compaction whole.
 - `/handoff when`, `diff`, `artifacts`, and `standing` query the
-  ledger: one path's history, the cursor lines that changed between
-  two cycles, every live artifact, every standing item.
+  ledger: one path's history by any spelling of the path, the cursor
+  change between two cycles by section, every live artifact, every
+  standing item or one item in full by its id.
+
+Every artifact the ledger records carries a tier, `read_before`, that
+says when a session loads it. A spec is the contract and seeds
+`always`; a draft seeds `edit`; a note or an output is graded by the
+writing session when the cursor points at it.
+
+| tier      | means                     | loaded when                    |
+| --------- | ------------------------- | ------------------------------ |
+| `always`  | the contract              | every resume, an anchored span |
+| `edit`    | read before you change it | the gate, at a write to it     |
+| `mention` | know it exists            | on demand, `hq read`           |
+| `never`   | on the record             | `hq artifacts`, `hq when`      |
 
 `.handoff/` belongs in the project's gitignore when handoffs should stay
 untracked. Versions before 0.3.0 wrote to `working/`, and before 0.2.2

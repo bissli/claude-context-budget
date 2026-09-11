@@ -122,12 +122,13 @@ s<n> for the heading numbered <n>.
   Title') is named by that id - F65, f65, or sF65 - and F7 never
   lands on '## 7. Seven'; a longer word such as 'Log4j:' is title
   text.
-- In the rendered read block, SPEC.md:11-13 is where the anchor
-  resolves today; (N lines) means the row has no anchor and the whole
-  file is the read; SPEC.md:? means the anchor matches no heading -
-  read the whole file, then re-stamp with a --where that resolves
-  and re-run hq open. A ? that survives means the anchor is still
-  wrong.""",
+- In the rendered read block, SPEC.md:11-13  (320 tok) is where the
+  anchor resolves today and what the span costs; a row with no
+  anchor, which only an older cycle can leave, shows (N lines, T tok)
+  and the whole file is the read; SPEC.md:? means the anchor matches
+  no heading - read the whole file, then re-stamp with a --where that
+  resolves and re-run hq open. A ? that survives means the anchor is
+  still wrong.""",
     'kinds': """\
 hq help kinds - how stamp infers kind and read_before
 
