@@ -1045,6 +1045,8 @@ def conservation(
       reported as missing.
     - The header line, wherever ``Written: ... | Cycle: N`` sits on it,
       is the script's, and never reported.
+    - A checkbox after the bullet marker (``[ ]``, ``[x]``) is structure:
+      a Plan item ticked done still counts as carried.
     """
     _standing_prefix = re.compile(r'^- \[[dcx]\d+\] \(c\d+\) ')
     _kf_grade = re.compile(r'^(read now|reference only)\s*:\s*', re.IGNORECASE)
@@ -1066,6 +1068,8 @@ def conservation(
         s = _standing_prefix.sub('- ', s)
         s = re.sub(r'^#+\s*', '', s)
         s = re.sub(r'^[-*+]\s+', '', s)
+        # A ticked box is the same item: the checkbox is structure.
+        s = re.sub(r'^\[[ xX]\]\s*', '', s)
         s = re.sub(r'^\d+[.)]\s+', '', s)
         s = re.sub(r'^unfiled:\s+', '', s)
         s = s.replace('**', '').replace('`', '')
@@ -1149,6 +1153,46 @@ def conservation(
             continue
         result.append(ln)
     return result
+
+
+def sibling_texts(folder: pathlib.Path, live: dict[str, Row]) -> list[str]:
+    """Return the text of every live notes or edit-graded sibling on disk.
+
+    Parameters
+    ----------
+    folder : pathlib.Path
+        Handoff folder the folder-relative rows resolve against.
+    live : dict[str, Row]
+        Live ledger rows keyed by path.
+
+    Returns
+    -------
+    list[str]
+        File contents, in ``live`` order, of each row whose status is
+        ``live`` and whose kind is ``notes`` or whose read obligation is
+        ``edit``; a row whose file is absent or unreadable is skipped.
+
+    Notes
+    -----
+    - The skill rehomes what fits nowhere into a sibling stamped notes
+      or edit, so a conservation check counts those files as carrying
+      the lines moved into them.
+    """
+    texts: list[str] = []
+    for row in live.values():
+        if row['status'] != 'live' or (
+                row['kind'] != 'notes' and row['read_before'] != 'edit'):
+            continue
+        sibling = (
+            pathlib.Path(row['path']).expanduser() if row['base'] == 'abs'
+            else folder / row['path'])
+        if not sibling.is_file():
+            continue
+        try:
+            texts.append(sibling.read_text(encoding='utf-8', errors='replace'))
+        except OSError:
+            continue
+    return texts
 
 
 def split_handoff(text: str) -> dict:
@@ -2817,28 +2861,11 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         print('conservation: every original line carried')
     orig_path = folder / 'HANDOFF.orig.md'
     if orig_path.is_file():
-        # The skill rehomes what fits nowhere into a sibling stamped
-        # notes or edit, so the hand rewrite is measured against those
-        # files as well.
-        sibling_texts: list[str] = []
-        for row in fresh_live.values():
-            if row['status'] != 'live' or (
-                    row['kind'] != 'notes' and row['read_before'] != 'edit'):
-                continue
-            sibling = (
-                pathlib.Path(row['path']).expanduser() if row['base'] == 'abs'
-                else folder / row['path'])
-            if not sibling.is_file():
-                continue
-            try:
-                sibling_texts.append(
-                    sibling.read_text(encoding='utf-8', errors='replace'))
-            except OSError:
-                continue
         orig_missing = conservation(
             orig_path.read_text(encoding='utf-8-sig', errors='replace'),
             union_cursor, union_standing,
-            seeded_labels + witnessed + legacy_log + header_tail + sibling_texts)
+            seeded_labels + witnessed + legacy_log + header_tail
+            + sibling_texts(folder, fresh_live))
         if orig_missing:
             print(f'conservation vs HANDOFF.orig.md: {len(orig_missing)} lines not carried')
             for line in orig_missing:
@@ -3811,6 +3838,34 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
             return 1
         new_note_lines.append(line)
         standing_text_new += line + '\n'
+    # --- Advisory: cursor lines not carried ---
+    # Notes:
+    # - The cursor is rewritten every cycle, so the previous archive is
+    #   the one record of what it held; a line that neither the new
+    #   cursor, standing.md, a live label, nor a rehome sibling carries
+    #   is named here, and the agent settles whether it was done or lost.
+    # - A cursor heading carries no fact, so a section omitted as empty
+    #   is not reported by its heading.
+    if manifest:
+        prev_cycle = int(manifest[-1]['cycle'])
+        prev_archive = folder / 'cycles' / f'c{prev_cycle:02d}.md'
+        if prev_archive.is_file():
+            prev_cursor = split_handoff(
+                prev_archive.read_text(encoding='utf-8', errors='replace'))['cursor']
+            live_labels = [
+                row['label'] for row in live.values()
+                if row['status'] == 'live' and row.get('label', '-') != '-']
+            dropped_lines = [
+                ln for ln in conservation(
+                    prev_cursor, cursor_clean, standing_text_new,
+                    live_labels + sibling_texts(folder, live))
+                if not ln.lstrip().startswith('#')]
+            if dropped_lines:
+                print(
+                    f'advisory: {len(dropped_lines)} cursor lines from'
+                    f' c{prev_cycle:02d} not carried')
+                for dropped in dropped_lines:
+                    print(f'  not carried: {dropped.strip()}')
     log_text = ' '.join((getattr(argv, 'log', '') or '').split())
     branch, sha7, dirty = anch['branch'], anch['sha'], anch['dirty']
     if branch != '-':
@@ -4293,7 +4348,7 @@ def _verb_list(root: pathlib.Path, argv: argparse.Namespace) -> int:
         rows.append((path.parent.name, written, cycle, progress, task))
     headers = ('SLUG', 'WRITTEN', 'CYCLE', 'PROGRESS')
     col_widths = [
-        max(max(len(row[i]) for row in rows), len(headers[i]))
+        max(*(len(row[i]) for row in rows), len(headers[i]))
         for i in range(4)
         ]
     header_line = (

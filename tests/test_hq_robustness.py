@@ -410,4 +410,4 @@ def test_root_resolves_to_the_ancestor_holding_the_handoff_dir(
         assert hq.main(['open', _SLUG]) == 0, f'open failed from {cwd}'
         capsys.readouterr()
         assert hq.main(['list']) == 0
-        assert capsys.readouterr().out.startswith(f'{_SLUG}  ')
+        assert capsys.readouterr().out.splitlines()[2].startswith(f'{_SLUG}  ')

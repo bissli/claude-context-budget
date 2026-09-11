@@ -226,12 +226,12 @@ def test_every_reviewer_seat_names_the_host_tier_before_a_literal_model():
     Mutation: a seat's host-tier clause dropped, so a host whose agent
     rules pin tiers leaves the agent with one literal type or model and
     no alternative it may use.
-    Oracle: the skill's Skeptic and Rewrite bullets - each carries the
-    word 'host' before its literal `model` name.
+    Oracle: the skill's Skeptic bullet - it carries the word 'host'
+    before its literal `model` name.
     """
     text = ' '.join(SKILL.read_text().split())
-    seats = re.findall(r'- (Skeptic|Rewrite) \((.*?)\)', text)
-    assert [name for name, _ in seats] == ['Skeptic', 'Rewrite'], seats
+    seats = re.findall(r'- (Skeptic) \((.*?)\)', text)
+    assert [name for name, _ in seats] == ['Skeptic'], seats
     for name, seat in seats:
         assert 'host' in seat and 'model `' in seat, (name, seat)
         assert seat.index('host') < seat.index('model `'), (name, seat)

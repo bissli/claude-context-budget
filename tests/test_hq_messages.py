@@ -481,7 +481,7 @@ def test_the_example_file_in_the_skill_is_the_scripts_own_output(
 
 def test_finish_advises_when_the_artifacts_block_is_over_its_cap(
         tmp_path, monkeypatch):
-    """finish names the rows the 40-line Artifacts cap folds into the counts.
+    """Finish names the rows the 40-line Artifacts cap folds into the counts.
 
     Mutation: the advisory computed off the capped list rather than the
     full one, so it never fires; or the cap read differently in finish
@@ -511,8 +511,53 @@ def test_finish_advises_when_the_artifacts_block_is_over_its_cap(
     assert sum('  other  mention  ' in ln for ln in block.splitlines()) == 40
 
 
+def test_finish_names_each_previous_cursor_line_nothing_now_carries(
+        tmp_path, monkeypatch):
+    """Finish lists the cycle-1 cursor lines that cycle 2 neither kept,
+    ticked, drained to standing.md, nor rehomed to a stamped sibling.
+
+    Mutation: the union built from the new cursor alone, so the drained
+    Plan item or the rehomed State line is reported; the checkbox kept in
+    the comparison, so the ticked item is reported; the omitted State
+    heading reported as a line; or the advisory silent.
+    Oracle: hand-built cursors - of the six cycle-1 lines exactly two
+    leave with no home, the old Now step and one State line; cycle 1
+    prints no advisory since no archive precedes it.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    _run(['begin', _SLUG])
+    handoff = folder / 'HANDOFF.md'
+    header = handoff.read_text()
+    header = header[:header.index('\n## ') + 1]
+    handoff.write_text(
+        header + '## Task\nRefresh the poller token.\n\n'
+        '## Now\nWire refresh_token() into the 401 branch.\n\n'
+        '## Plan\n- [ ] Pick the retry ceiling\n- [ ] Name the backoff cap\n\n'
+        '## State\n- Verified: refresh round-trips against staging.\n'
+        '- Unverified: retry backoff never exercised.\n')
+    rc, out, _ = _run(['finish', _SLUG, '--log', 'one'])
+    assert rc == 0
+    assert 'not carried' not in out
+    _run(['begin', _SLUG])
+    (folder / 'notes-state.md').write_text(
+        '# State notes\n\n- Unverified: retry backoff never exercised.\n')
+    assert _run(['stamp', _SLUG, 'notes-state.md', '--label', 'state moved'])[0] == 0
+    handoff.write_text(
+        header + '## Task\nRefresh the poller token.\n\n'
+        '## Now\nRun the integration test against staging.\n\n'
+        '## Plan\n- [x] Pick the retry ceiling\n\n'
+        '## Unfiled\n- decision: **Name the backoff cap** 60 s.\n')
+    rc, out, _ = _run(['finish', _SLUG, '--log', 'two'])
+    assert rc == 0
+    lines = out.splitlines()
+    assert 'advisory: 2 cursor lines from c01 not carried' in lines
+    assert '  not carried: Wire refresh_token() into the 401 branch.' in lines
+    assert '  not carried: - Verified: refresh round-trips against staging.' in lines
+    assert sum(ln.startswith('  not carried:') for ln in lines) == 2
+
+
 def test_supersede_prints_the_item_it_drops_from_the_block(tmp_path, monkeypatch):
-    """supersede echoes the superseded item's stored line as it leaves.
+    """Supersede echoes the superseded item's stored line as it leaves.
 
     Mutation: the echo dropped, the new id's item echoed instead of the
     old one, or the headline echoed without the body a decision never
@@ -529,14 +574,14 @@ def test_supersede_prints_the_item_it_drops_from_the_block(tmp_path, monkeypatch
     rc, out, _ = _run(['supersede', _SLUG, 'd01', 'd02'])
     assert rc == 0
     assert out.splitlines() == [
-        'dropped from the block: [d01] (c1) **Ship order fixed**'
-        ' Release the parser first. The crew owns retention.']
+        ('dropped from the block: [d01] (c1) **Ship order fixed**'
+         ' Release the parser first. The crew owns retention.')]
     stored = (folder / 'standing.md').read_text().splitlines()[0]
     assert out.split(': ', 1)[1].rstrip('\n') == stored[2:]
 
 
 def test_open_names_a_folder_path_under_another_directory(tmp_path, monkeypatch):
-    """open names cursor and standing text placing the folder under an old dir.
+    """Open names cursor and standing text placing the folder under an old dir.
 
     Mutation: HANDOFF.md scanned and not standing.md, the scan widened to
     any directory so a source tree named after the slug reports as a

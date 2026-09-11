@@ -300,11 +300,13 @@ Rules:
   answered, however old.
 - An item recorded with `note` or under `## Unfiled` is not repeated
   in State: the Standing block carries it.
-- Under 120 hand-written cursor lines fits most sessions; 200 is the
-  ceiling. `finish` counts the cursor it writes back, `## Task` through
-  the last cursor section, blank lines included and `## Unfiled` already
-  drained, and prints the count. The generated blocks do not count - the
-  script bounds them.
+- No line ceiling binds the cursor: it carries every unsettled line.
+  What a resuming reader does not need first moves whole to a sibling
+  by the rule above - moved, never cut. Rewording to reach a count
+  drops facts and barely moves it. `finish` counts the cursor it
+  writes back, `## Task` through the last cursor section, blank lines
+  included and `## Unfiled` already drained, and prints the count. The
+  generated blocks do not count - the script bounds them.
 
 ### The artifact ledger
 
@@ -612,10 +614,9 @@ Run these steps in order:
    carrying forward every line this session did not settle. Leave the
    header line and everything below the marker alone. Anything
    settled with no `note` call goes under `## Unfiled`.
-5. Run the Reviewer pass (below): the skeptic seat, and past 160
-   cursor lines the rewrite seat. Each surviving finding becomes a
-   `note`, a `stamp`, or a cursor edit in this cycle; return to step 2
-   for it, then continue.
+5. Run the Reviewer pass (below): the skeptic seat. Each surviving
+   finding becomes a `note`, a `stamp`, or a cursor edit in this
+   cycle; return to step 2 for it, then continue.
 6. `hq finish <slug> --log "<one line for the Log>"`. It checks, in
    order, and exits 1 having written nothing on the first class that
    fires:
@@ -661,7 +662,14 @@ Run these steps in order:
    and `s<n>` reference the old one carried; otherwise ignore it - the
    line comes once, at this finish), `advisory: label dropped {...}:
    <path>` (one of those tokens is gone; put it back or accept the
-   loss), and
+   loss), `advisory: N cursor lines from c<NN> not carried` with one
+   `not carried: <line>` line under it per line (a line the previous
+   cycle's cursor held that neither the new cursor, `standing.md`, a
+   live label, nor a live notes or edit-graded sibling now carries;
+   a rewritten Now drops its old lines by design, and a Plan item
+   leaves when done or rehomed - confirm each line was settled or
+   moved, else carry it forward or rehome it; `hq diff <slug> <c1>
+   <c2>` shows the whole change), and
    `advisory: collides: <term> <- <where> "<text>"`, where `<where>` is
    `<file>:<line>` for a spec heading and a standing id such as `x01`
    for a dead-end headline: a term in the Now step also names a dead
@@ -737,10 +745,10 @@ Converge the form, destroy no content, in this order:
    State, Environment, Open questions - and keep every fact. A
    directive the file quotes - a reading order, a backup or worktree
    it says never to delete - becomes a `## Constraints` entry. What
-   fits nowhere, or would hold the cursor over the ceiling, moves whole
-   to a sibling `notes-<topic>.md`, stamped `--read-before edit` when
-   the cursor points at it - rehomed, never cut. Touch no sibling file
-   except to add.
+   fits nowhere, or that a resuming reader does not need first, moves
+   whole to a sibling `notes-<topic>.md`, stamped `--read-before edit`
+   when the cursor points at it - rehomed, never cut. Touch no sibling
+   file except to add.
 4. Continue at Write path step 1: `begin` sees the conforming header
    with no `ledger.tsv`, runs `adopt`, prints `hq begin: ran adopt on
    existing HANDOFF.md`, and opens cycle 2 - the hand-written file is
@@ -782,10 +790,10 @@ judgment lines listed in step 4.
 
 ### Reviewer pass
 
-With the file on disk, spawn the seats below before `finish`. The
-skeptic returns one numbered item per finding, `<n>. <finding>`;
-re-check each in the write session, apply what survives, and stop -
-never loop. A question it raises for the user goes under `## Open
+With the file on disk, spawn the skeptic below before `finish`. It
+returns one numbered item per finding, `<n>. <finding>`; re-check
+each in the write session, apply what survives, and stop - never
+loop. A question it raises for the user goes under `## Open
 questions`; do not stop for it.
 
 - Skeptic (always; Agent tool, at the reviewer tier the host's own
@@ -796,10 +804,6 @@ questions`; do not stop for it.
   report any point where the Now step contradicts it. For each todo
   file the Plan points at, verify that the Now step agrees with the
   corresponding live item in that file.
-- Rewrite (past 160 cursor lines, as `finish` counts them; Agent tool,
-  at the opus tier the host's own agent rules name, else model `opus`):
-  one agent rewrites the cursor for precision and returns it; apply it
-  before `finish`.
 
 ### Report
 
