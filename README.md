@@ -195,7 +195,12 @@ session chose.)
   enabled, writes the ledger, renders the generated blocks of `HANDOFF.md` from
   it, and refuses the two edits that lose work over many cycles:
   lowering a spec's read obligation without naming its successor, and
-  rewriting a recorded line in place.
+  rewriting a recorded line in place. What the thread made lives where
+  the project already keeps that kind of file - a spec beside its docs,
+  a prototype or experiment in the working directory `hq work-dir` pins
+  once - and the ledger points at it. What the project has no place for
+  sits in the thread folder under `notes/`, `specs/`, `drafts/`, or
+  `outputs/`, never loose at its top level.
 - Run again a session later, it updates the same folder: the cursor
   rewritten, the plan ticked off, decisions and dead ends appended,
   the previous cycle archived. The read-time payload stays flat - a

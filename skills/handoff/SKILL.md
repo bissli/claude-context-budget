@@ -27,9 +27,10 @@ The plugin puts `hq` on the agent's PATH. After a plugin update
 mid-session `hq` fails with `command not found`: run `/reload-plugins`,
 or until then call
 `~/.claude/plugins/cache/claude-handoff/claude-handoff/<version>/bin/hq`.
-Every verb but `list` and `help` takes the slug first. Exit 0 is done;
-1 is a refusal or a blocking finding, and nothing is written except
-that a refused `stamp` appends its receipt row; 2 is a usage error.
+Every verb but `list`, `work-dir`, and `help` takes the slug first.
+Exit 0 is done; 1 is a refusal or a blocking finding, and nothing is
+written except that a refused `stamp` appends its receipt row; 2 is a
+usage error.
 Every line that calls for a move names it: `<finding> - <what to do>`;
 `hq help <topic>` and `hq <verb> --help` hold the longer forms.
 
@@ -46,7 +47,9 @@ Every line that calls for a move names it: `<finding> - <what to do>`;
 +- cycles/         each finished HANDOFF.md verbatim, c01.md ..
 +- .hq.lock        held from begin to finish
 +- HANDOFF.orig.md the foreign file an adoption began from
-+- SPEC.md notes-*.md probes/    the work itself, untouched
++- notes/          what the thread learned: evidence, excerpts, reviews
++- specs/ drafts/ outputs/  what it made and the project has no place
+|                  for, by kind; probes/ or any other folder is one unit
 ```
 
 The agent writes the cursor (Task through Open questions) and
@@ -55,6 +58,27 @@ The agent writes the cursor (Task through Open questions) and
 `hq supersede`. The script writes everything else; a hand edit to the
 header line or below the first `<!-- hq:` marker is overwritten by
 `finish`.
+
+What the thread learned - a finding, its evidence, a review - stays in
+the folder, under `notes/` or a folder of the work's own. What it made
+goes where the project keeps that kind of file - a spec beside its docs
+- and a prototype, an experiment, a throwaway script, or a generated
+result goes to the directory `hq work-dir` prints, run before the first
+such file; each named as its neighbors are and stamped by its `~` or
+absolute path, `--kind spec` or `--kind draft` to gate it, else
+`--read-before mention` when the cursor points at it so its label
+prints. Settle the verb once: `hq work-dir <dir>` pins the directory
+CLAUDE.md or the user names for such work, made when missing, else one
+the agent located that already holds it - never one of end-user docs,
+todo items, or shipped source; two fit, ask under `Open questions` and
+hold the files in the folder meanwhile; none fits, `hq work-dir
+.handoff`. What the project has no place for goes in folders under the
+thread folder, never loose at its top level: under `specs/`, `drafts/`,
+`notes/`, or `outputs/` the folder sets the kind and any file name
+serves; `probes/` or a name the work calls for is stamped as one unit or
+file by file. The agent invents no project directory and proposes none.
+Only a file that outlives the session or is stamped is bound.
+
 
 ## Which verb, which target
 
@@ -172,27 +196,15 @@ Wire refresh_token() into poll() at scripts/auth.py:88, in the 401 branch.
 <!-- hq:read 53c21ca4645f -->
 ```
 
-In the generated blocks, `Read first` has one line per live
-`read_before=always` row: `SPEC.md:11-13` is where its anchor resolves
-today, `(N lines)` means no anchor and the whole file is the read,
-`SPEC.md:?` means the anchor matches no heading - read the whole file,
-re-stamp with a `--where` that resolves, re-run `hq open`.
-`Artifacts` prints rows graded always, edit, or mention in full and
-`path  spec?  unstamped` for a file with no row; the rest collapse to
-counts, and a counted line ends in the command that expands it -
-`- hq artifacts <slug>`, `- hq when <slug> <path>` - run it.
-`Standing` ids are `d` decision, `c` constraint, `x` dead end; a cut
-ends in `- hq standing <slug>`. In `Log`, `+1` counts dirty paths.
-
 Rules:
 
 - Point, never paste: a rehomed sibling is stamped with `hq stamp`;
   its pointer line is generated, never typed.
 - Skip what the repo records: git history, CLAUDE.md, README content.
-- Too big for the file but worth keeping (a log excerpt, a survey):
-  a sibling file `.handoff/<slug>/notes-<topic>.md`, stamped
-  `--read-before edit` when the cursor points at it, so its label stays
-  in the Artifacts block instead of a count.
+- Too big for the file but worth keeping: a sibling `notes/<topic>.md`,
+  stamped `--read-before edit` when the cursor points at it, so its
+  label stays in the Artifacts block instead of a count.
+
 - Name where a credential lives, never its value.
 - Absolute dates. ASCII only.
 - Now is the single next action; Plan is what follows it. Plan
@@ -202,9 +214,7 @@ Rules:
   an Open question leaves only when answered, a Plan item only when
   done or rehomed. `finish` owns the header line.
 - Anything still awaiting the user - a question, an unapproved plan -
-  goes under `Open questions`; read stops there. Now is rewritten
-  every cycle; an unanswered question is carried forward until it is
-  answered, however old.
+  goes under `Open questions`; read stops there.
 - An item recorded with `note` or under `## Unfiled` is not repeated
   in State: the Standing block carries it.
 - No line ceiling binds the cursor: it carries every unsettled line.
@@ -218,14 +228,16 @@ Rows are dictated through `hq stamp`, `hq note`, and `hq supersede`;
 `stamp` and `note` also take `--batch`, one row per stdin line, the
 same arguments minus the slug.
 
-`stamp` infers kind and `read_before` from the name (`hq help kinds`
-has the table): `SPEC*`, `DESIGN*`, `PROPOSAL*`, `*-DECLARATION*`, and
-a file whose first heading starts `Spec` or `Design` are spec, and a
-`*.py`, `*.sql`, `*.js`, `*.ts`, or `*.ps1` at the folder's top level
-is draft, both gated `always`; everything else is `never`. A repo file
-stamped by its `~` or absolute path infers `other`: pass `--kind
-draft` to gate it. Of several `SPEC*` stem-mates only the newest is
-gated.
+`stamp` infers kind and `read_before` from the place, then the name
+(`hq help kinds` has the table): a file one level under `specs/`,
+`drafts/`, `notes/`, or `outputs/` takes the folder's kind; at the top
+level `SPEC*`, `DESIGN*`, `PROPOSAL*`, `*-DECLARATION*`, and a file
+whose first heading starts `Spec` or `Design` are spec, and a `*.py`,
+`*.sql`, `*.js`, `*.ts`, or `*.ps1` is draft, both gated `always`;
+everything else is `never`. Outside the folder only the draft rule
+lapses: a `SPEC*` name or a Spec/Design heading still infers spec, and
+anything else infers `other` - pass `--kind spec` or `--kind draft` to
+gate it. Of several `SPEC*` stem-mates only the newest is gated.
 
 Rules the script enforces (`hq help rules` has them in full):
 
@@ -245,20 +257,19 @@ Rules the script enforces (`hq help rules` has them in full):
 Stamp forms, all real:
 
 ```
-hq stamp <slug> SPEC.md \
+hq stamp <slug> ~/code/poller/docs/auth-refresh.md --kind spec \
   --where "3. Retry" --label "refresh contract; s3 is the retry schedule"
 hq stamp <slug> ~/code/poller/scripts/auth.py \
   --kind draft --label "poller; the 401 branch is under edit"
-hq stamp <slug> notes-idp-quirks.md \
+hq stamp <slug> notes/idp-quirks.md \
   --read-before edit --label "staging IdP quirks, found the hard way"
-hq stamp <slug> SPEC.md \
-  --successor SPEC-v2.md
-hq stamp <slug> DRAFT.py \
+hq stamp <slug> specs/SPEC.md \
+  --successor specs/SPEC-v2.md
+hq stamp <slug> drafts/DRAFT.py \
   --archive --reason "abandoned for the sidecar approach"
-hq stamp <slug> notes-old.md --defer
 hq stamp <slug> --batch <<'ROWS'
-SPEC.md --where "3. Retry" --label "refresh contract; s3 is the retry schedule"
-notes-idp-quirks.md --read-before edit --label "staging IdP quirks"
+~/code/poller/docs/auth-refresh.md --kind spec --where "3. Retry" --label "the contract"
+notes/idp-quirks.md --read-before edit --label "staging IdP quirks"
 ROWS
 ```
 
@@ -308,18 +319,6 @@ runs on). `finish` drains the section into `standing.md`; an untyped
 bullet is a hard fail that writes nothing. Omit the section when every
 item went through `note`.
 
-### The hooks
-
-Two hooks report and, unless the operator sets `HQ_GATE_DENY`, never
-block; `finish` consults neither - R3 is what blocks `finish`. On the
-first write after an `hq open`, the gate names each gated path (graded
-always or edit) with no read-shaped evidence in the session, once;
-read each before going on. Evidence is a Read tool call, a
-`cat`/`head`/`tail`/`less`/`sed -n` naming the path, or an `hq read`
-receipt; `ls`, `wc`, `grep`, and a `stamp` do not count. At the end
-of a turn, the Stop hook names a `HANDOFF.md` written by hand since
-its last finished cycle and the `begin`/`finish` pair that files it.
-
 ### A plan that lives in a todo file
 
 Work often has a ledger of its own - `todo/foobar.md`, tracked in the
@@ -352,11 +351,13 @@ Run these steps in order:
 2. One `hq note` per item settled this session, or one `--batch`; one
    `hq supersede <slug> <old-id> <new-id>` when a ruling reverses an
    earlier one.
-3. One `hq stamp` per artifact created, re-read, or moved, or one
-   `--batch`. A refusal (exit 1) leaves the row as it was, records the
-   attempt, and names the way out: a successor, an archive reason, or
-   leave the row gated - unless its file is missing, which blocks
-   `finish` until the row is re-pointed, superseded, or archived.
+3. Place each file this session made by `## The folder` before its first
+   stamp; then one `hq stamp` per artifact created, re-read, or moved,
+   or one `--batch`. A refusal (exit 1) leaves the row as it was,
+   records the attempt, and names the way out: a successor, an archive
+   reason, or leave the row gated - unless its file is missing, which
+   blocks `finish` until the row is re-pointed, superseded, or archived.
+
 4. Rewrite the cursor from `## Task` down, above the first `<!-- hq:`
    marker, carrying forward every line this session did not settle;
    leave the header line and everything below the marker alone.
@@ -380,7 +381,7 @@ One whole cycle on the example thread, in order:
 hq begin auth-token-refresh
 hq note auth-token-refresh decision \
   --headline "Refresh in-process, no sidecar" "One caller; latency is fine."
-hq stamp auth-token-refresh SPEC.md \
+hq stamp auth-token-refresh ~/code/poller/docs/auth-refresh.md --kind spec \
   --where "3. Retry" --label "refresh contract; s3 is the retry schedule"
 hq stamp auth-token-refresh ~/code/poller/scripts/auth.py \
   --kind draft --label "poller; the 401 branch is under edit"
@@ -388,14 +389,6 @@ hq stamp auth-token-refresh ~/code/poller/scripts/auth.py \
 hq finish auth-token-refresh \
   --log "token store and refresh endpoint written"
 ```
-
-### Adoption
-
-A target with no conforming header was written by some other process.
-`hq adopt <slug>` changes nothing, prints the heading inventory, and
-names `reference/adoption.md` beside this file: the conversion that
-converges the form and destroys no content. Follow it, then continue
-at write path step 1; `begin` runs `adopt` and opens cycle 2.
 
 ### Reviewer pass
 
@@ -461,6 +454,18 @@ Resume: kill this session, start a fresh one, run
    follows.
 6. A later bare `/handoff` targets this handoff - write rule 2.
 
+In the generated blocks, `Read first` has one line per live
+`read_before=always` row: `specs/SPEC.md:11-13` is where its anchor
+resolves today, `(N lines)` means no anchor and the whole file is the
+read, `specs/SPEC.md:?` means the anchor matches no heading - read the
+whole file, re-stamp with a `--where` that resolves, re-run `hq open`.
+`Artifacts` prints rows graded always, edit, or mention in full and
+`path spec? unstamped` for a file with no row; the rest collapse to
+counts, and a counted line ends in the command that expands it - `- hq
+artifacts <slug>`, `- hq when <slug> <path>` - run it. `Standing` ids
+are `d` decision, `c` constraint, `x` dead end; a cut ends in `- hq
+standing <slug>`. In `Log`, `+1` counts dirty paths.
+
 ## check
 
 Resolve like read, then read steps 2 and 3; open questions do not stop
@@ -490,6 +495,26 @@ that changed between two finished cycles; no output means none.
 `hq artifacts <slug>`: every live row, uncapped, plus unstamped files.
 `hq standing <slug>`: every unsuperseded item in full; `--all` adds
 the superseded ones.
+
+## The hooks
+
+Two hooks report and, unless the operator sets `HQ_GATE_DENY`, never
+block; `finish` consults neither - R3 is what blocks `finish`. On the
+first write after an `hq open`, the gate names each gated path (graded
+always or edit) with no read-shaped evidence in the session, once.
+Evidence is a Read tool call, a `cat`/`head`/`tail`/`less`/`sed -n`
+naming the path, or an `hq read` receipt; `ls`, `wc`, `grep`, and a
+`stamp` do not count. At the end of a turn, the Stop hook names a
+`HANDOFF.md` written by hand since its last finished cycle and the
+`begin`/`finish` pair that files it.
+
+
+## Adoption
+
+`hq adopt <slug>` changes nothing, prints the heading inventory, and
+names `reference/adoption.md` beside this file: the conversion that
+converges the form and destroys no content. Follow it, then continue
+at write path step 1; `begin` runs `adopt` and opens cycle 2.
 
 ## Where the rest lives
 

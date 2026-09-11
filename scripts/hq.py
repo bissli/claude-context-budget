@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Handoff ledger script: fourteen verbs for managing per-project handoff files.
+"""Handoff ledger script: fifteen verbs for managing per-project handoff files.
 
 Each handoff lives in .handoff/<slug>/: HANDOFF.md written by the agent,
 ledger.tsv stamping every artifact, and standing.md for decisions,
@@ -39,6 +39,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import tempfile
 
 Row = dict[str, str]
 
@@ -78,6 +79,8 @@ _KF_LABEL_PAT = re.compile(
 _SNAPSHOT_PATS = ['*.pre-*', '*.prev.*', '*.orig.*', '*.bak']
 _SPEC_PATS = ['SPEC*', 'DESIGN*', 'PROPOSAL*', '*-DECLARATION*']
 _DRAFT_EXTS = {'.py', '.sql', '.js', '.ts', '.ps1'}
+_WORK_PIN_NAME = 'work-dir'
+_KIND_DIRS = {'specs': 'spec', 'drafts': 'draft', 'notes': 'notes', 'outputs': 'other'}
 _GATE_RB = {'always', 'edit'}
 _FULL_RB = {'always', 'edit', 'mention'}
 _ARTIFACTS_CAP = 40
@@ -134,6 +137,9 @@ Kind inference, first match wins:
   HANDOFF*.md at the folder's top level                snapshot   never
   name contains cycle<digits>                          snapshot   never
   a directory                                          probe-dir  never
+  a file one level under specs/ or drafts/             spec/draft always
+  a file one level under notes/                        notes      never
+  a file one level under outputs/                      other      never
   SPEC*, DESIGN*, PROPOSAL*, *-DECLARATION*            spec       always
   notes-*, REVIEW*                                     notes      never
   todo*, TODO*                                         todo       never
@@ -141,8 +147,14 @@ Kind inference, first match wins:
   *.py *.sql *.js *.ts *.ps1 at the folder's top level draft      always
   anything else, a nested or outside file included     other      never
 
-- A repo file stamped by its ~ or absolute path infers other/never:
-  pass --kind draft to gate it.
+- The kind folder sets the kind of a file one level under it, whatever
+  the name; probes/, like any other directory, is one probe-dir entry,
+  stamped as a unit or recorded by the rows of its files. drafts/ holds
+  the candidate that will land, gated always; a throwaway script goes
+  to the work dir or probes/. hq work-dir --help has where made files go.
+- Outside the folder only the draft rule lapses: a SPEC*-shaped name
+  or a Spec/Design first heading still infers spec; any other outside
+  file infers other/never - pass --kind spec or --kind draft to gate it.
 - When a stem (SPEC) has several members, adopt and begin gate only
   the newest spec-kind file; every older stem-mate is stamped
   superseded/never pointing at the newest.
@@ -305,6 +317,7 @@ def infer_kind(
     is_dir: bool,
     first_heading: str,
     top_level: bool = True,
+    kind_dir: str = '',
 ) -> tuple[str, str]:
     """Infer the ledger kind and seeded read_before for one file or directory.
 
@@ -319,6 +332,10 @@ def infer_kind(
     top_level : bool, default True
         True for a top-level entry of the handoff folder. The draft rule
         applies only there; a nested or outside ``.py`` is ``other``.
+    kind_dir : str, default ''
+        The kind folder the entry sits one level under - a key of
+        ``_KIND_DIRS`` - or empty. The folder sets the kind of a file,
+        whatever its name; a directory there is still ``probe-dir``.
 
     Returns
     -------
@@ -346,6 +363,9 @@ def infer_kind(
         return ('snapshot', 'never')
     if is_dir:
         return ('probe-dir', 'never')
+    if kind_dir:
+        kind = _KIND_DIRS[kind_dir]
+        return (kind, 'always' if kind in {'spec', 'draft'} else 'never')
     for pat in _SPEC_PATS:
         if fnmatch.fnmatchcase(name, pat):
             return ('spec', 'always')
@@ -363,13 +383,56 @@ def infer_kind(
     return ('other', 'never')
 
 
+def is_recorded(name: str, live: dict[str, Row]) -> bool:
+    """Return True when a walk entry has a row, or a row names a file in it.
+
+    Parameters
+    ----------
+    name : str
+        A walk entry: a top-level name or ``<kind folder>/<name>``.
+    live : dict[str, Row]
+        Latest ledger row per path.
+
+    Returns
+    -------
+    bool
+        True for a row under the entry's own path, or for a directory
+        whose files carry rows of their own, which records the directory
+        file by file.
+    """
+    return name in live or any(path.startswith(name + '/') for path in live)
+
+
+def kind_dir_of(stored_path: str, base: str) -> str:
+    """Return the kind folder a stored path sits one level under, else ''.
+
+    Parameters
+    ----------
+    stored_path : str
+        The path as the ledger stores it.
+    base : str
+        ``folder`` or ``abs``; only a folder-relative path can sit under a
+        kind folder.
+
+    Returns
+    -------
+    str
+        A key of ``_KIND_DIRS`` when the path is ``<kind folder>/<name>``
+        with no deeper segment; otherwise ``''``.
+    """
+    head, sep, tail = stored_path.partition('/')
+    if base != 'folder' or not sep or '/' in tail or head not in _KIND_DIRS:
+        return ''
+    return head
+
+
 def apply_stem_rule(entries: list[tuple[str, str, float]]) -> dict[str, str]:
     """Mark older spec stem-mates as superseded by the newest member.
 
     Parameters
     ----------
     entries : list[tuple[str, str, float]]
-        Each entry is ``(name, kind, mtime)`` for a top-level file.
+        Each entry is ``(name, kind, mtime)`` for one walk entry.
 
     Returns
     -------
@@ -782,6 +845,8 @@ def artifact_lines(
 
     for path, inferred in walk:
         seen.add(path)
+        if rows.get(path) is None and is_recorded(path, rows):
+            continue
         _classify(path, rows.get(path), inferred)
 
     # Rows the walk cannot see: abs paths and subdirectory paths.
@@ -1585,6 +1650,145 @@ def _append_tsv(path: pathlib.Path, fields: list[str], row: dict, header: str) -
         fh.write(lead + vals + '\n')
 
 
+def validate_work_dir(root: pathlib.Path, token: str) -> tuple[str, str]:
+    """Check one work-dir token and return (value, reason).
+
+    Parameters
+    ----------
+    root : pathlib.Path
+        Project root the value is stored relative to.
+    token : str
+        ``.handoff``, or a directory spelled relative to the root, by
+        ``~``, or absolutely.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(value, '')`` on a pass - ``.handoff``, or the directory's posix
+        path relative to the root - else ``('', reason)``, the reason a
+        clause that follows the token in a printed line.
+
+    Notes
+    -----
+    - The root itself, anything outside it, and anything under
+      ``.handoff/`` are refused: the first turns the root into a dump,
+      the second the project cannot carry, the third is the handoff's
+      own. An outside path under the system temp directory is named as
+      such, since /tmp is the one place a session reaches for.
+    - A directory not yet on disk passes: a declared work dir is made
+      by the caller, so the declaration alone settles the place.
+    """
+    clean = token.strip().strip('`')
+    if clean.rstrip('/') == HANDOFF_DIRNAME:
+        return HANDOFF_DIRNAME, ''
+    root_abs = pathlib.Path(os.path.abspath(os.path.expanduser(str(root))))
+    if clean.startswith(('/', '~')):
+        candidate = pathlib.Path(os.path.normpath(os.path.expanduser(clean)))
+    else:
+        candidate = pathlib.Path(os.path.normpath(root_abs / clean))
+    if candidate == root_abs:
+        return '', 'is the root itself'
+    # Containment is lexical first, then by real path, so a root reached
+    # through a symlink still owns its directories spelled either way.
+    under_root = root_abs in candidate.parents
+    if not under_root:
+        real_root = pathlib.Path(os.path.realpath(root_abs))
+        real_candidate = pathlib.Path(os.path.realpath(candidate))
+        under_root = real_root in real_candidate.parents
+        if under_root:
+            candidate = real_root / real_candidate.relative_to(real_root)
+            root_abs = real_root
+    # A project checked out under the temp directory keeps its own
+    # subdirectories; the temp refusal names a path outside the root.
+    temp_dirs = (
+        pathlib.Path(os.path.abspath(tempfile.gettempdir())), pathlib.Path('/tmp'))
+    if not under_root and any(
+            candidate == d or d in candidate.parents for d in temp_dirs):
+        return '', 'is under the system temp directory'
+    if candidate.exists() and not candidate.is_dir():
+        return '', 'is not a directory'
+    if not under_root:
+        return '', f'is outside the root {root_abs}'
+    rel = candidate.relative_to(root_abs).as_posix()
+    if rel == HANDOFF_DIRNAME or rel.startswith(HANDOFF_DIRNAME + '/'):
+        return '', f'is under {HANDOFF_DIRNAME}/'
+    return rel, ''
+
+
+def _make_work_dir(root: pathlib.Path, value: str) -> str:
+    """Create a declared work dir under the root; return '' or the failure.
+    """
+    if value == HANDOFF_DIRNAME:
+        return ''
+    try:
+        (root / value).mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return exc.strerror or str(exc)
+    return ''
+
+
+def resolve_work_dir(
+    root: pathlib.Path,
+    make: bool = True,
+) -> tuple[str, str, list[str]]:
+    """Resolve the work dir: HQ_WORK_DIR, then the pin, else unpinned.
+
+    Parameters
+    ----------
+    root : pathlib.Path
+        Project root; the pin is ``root/.handoff/work-dir``.
+    make : bool, default True
+        Create a declared directory that is missing. ``open`` passes
+        False: it is read-only, and a directory it cannot make is no
+        finding of its own.
+
+    Returns
+    -------
+    tuple[str, str, list[str]]
+        ``(value, source, lines)``: the value as ``validate_work_dir``
+        returns it with ``source`` ``env`` or ``pin``, or ``('', '', lines)``
+        when neither names a directory. ``lines`` are the printed lines
+        for a source that failed its check, each naming its move.
+
+    Notes
+    -----
+    - The first source that passes wins; a failing env var falls
+      through to the pin rather than leaving the thread unpinned.
+    - A declared directory missing from disk is made here, so the
+      declaration is the one act the user or agent performs. One that
+      cannot be made is reported and passed over, never fatal: begin
+      and finish must still run on a bad pin.
+    """
+    lines: list[str] = []
+    raw_env = os.environ.get('HQ_WORK_DIR', '').strip()
+    if raw_env:
+        value, reason = validate_work_dir(root, raw_env)
+        if value:
+            reason = _make_work_dir(root, value) if make else ''
+            if not reason:
+                return value, 'env', lines
+            reason = f'could not be made: {reason}'
+        lines.append(
+            f'HQ_WORK_DIR={raw_env} {reason} - fix or unset it; the pin is read next')
+    pin = root / HANDOFF_DIRNAME / _WORK_PIN_NAME
+    if pin.is_file():
+        try:
+            raw_pin = pin.read_text(encoding='utf-8').strip()
+        except OSError:
+            raw_pin = ''
+        value, reason = (
+            validate_work_dir(root, raw_pin) if raw_pin else ('', 'is empty'))
+        if value:
+            reason = _make_work_dir(root, value) if make else ''
+            if not reason:
+                return value, 'pin', lines
+            reason = f'could not be made: {reason}'
+        lines.append(
+            f'{HANDOFF_DIRNAME}/{_WORK_PIN_NAME} names {raw_pin!r}: {reason}'
+            ' - repin it with hq work-dir <dir>')
+    return '', '', lines
+
+
 def _find_folder(
     root: pathlib.Path,
     slug: str,
@@ -1644,7 +1848,7 @@ def _find_folder(
 
 
 def _walk_folder(folder: pathlib.Path) -> list[tuple[str, str]]:
-    """Walk top-level entries and return (name, inferred_kind) pairs.
+    """Walk the folder and return (name, inferred_kind) pairs.
 
     Parameters
     ----------
@@ -1654,13 +1858,17 @@ def _walk_folder(folder: pathlib.Path) -> list[tuple[str, str]]:
     Returns
     -------
     list[tuple[str, str]]
-        One pair per top-level entry: the entry name and its inferred
-        kind from ``infer_kind``.
+        One pair per entry - a top-level name, or ``<kind folder>/<name>``
+        - with its inferred kind from ``infer_kind``.
 
     Notes
     -----
     - Skips HANDOFF.md, ledger.tsv, standing.md, cycles/, .hq.lock,
       dotfiles.
+    - Walks one level into each kind folder - specs/, drafts/, notes/,
+      outputs/ - listing ``<kind folder>/<name>`` with the folder's kind;
+      the kind folder itself is not an entry. Any other directory,
+      probes/ included, is one probe-dir entry.
     - Reads the first heading line of text files for spec detection.
     - ``'skip'`` entries are included; callers filter them as needed.
       Besides a conflicted copy, an entry that is neither a regular file
@@ -1671,29 +1879,37 @@ def _walk_folder(folder: pathlib.Path) -> list[tuple[str, str]]:
       file again. A caller tells the two apart by the name.
     """
     results = []
-    for entry in sorted(folder.iterdir()):
-        name = entry.name
-        if name.startswith('.') or name in _SKIP_NAMES:
-            continue
-        is_dir = entry.is_dir()
-        if not is_dir and not entry.is_file():
-            results.append((name, 'skip'))
-            continue
-        if any(ch in name for ch in '\t\r\n'):
-            results.append((name, 'skip'))
-            continue
-        first_heading = ''
-        if not is_dir:
-            try:
-                with entry.open(encoding='utf-8', errors='replace') as fh:
-                    for line in fh:
-                        if line.startswith('#'):
-                            first_heading = line.strip()
-                            break
-            except OSError:
-                pass
-        kind, _ = infer_kind(name, is_dir, first_heading)
-        results.append((name, kind))
+    scopes = [('', folder)] + [
+        (f'{kind_dir}/', folder / kind_dir) for kind_dir in sorted(_KIND_DIRS)
+        if (folder / kind_dir).is_dir()]
+    for prefix, scope in scopes:
+        for entry in sorted(scope.iterdir()):
+            name = entry.name
+            if name.startswith('.') or name in _SKIP_NAMES:
+                continue
+            is_dir = entry.is_dir()
+            if not prefix and is_dir and name in _KIND_DIRS:
+                continue
+            if not is_dir and not entry.is_file():
+                results.append((prefix + name, 'skip'))
+                continue
+            if any(ch in name for ch in '\t\r\n'):
+                results.append((prefix + name, 'skip'))
+                continue
+            first_heading = ''
+            if not is_dir:
+                try:
+                    with entry.open(encoding='utf-8', errors='replace') as fh:
+                        for line in fh:
+                            if line.startswith('#'):
+                                first_heading = line.strip()
+                                break
+                except OSError:
+                    pass
+            kind, _ = infer_kind(
+                name, is_dir, first_heading, top_level=not prefix,
+                kind_dir=prefix.rstrip('/'))
+            results.append((prefix + name, kind))
     return results
 
 
@@ -2764,7 +2980,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         # this folder's draft; inferring one would gate it under R1.
         at_top = base == 'folder' and '/' not in stored_again
         kind, _ = infer_kind(
-            path_obj.name, is_dir, first_heading, top_level=at_top)
+            path_obj.name, is_dir, first_heading, top_level=at_top,
+            kind_dir=kind_dir_of(stored_again, base))
         on_disk = path_obj.exists()
         rb = 'always' if kind in {'spec', 'draft'} else 'never'
         # The grade applies exactly as the walk branch applies it.
@@ -3227,7 +3444,7 @@ def _print_worklist(folder: pathlib.Path, anch: dict) -> None:
     walk, rows, live, sha_map, manifest, lb, sb = _folder_state(folder)
     for b in witness(manifest[-1] if manifest else None, lb, sb):
         print(f'  {b}')
-    unstamped = [(n, k) for n, k in walk if n not in live and k != 'skip']
+    unstamped = [(n, k) for n, k in walk if not is_recorded(n, live) and k != 'skip']
     by_kind: dict[str, list[str]] = {}
     for n, k in unstamped:
         by_kind.setdefault(k, []).append(n)
@@ -3289,6 +3506,18 @@ def _print_worklist(folder: pathlib.Path, anch: dict) -> None:
         shown = ', '.join(deferred[:5])
         tail = f' ... and {len(deferred) - 5} more' if len(deferred) > 5 else ''
         print(f'  deferred x{len(deferred)}: {shown}{tail} - stamp each when decided')
+    wd_value, wd_source, wd_lines = resolve_work_dir(folder.parent.parent)
+    for line in wd_lines:
+        print(line)
+    if wd_value == HANDOFF_DIRNAME:
+        print(
+            f'work dir: {HANDOFF_DIRNAME}/{folder.name}/ ({wd_source})'
+            ' - made files go under notes/, specs/, drafts/, or outputs/;'
+            ' any other folder is one unit')
+    elif wd_value:
+        print(f'work dir: {wd_value} ({wd_source})')
+    else:
+        print('work dir: unpinned - run hq work-dir')
     print(f'cycle {anch["cycle"]} begun by {anch["session"]} on {anch["host"]}')
 
 
@@ -3402,6 +3631,11 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
                 f'hq stamp: {stored_path}: no such file under {folder}'
                 ' - a file outside the folder is stamped by its ~ or absolute path')
         return 2
+    if base == 'folder' and stored_path in _KIND_DIRS and path_obj.is_dir():
+        print(
+            f'hq stamp: {stored_path} is a kind folder'
+            ' - stamp the files under it, each by its own path')
+        return 2
     is_dir = path_obj.is_dir()
     if not is_dir and path_obj.exists() and not path_obj.is_file():
         print(
@@ -3422,7 +3656,8 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
     # the folder or outside it infers other, gated by --kind draft.
     top_level = base == 'folder' and '/' not in stored_path
     inferred_kind, seed_rb = infer_kind(
-        path_obj.name, is_dir, first_heading, top_level)
+        path_obj.name, is_dir, first_heading, top_level,
+        kind_dir_of(stored_path, base))
     history = [row for row in rows if row['path'] == stored_path]
     # Notes:
     # - R1 binds to every kind the path has ever carried, so an
@@ -3951,7 +4186,8 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
             ' - re-grade or supersede rows, or read them all with'
             f' hq artifacts {folder.name}')
     # --- Advisory: unstamped ---
-    unstamped_entries = [(n, k) for n, k in walk if n not in live and k != 'skip']
+    unstamped_entries = [
+        (n, k) for n, k in walk if not is_recorded(n, live) and k != 'skip']
     if unstamped_entries:
         by_kind: dict[str, list[str]] = {}
         for n, k in unstamped_entries:
@@ -3960,6 +4196,48 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
             shown = ', '.join(names[:5])
             tail = f' ... and {len(names) - 5} more' if len(names) > 5 else ''
             print(f'advisory: unstamped {k} x{len(names)}: {shown}{tail} - stamp each')
+    # --- Advisory: made files placed against the work dir ---
+    # Notes:
+    # - Only a path first stamped this cycle is named: an older row was
+    #   placed under an earlier ruling, and moving it is the agent's
+    #   call.
+    # - A directory is an organized unit under either ruling, the
+    #   recommended names or the agent's own, so only a loose file at
+    #   the top level is named.
+    wd_value, _, wd_lines = resolve_work_dir(folder.parent.parent)
+    for line in wd_lines:
+        print(line)
+    if wd_value:
+        first_cycle: dict[str, int] = {}
+        for row in rows:
+            if row['cycle'].strip().isdigit():
+                first_cycle.setdefault(row['path'], int(row['cycle']))
+        # A spec's place is beside the project's docs, a judgment the
+        # work dir does not make, so a real work dir claims drafts and
+        # outputs alone; the folder ruling claims any loose made file.
+        made_kinds = (
+            {'spec', 'draft', 'other'} if wd_value == HANDOFF_DIRNAME
+            else {'draft', 'other'})
+        misplaced = [
+            path for path, row in live.items()
+            if row['base'] == 'folder' and row['status'] == 'live'
+            and row['kind'] in made_kinds
+            and first_cycle.get(path) == int(anch['cycle'])
+            and '/' not in path]
+        if misplaced:
+            shown = ', '.join(misplaced[:5])
+            tail = f' ... and {len(misplaced) - 5} more' if len(misplaced) > 5 else ''
+            if wd_value == HANDOFF_DIRNAME:
+                print(
+                    f'advisory: made at the top level x{len(misplaced)}: {shown}{tail}'
+                    ' - move each under notes/, specs/, drafts/, or outputs/'
+                    ' and re-stamp with --successor')
+            else:
+                print(
+                    f'advisory: made in the folder x{len(misplaced)}: {shown}{tail}'
+                    f' - move each to {wd_value}, or under notes/ when it is'
+                    ' evidence, then re-stamp with --successor and the'
+                    " file's ~ or absolute path")
     # A skip entry the ledger cannot carry: a sync duplicate by name
     # or a name holding a tab or newline, shown escaped.
     for n, k in walk:
@@ -4284,9 +4562,13 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     # - A superseded standing item is skipped: the file is append-only,
     #   so the old wording stays on disk after the re-note, and counting
     #   it would leave the line with no move that clears it.
+    # A work dir pinned under a former name is a real place: its
+    # per-thread paths are not stale, so that name leaves the scan.
+    wd_value, _, _ = resolve_work_dir(folder.parent.parent, make=False)
+    former = [d for d in _FORMER_HANDOFF_DIRNAMES if d != wd_value]
     stale_pat = re.compile(
-        r'(' + '|'.join(re.escape(d) for d in _FORMER_HANDOFF_DIRNAMES) + r')/'
-        + re.escape(folder.name) + r'/')
+        r'(' + '|'.join(re.escape(d) for d in former) + r')/'
+        + re.escape(folder.name) + r'/' if former else r'(?!)')
     standing_text = sb.decode('utf-8', 'replace')
     _, superseded_ids = _parse_standing(standing_text)
     standing_live_lines: list[str] = []
@@ -4486,7 +4768,8 @@ def _verb_artifacts(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) 
             continue
         row = live.get(name)
         if row is None:
-            print(f'{name}  {kind}?  unstamped')
+            if not is_recorded(name, live):
+                print(f'{name}  {kind}?  unstamped')
             continue
         if row['status'] == 'live':
             print(
@@ -4528,6 +4811,66 @@ def _verb_standing(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -
             sup = ' [superseded]' if item['id'] in superseded_ids else ''
             print(f'[{item["id"]}] (c{item["cycle"]}) **{item["headline"]}** {item["body"]}{sup}')
     return 0
+
+
+def _verb_work_dir(root: pathlib.Path, argv: argparse.Namespace) -> int:
+    """Print the directory made files go to, or pin one.
+
+    Parameters
+    ----------
+    root : pathlib.Path
+        Project root; the pin is ``root/.handoff/work-dir``.
+    argv : argparse.Namespace
+        Parsed ``work-dir`` arguments; ``dir`` is the token to pin, or
+        None to resolve.
+
+    Returns
+    -------
+    int
+        0 with the resolved line, or once the pin is written; 1 when
+        unpinned or the token is refused, with nothing written.
+
+    Notes
+    -----
+    - No scan: which directory holds the project's work is a judgment
+      over the layout and CLAUDE.md, and a name list would pin a dump in
+      the wrong place. The agent judges and pins.
+    """
+    token = getattr(argv, 'dir', None)
+    if token:
+        value, reason = validate_work_dir(root, token)
+        if not value:
+            print(
+                f'hq work-dir: {token} {reason} - name a directory under'
+                f' the root, or {HANDOFF_DIRNAME} for the folder')
+            return 1
+        failure = _make_work_dir(root, value)
+        if failure:
+            print(
+                f'hq work-dir: {token} could not be made: {failure} - name a'
+                f' directory under the root, or {HANDOFF_DIRNAME} for the folder')
+            return 1
+        pin_dir = root / HANDOFF_DIRNAME
+        pin_dir.mkdir(parents=True, exist_ok=True)
+        (pin_dir / _WORK_PIN_NAME).write_text(value + '\n', encoding='utf-8')
+        print(f'work dir: {value} - pinned in {HANDOFF_DIRNAME}/{_WORK_PIN_NAME}')
+        return 0
+    value, source, lines = resolve_work_dir(root)
+    for line in lines:
+        print(line)
+    if value == HANDOFF_DIRNAME:
+        print(
+            f'work dir: {value} ({source})'
+            ' - made files go under notes/, specs/, drafts/, or outputs/'
+            ' in the thread folder; any other folder there is one unit')
+        return 0
+    if value:
+        print(f'work dir: {value} ({source})')
+        return 0
+    print(
+        'work dir: unpinned - judge the project layout and CLAUDE.md, then'
+        f' hq work-dir <dir>, or {HANDOFF_DIRNAME} when nothing fits')
+    return 1
 
 
 def _verb_list(root: pathlib.Path, argv: argparse.Namespace) -> int:
@@ -4638,11 +4981,12 @@ def _verb_list(root: pathlib.Path, argv: argparse.Namespace) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Return the top-level argument parser for all fourteen verbs.
+    """Return the top-level argument parser for all fifteen verbs.
     """
     _top_epilog = (
-        'Every verb but list and help takes the slug first. A slug resolves to\n'
-        'an exact folder name under .handoff/, else a unique prefix of one.\n'
+        'Every verb but list, work-dir, and help takes the slug first. A slug\n'
+        'resolves to an exact folder name under .handoff/, else a unique\n'
+        'prefix of one.\n'
         'Five flags before the verb - --root DIR, --cycle N, --now ISO,\n'
         '--session ID, --host H - override the HQ_ROOT, HQ_CYCLE, HQ_NOW,\n'
         'HQ_SESSION, and HQ_HOST environment values the script otherwise\n'
@@ -4827,6 +5171,25 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     ).add_argument('count', nargs='?', type=int)
 
+    _work_dir_epilog = (
+        'With no argument, prints the work dir and stops at the\n'
+        'first source that names a directory: HQ_WORK_DIR, then the pin\n'
+        '.handoff/work-dir - work dir: <dir> (env) or (pin). The value\n'
+        ".handoff means the thread folder's kind folders notes/, specs/,\n"
+        'drafts/, outputs/. Neither set: exit 1, nothing written; the agent\n'
+        'judges the project layout and CLAUDE.md, then pins. With an\n'
+        'argument, checks it - under the root, not the root, not under\n'
+        '.handoff/ or the system temp directory, or the word .handoff -\n'
+        'writes it root-relative to .handoff/work-dir, and makes the\n'
+        'directory when missing; a refused token writes nothing (exit 1).\n'
+        'The directory is for prototypes, experiments, throwaway scripts,\n'
+        "and generated output; a spec goes beside the project's docs.")
+    sub.add_parser(
+        'work-dir',
+        epilog=_work_dir_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    ).add_argument('dir', nargs='?')
+
     hlp = sub.add_parser('help')
     hlp.add_argument('topic', nargs='?')
 
@@ -4899,6 +5262,8 @@ def main(argv: list[str]) -> int:
         root = _resolve_root(args)
         if verb == 'list':
             return _verb_list(root, args)
+        if verb == 'work-dir':
+            return _verb_work_dir(root, args)
         slug = getattr(args, 'slug', '')
         is_begin = verb == 'begin'
         folder = _find_folder(root, slug, missing_ok=is_begin)
