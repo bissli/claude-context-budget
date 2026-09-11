@@ -90,12 +90,13 @@ def test_a_backticked_and_dot_slash_successor_keys_on_the_stored_path(
 
 
 def test_a_relative_token_is_never_searched_in_the_home_directory(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, capsys):
     """A bare relative token stays folder-relative when only $HOME has it.
 
     Mutation: the home fallback of the candidate search, which turns
     'SPEC2.md' into a gated ~/SPEC2.md row outside the folder.
-    Oracle: the row reads ('SPEC2.md', 'folder'), not ('~/SPEC2.md', 'abs').
+    Oracle: exit 2 naming the folder the token was read against, and a
+    ledger of header only - no ('~/SPEC2.md', 'abs') row.
     """
     folder = _root(tmp_path, monkeypatch)
     home = pathlib.Path(tmp_path) / 'home'
@@ -104,11 +105,12 @@ def test_a_relative_token_is_never_searched_in_the_home_directory(
     hq.main(['begin', _SLUG])
     (home / 'SPEC2.md').write_text('# Spec\n\nOutside.\n')
     monkeypatch.chdir(tmp_path)
+    capsys.readouterr()
 
-    assert hq.main(['stamp', _SLUG, 'SPEC2.md']) == 0
+    assert hq.main(['stamp', _SLUG, 'SPEC2.md']) == 2
 
-    row = _rows(folder)[-1]
-    assert (row['path'], row['base']) == ('SPEC2.md', 'folder')
+    assert f'no such file under {folder}' in capsys.readouterr().out
+    assert _rows(folder) == []
 
 
 def test_a_path_carrying_a_tab_or_a_newline_is_a_usage_error(
@@ -435,4 +437,58 @@ def test_read_and_when_find_a_row_by_any_spelling_of_its_path(
     assert receipts.read_text().splitlines() == [
         f'{_NOW} {_SLUG} ~/repo/auth.py',
         f'{_NOW} {_SLUG} SPEC.md',
+        ]
+
+
+def test_a_first_stamp_of_a_path_the_folder_lacks_is_a_usage_error(
+        tmp_path, monkeypatch, capsys):
+    """A repo-relative token the folder does not hold exits 2 and writes no row.
+
+    Mutation: the existence check dropped, so the stamp exits 0 and a live
+    row with sha '-' waits in the ledger until finish names it missing.
+    Oracle: exit 2 with the line naming the ~ or absolute form and a ledger
+    of header only; the same file by its absolute path exits 0 as base abs;
+    a token given --status missing, --successor, --archive, or --status
+    archived still writes its row, as does a re-stamp of a row whose file
+    is gone; an absolute token inside the folder is told to create the
+    file or record it gone.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    repo_file = pathlib.Path(tmp_path) / 'root' / 'docs' / 'SPEC-b.md'
+    repo_file.parent.mkdir(parents=True)
+    repo_file.write_text('# Spec\n\nOutside.\n')
+    hq.main(['begin', _SLUG])
+    (folder / 'SPEC2.md').write_text('# Spec\n\nTwo.\n')
+    capsys.readouterr()
+
+    assert hq.main(['stamp', _SLUG, 'docs/SPEC-b.md']) == 2
+
+    out = capsys.readouterr().out
+    assert out.startswith(f'hq stamp: docs/SPEC-b.md: no such file under {folder}')
+    assert '~ or absolute path' in out
+    assert _rows(folder) == []
+    assert hq.main(['stamp', _SLUG, str(repo_file)]) == 0
+    assert hq.main([
+        'stamp', _SLUG, 'gone.md', '--status', 'missing', '--label', 'gone']) == 0
+    assert hq.main(['stamp', _SLUG, 'old-SPEC.md', '--successor', 'SPEC2.md']) == 0
+    assert hq.main([
+        'stamp', _SLUG, 'gone2.md', '--archive', '--reason', 'never written']) == 0
+    assert hq.main([
+        'stamp', _SLUG, 'gone3.md', '--status', 'archived', '--reason', 'parked']) == 0
+    (folder / 'notes-x.md').write_text('# X\n')
+    assert hq.main(['stamp', _SLUG, 'notes-x.md']) == 0
+    (folder / 'notes-x.md').unlink()
+    assert hq.main(['stamp', _SLUG, 'notes-x.md', '--label', 'gone now']) == 0
+    capsys.readouterr()
+    assert hq.main(['stamp', _SLUG, str(folder / 'inside-gone.md')]) == 2
+    assert ('create it first, or record it gone with --status missing'
+            in capsys.readouterr().out)
+    assert [(r['path'], r['base'], r['status']) for r in _rows(folder)] == [
+        (str(repo_file), 'abs', 'live'),
+        ('gone.md', 'folder', 'missing'),
+        ('old-SPEC.md', 'folder', 'superseded'),
+        ('gone2.md', 'folder', 'archived'),
+        ('gone3.md', 'folder', 'archived'),
+        ('notes-x.md', 'folder', 'live'),
+        ('notes-x.md', 'folder', 'live'),
         ]

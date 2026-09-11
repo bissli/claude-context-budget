@@ -3372,6 +3372,32 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
     live = latest_rows(rows)
     stored_path, path_obj, base = _stored_path(folder, path)
     prev = live.get(stored_path, {})
+    # Notes:
+    # - stamp never searches, so a relative token the folder does not
+    #   hold is a repo path typed folder-relative, not a file to record:
+    #   the row would sit live with no sha until finish called it
+    #   missing.
+    # - An abs path not on disk is a file on another host or one still
+    #   to come, and stays an advisory at begin and finish.
+    # - A path gone on purpose is recorded with --status missing,
+    #   --archive, or --successor, which pass; a path with a row already
+    #   is a re-stamp, judged by R1 and R3.
+    recorded_on_purpose = (
+        getattr(argv, 'status', None) in {'missing', 'archived'}
+        or getattr(argv, 'archive', False)
+        or bool(getattr(argv, 'successor', None)))
+    never_stamped = all(row['path'] != stored_path for row in rows)
+    if (never_stamped and base == 'folder' and not path_obj.exists()
+            and not recorded_on_purpose):
+        if path.strip('`').startswith(('/', '~')):
+            print(
+                f'hq stamp: {stored_path}: no such file under {folder}'
+                ' - create it first, or record it gone with --status missing')
+        else:
+            print(
+                f'hq stamp: {stored_path}: no such file under {folder}'
+                ' - a file outside the folder is stamped by its ~ or absolute path')
+        return 2
     is_dir = path_obj.is_dir()
     if not is_dir and path_obj.exists() and not path_obj.is_file():
         print(
@@ -3388,9 +3414,8 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
                         break
         except OSError:
             pass
-    # An outside file is judged by its own name, so a repo script
-    # stamped from the repo root is a draft; a file nested in the
-    # folder is not at the top level the draft rule names.
+    # The draft rule names the folder's top level alone: a .py nested in
+    # the folder or outside it infers other, gated by --kind draft.
     top_level = base == 'folder' and '/' not in stored_path
     inferred_kind, seed_rb = infer_kind(
         path_obj.name, is_dir, first_heading, top_level)
@@ -4650,7 +4675,8 @@ def _build_parser() -> argparse.ArgumentParser:
         'The path is relative to the handoff folder: ./SPEC.md and\n'
         'sub/../SPEC.md are the row SPEC.md. A path outside it - a repo file,\n'
         'a ~ path, an absolute path - is stored whole and gated the same way;\n'
-        'there is no search of the working directory. An outside .py/.sql/\n'
+        'there is no search of the working directory, and a first stamp of a\n'
+        'relative token the folder does not hold exits 2. An outside .py/.sql/\n'
         '.js/.ts/.ps1 infers other/never: pass --kind draft to gate it.\n'
         '--kind, --read-before, --status, --where, and --label default to the\n'
         "previous row's value; omit them on a re-stamp to carry them forward.\n"
