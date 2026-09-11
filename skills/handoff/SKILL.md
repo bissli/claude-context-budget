@@ -1,10 +1,10 @@
 ---
 name: handoff
 description: >-
-  Write or read a session handoff under working/ - the exit the
+  Write or read a session handoff under .handoff/ - the exit the
   context-budget warnings point at. The verb is inferred, never typed.
   Bare /handoff writes or updates this session's
-  working/<slug>/HANDOFF.md. In a fresh session it reads one back
+  .handoff/<slug>/HANDOFF.md. In a fresh session it reads one back
   instead. list shows what exists, check reviews one in place, and
   when, diff, artifacts, standing query the ledger. Replaces /compact,
   and replaces re-planning: the file carries the approved plan across
@@ -14,7 +14,7 @@ allowed-tools: Bash(hq *)
 
 # Handoff
 
-One folder per task thread, `working/<slug>/` at the repo root
+One folder per task thread, `.handoff/<slug>/` at the repo root
 (`git rev-parse --show-toplevel`; the cwd outside a repo). Its
 `HANDOFF.md` carries what a fresh session needs to resume and nothing
 the repo already records. Write near the budget, then kill the session:
@@ -46,7 +46,7 @@ a permission, or a path that is not a directory; fix it and re-run. A
 ## The folder
 
 ```
-working/auth-token-refresh/
+.handoff/auth-token-refresh/
 +- HANDOFF.md        the whole read-time payload
 |    header line     Written | Cycle | branch @ sha | dirty    SCRIPT
 |    ## Task ## Now ## Plan ## State ## Environment
@@ -89,13 +89,13 @@ many messages came first. Write is the last move of a working session,
 read is the first move of the session that replaces it, and there is
 no third case.
 
-An argument is always a folder under `working/`; the document inside
+An argument is always a folder under `.handoff/`; the document inside
 is always `HANDOFF.md`, never named by the caller.
 
 | Input                              | Action                                 |
 | ---------------------------------- | -------------------------------------- |
 | `/handoff`                         | write; read when the session is fresh  |
-| `/handoff <slug>`                  | the same, against `working/<slug>/`    |
+| `/handoff <slug>`                  | the same, against `.handoff/<slug>/`   |
 | `/handoff list [n]`                | this repo, newest first; n caps it     |
 | `/handoff check [slug]`            | review one handoff in place, fix it    |
 | `/handoff when <slug> <path>`      | one path's ledger rows, oldest first   |
@@ -114,7 +114,7 @@ Guess neither the verb nor the target. Where either is ambiguous,
 say so, list the candidates, and stop - touch nothing.
 
 A folder argument resolves the same way everywhere: exact folder
-name, else a unique prefix of the `working/*/` names, else list the
+name, else a unique prefix of the `.handoff/*/` names, else list the
 candidates and stop (write: create the folder). A target exists when
 its `HANDOFF.md` exists. `hq` resolves its slug the same way and
 exits 2 with `hq: ambiguous slug '<slug>': <names>` or
@@ -128,10 +128,10 @@ Target, first match wins - an argument is never required:
 2. the handoff this session read, wrote, or checked, when the work
    since has been that same task; several threads this session - name
    the candidates and ask
-3. an existing `working/` folder whose slug or Task line matches this
+3. an existing `.handoff/` folder whose slug or Task line matches this
    session's task - update it, never create a twin
 4. a new slug: 2-4 kebab-case words naming the task as this session
-   would state it (`auth-token-refresh`), unique under `working/`
+   would state it (`auth-token-refresh`), unique under `.handoff/`
 
 What the target holds decides the route; the write path below is the
 same in every case:
@@ -280,7 +280,7 @@ Rules:
   its pointer line is generated, never typed.
 - Skip what the repo records: git history, CLAUDE.md, README content.
 - Too big for the file but worth keeping (a log excerpt, a survey):
-  a sibling file `working/<slug>/notes-<topic>.md`, stamped
+  a sibling file `.handoff/<slug>/notes-<topic>.md`, stamped
   `--read-before edit` when the cursor points at it, so its label stays
   in the Artifacts block instead of a count.
 - Name where a credential lives, never its value.
@@ -486,7 +486,7 @@ is R3, and a re-stamp clears R3.
   arms on the first `hq open <slug>` in the session's transcript and
   follows the slug opened most recently.
   On the first write after that - an Edit or Write outside
-  `working/<slug>/`, or a Bash command that redirects to a file, runs
+  `.handoff/<slug>/`, or a Bash command that redirects to a file, runs
   `sed -i`, `tee`, `git add`, or `git commit` - it names each gated
   path (`read_before` in {always, edit}) with no read-shaped evidence
   in the session: `handoff gate: <slug>: N gated path(s) not read this
@@ -506,7 +506,7 @@ is R3, and a re-stamp clears R3.
   `HANDOFF.md` no longer matches the sha its last finished cycle
   recorded and no cycle is open, it tells the user once (the line can
   repeat when the state directory cannot be written): `handoff:
-  working/<slug>/HANDOFF.md was written by hand since cycle N finished;
+  .handoff/<slug>/HANDOFF.md was written by hand since cycle N finished;
   run hq begin <slug>, then hq finish <slug> --log "...", or the
   next open reports LEDGER BEHIND`. The move is the one it names.
 
@@ -525,7 +525,7 @@ it - state, decisions, the Now step. Neither restates the other.
   the handoff against the result. A todo left dirty shows in the
   header's dirty list.
 - On first pointing at an item, add one back-pointer line under it:
-  `entry: working/<slug>/HANDOFF.md`. Add nothing else to the todo
+  `entry: .handoff/<slug>/HANDOFF.md`. Add nothing else to the todo
   from here.
 - An untracked todo file cannot anchor to a sha: mark the pointer
   `(untracked)`, and at read its current content is the truth.
@@ -667,7 +667,7 @@ Converge the form, destroy no content, in this order:
    changes nothing and prints `hq adopt: non-conforming header; write
    a conforming HANDOFF.md first` and the heading inventory (exit 1) -
    the map for step 3.
-2. `cp -n working/<slug>/HANDOFF.md working/<slug>/HANDOFF.orig.md`,
+2. `cp -n .handoff/<slug>/HANDOFF.md .handoff/<slug>/HANDOFF.orig.md`,
    before any other write; skip it when the copy already exists. That
    copy is never overwritten or deleted; the walk stamps it as a
    `snapshot` row. A `HANDOFF.prev.md` needs no copy: `adopt` archives
@@ -759,7 +759,7 @@ path, the size `finish` printed, and the resume line - with
 `--no-check` too:
 
 ```
-Wrote /home/me/code/poller/working/auth-token-refresh/HANDOFF.md
+Wrote /home/me/code/poller/.handoff/auth-token-refresh/HANDOFF.md
   (~528 tokens, cycle 3).
 Resume: kill this session, start a fresh one, run
   /handoff auth-token-refresh
@@ -824,7 +824,7 @@ Resume: kill this session, start a fresh one, run
 ## list
 
 `hq list [n]` prints one line
-per folder under `working/` that holds a `HANDOFF.md`, newest
+per folder under `.handoff/` that holds a `HANDOFF.md`, newest
 first by the time that file last changed, and writes nothing:
 `<slug>  <Written date>  c<N>  <done>/<total>  <Task line>`. A bare
 `list` shows every one; `list 5` the five most recent; `list 1` the
@@ -840,7 +840,7 @@ header shows `-` for the date and the cycle. The Task line is the first
 non-empty line under `## Task`, `-` when there is none. A file the
 script cannot read shows `-  -  -  unreadable: <reason>` after its slug
 and the survey goes on. Files changed in the same second list A to Z by
-slug. `hq list: no handoff under <path>` (exit 0) means `working/` holds
+slug. `hq list: no handoff under <path>` (exit 0) means `.handoff/` holds
 no folder with a `HANDOFF.md`.
 
 Plan progress is what tells a live thread from a finished one: `7/7` is

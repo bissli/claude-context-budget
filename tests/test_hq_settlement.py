@@ -28,7 +28,7 @@ def _root(tmp_path, monkeypatch, cycle='1'):
     monkeypatch.setenv('HQ_HOST', 'host')
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
-    return root / 'working' / _SLUG
+    return root / '.handoff' / _SLUG
 
 
 def _run(argv):
@@ -226,9 +226,9 @@ def test_a_bad_cycle_on_begin_creates_no_handoff_directory(
         tmp_path, monkeypatch):
     """`begin --cycle abc` on a fresh root exits 2 and leaves the disk alone.
 
-    Mutation: the resolver creating working/ for begin before the anchors
+    Mutation: the resolver creating .handoff/ for begin before the anchors
     are validated, so an exit-2 run leaves a directory behind.
-    Oracle: exit 2 and no working/ under the root.
+    Oracle: exit 2 and no .handoff/ under the root.
     """
     folder = _root(tmp_path, monkeypatch)
     monkeypatch.setenv('HQ_CYCLE', 'abc')

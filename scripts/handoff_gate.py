@@ -40,7 +40,7 @@ try:
 except ImportError:
     from scripts import hq
 
-STATE_DIR = os.path.expanduser('~/.claude/cache/context-budget')
+STATE_DIR = os.path.expanduser('~/.claude/cache/claude-handoff')
 
 WRITE_TOOL_TARGETS = {
     'Edit': 'file_path',
@@ -326,8 +326,8 @@ def gate(payload: dict[str, Any]) -> int:
     #   source: the prefix must follow a redirect, an in-place edit, or
     #   a write verb.
     # - A quoted target keeps its text while a quoted operator loses
-    #   its angle brackets, so `> "working/x/f"` counts as a write into
-    #   the folder and `grep '>' working/x/f > out` does not.
+    #   its angle brackets, so `> ".handoff/x/f"` counts as a write into
+    #   the folder and `grep '>' .handoff/x/f > out` does not.
     if folder is not None and f'{name}/{folder.name}/' in command:
         text = _QUOTED.sub(
             lambda m: re.sub(r'[<>]', ' ', m.group(0)[1:-1]),

@@ -55,7 +55,7 @@ import budget  # noqa: E402  (path must be set before this import resolves)
 # short enough to react when a session starts reading large files.
 GROWTH_WINDOW_CALLS = 60
 
-STATE_DIR = os.path.expanduser('~/.claude/cache/context-budget')
+STATE_DIR = os.path.expanduser('~/.claude/cache/claude-handoff')
 
 OSC_NOTIFY = '\x1b]9;{}\x07'
 

@@ -46,7 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import budget  # noqa: E402  (path must be set before this import resolves)
 
-STATE_DIR = os.path.expanduser('~/.claude/cache/context-budget')
+STATE_DIR = os.path.expanduser('~/.claude/cache/claude-handoff')
 
 RESET = '\x1b[0m'
 DIM = '\x1b[2m'

@@ -31,7 +31,7 @@ def _setup(
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
     monkeypatch.setenv('HQ_CYCLE', '1')
-    folder = root / 'working' / slug
+    folder = root / '.handoff' / slug
     return root, folder
 
 
@@ -72,7 +72,7 @@ def test_unreadable_ledger_artifacts(tmp_path, monkeypatch, capsys):
 
 @pytest.mark.skipif(os.geteuid() == 0, reason='root bypasses chmod 000')
 def test_handoff_dir_is_file_begin(tmp_path, monkeypatch, capsys):
-    """Begin with working/ as a regular file prints the access line.
+    """Begin with .handoff/ as a regular file prints the access line.
 
     Mutation: NotADirectoryError from mkdir not caught in main, producing
     a traceback instead of the documented 'hq: cannot access ...' line.
@@ -80,7 +80,7 @@ def test_handoff_dir_is_file_begin(tmp_path, monkeypatch, capsys):
     rc is 1, and stderr has no 'Traceback'.
     """
     root, folder = _setup(tmp_path, monkeypatch)
-    handoff_dir = root / 'working'
+    handoff_dir = root / '.handoff'
     handoff_dir.write_text('not a directory')
     rc = hq.main(['begin', _SLUG])
     out, err = capsys.readouterr()
@@ -201,8 +201,8 @@ def test_resolve_root_expands_tilde(tmp_path, monkeypatch, capsys):
     """Begin creates the folder under the expanded tilde path, not under cwd.
 
     Mutation: pathlib.Path(root) without .expanduser() so HQ_ROOT='~/r'
-    creates '<cwd>/~/r/working/<slug>' rather than '<home>/r/working/<slug>'.
-    Oracle: folder created under tmp_path / 'r' / 'working'; nothing named
+    creates '<cwd>/~/r/.handoff/<slug>' rather than '<home>/r/.handoff/<slug>'.
+    Oracle: folder created under tmp_path / 'r' / '.handoff'; nothing named
     '~' appears under the current working directory.
     """
     fake_home = tmp_path / 'home'
@@ -219,7 +219,7 @@ def test_resolve_root_expands_tilde(tmp_path, monkeypatch, capsys):
     rc = hq.main(['begin', _SLUG])
     capsys.readouterr()
     assert rc == 0
-    expected_folder = fake_home / 'r' / 'working' / _SLUG
+    expected_folder = fake_home / 'r' / '.handoff' / _SLUG
     assert expected_folder.is_dir(), (
         f'folder not created at {expected_folder}')
     assert not (tmp_path / '~').exists(), (
@@ -233,7 +233,7 @@ def test_slug_with_double_dot_exits_2(tmp_path, monkeypatch, capsys):
     """Begin 'has..dots' exits 2 with 'hq: invalid slug' and creates nothing.
 
     Mutation: slug regex [A-Za-z0-9._-]* admits consecutive dots so '..'
-    passes the fullmatch check, allowing path traversal out of working/.
+    passes the fullmatch check, allowing path traversal out of .handoff/.
     Oracle: SystemExit code 2, out contains 'hq: invalid slug', no folder.
     """
     root, folder = _setup(tmp_path, monkeypatch)
@@ -243,21 +243,21 @@ def test_slug_with_double_dot_exits_2(tmp_path, monkeypatch, capsys):
     out, _ = capsys.readouterr()
     assert exc.value.code == 2
     assert 'hq: invalid slug' in out
-    assert not (root / 'working' / bad_slug).exists()
+    assert not (root / '.handoff' / bad_slug).exists()
 
 
 def test_slug_single_dot_still_valid(tmp_path, monkeypatch, capsys):
     """Begin 'has.dots' succeeds - a single dot remains a valid slug char.
 
     Mutation: an overly broad '..' check rejecting any slug with a dot.
-    Oracle: rc is 0, folder created at root/working/has.dots.
+    Oracle: rc is 0, folder created at root/.handoff/has.dots.
     """
     root, _ = _setup(tmp_path, monkeypatch)
     good_slug = 'has.dots'
     rc = hq.main(['begin', good_slug])
     capsys.readouterr()
     assert rc == 0
-    assert (root / 'working' / good_slug).is_dir()
+    assert (root / '.handoff' / good_slug).is_dir()
 
 
 def _pre_ledger_folder(folder: pathlib.Path) -> None:
@@ -333,7 +333,7 @@ def test_unknown_user_in_a_tilde_root_keeps_the_literal_path(
         hq.main(['--root', '~nosuchuser12345/x', 'open', 'nosuch'])
     out, _ = capsys.readouterr()
     assert exit_info.value.code == 2
-    assert "no folder matching 'nosuch' under ~nosuchuser12345/x/working" in out
+    assert "no folder matching 'nosuch' under ~nosuchuser12345/x/.handoff" in out
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason='root bypasses chmod 000')

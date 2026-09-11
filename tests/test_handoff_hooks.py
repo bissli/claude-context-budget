@@ -49,7 +49,7 @@ def _handoff_root(tmp_path: pathlib.Path, slug: str = _SLUG) -> tuple:
     tmp_path : pathlib.Path
         Pytest temporary directory; the root is placed at ``tmp_path/proj``.
     slug : str, default _SLUG
-        Handoff folder name under ``working/``.
+        Handoff folder name under ``.handoff/``.
 
     Returns
     -------
@@ -62,7 +62,7 @@ def _handoff_root(tmp_path: pathlib.Path, slug: str = _SLUG) -> tuple:
       OLD.md is superseded, so a filter that drops either test breaks.
     """
     root = pathlib.Path(tmp_path) / 'proj'
-    folder = root / 'working' / slug
+    folder = root / '.handoff' / slug
     folder.mkdir(parents=True, exist_ok=True)
     (root / 'src').mkdir(exist_ok=True)
     (root / 'src' / 'app.py').write_text('x = 1\n', encoding='utf-8')
@@ -250,7 +250,7 @@ def test_gate_exempts_a_segment_whose_command_word_is_hq():
     gated = [
         'echo x > hq-notes.md',
         'echo chq > f',
-        'echo x > working/hq.md',
+        'echo x > .handoff/hq.md',
         'echo x > hq',
         'my-hq stamp demo-slug SPEC.md > out.txt',
         'git commit -m "add hq wrapper"',
@@ -280,11 +280,11 @@ def test_gate_counts_only_read_shaped_evidence(monkeypatch, capsys, tmp_path):
         return _run(monkeypatch, capsys, handoff_gate, payload)
 
     assert 'SPEC.md' in run('m1', [
-        _bash(f'ls working/{_SLUG}/SPEC.md'),
-        _bash(f'wc -l working/{_SLUG}/SPEC.md'),
+        _bash(f'ls .handoff/{_SLUG}/SPEC.md'),
+        _bash(f'wc -l .handoff/{_SLUG}/SPEC.md'),
         _bash(f'python3 scripts/hq.py stamp {_SLUG} SPEC.md'),
         ])
-    assert run('m2', [_bash(f'cat working/{_SLUG}/SPEC.md')]) == ''
+    assert run('m2', [_bash(f'cat .handoff/{_SLUG}/SPEC.md')]) == ''
     assert run('m3', [_bash(f'sed -n 1,20p {spec}')]) == ''
     assert run('m4', [_read(str(spec))]) == ''
 
@@ -440,7 +440,7 @@ def test_gate_exempts_hq_commands_and_folder_writes(monkeypatch, capsys,
     assert run('Bash', {
         'command': f'python3 scripts/hq.py stamp {_SLUG} notes-a.md'}) == ''
     assert run('Bash', {
-        'command': f'echo x > working/{_SLUG}/notes-a.md'}) == ''
+        'command': f'echo x > .handoff/{_SLUG}/notes-a.md'}) == ''
     assert run('Edit', {'file_path': str(folder / 'HANDOFF.md')}) == ''
     assert 'SPEC.md' in run('Edit', {'file_path': 'src/app.py'})
 
@@ -473,9 +473,9 @@ def test_gate_scans_the_transcript_once_per_session(monkeypatch, capsys,
         payload = _payload(root, tr, 'O1', 'Bash', tool_input)
         return _run(monkeypatch, capsys, handoff_gate, payload)
 
-    assert run({'command': f'echo x > working/{_SLUG}/notes-a.md'}) == ''
+    assert run({'command': f'echo x > .handoff/{_SLUG}/notes-a.md'}) == ''
     assert len(scanned) == 1
-    assert run({'command': f'echo y > working/{_SLUG}/notes-b.md'}) == ''
+    assert run({'command': f'echo y > .handoff/{_SLUG}/notes-b.md'}) == ''
     assert len(scanned) == 1
     tr.unlink()
     assert 'SPEC.md' in run({'command': 'echo x > src/app.py'})
@@ -656,7 +656,7 @@ def test_stop_reports_when_handoff_sha_differs_from_manifest(monkeypatch,
     handoff.write_text('# Handoff\n\n## Task\n\nWonk.\n', encoding='utf-8')
     out = _run(monkeypatch, capsys, handoff_stop, _stop_payload(root, 'P1'))
     assert json.loads(out) == {'systemMessage': (
-        f'handoff: working/{_SLUG}/HANDOFF.md was written by hand since'
+        f'handoff: .handoff/{_SLUG}/HANDOFF.md was written by hand since'
         f' cycle 2 finished; run hq begin {_SLUG}, then hq finish'
         f' {_SLUG} --log "...", or the next open reports LEDGER BEHIND')}
 

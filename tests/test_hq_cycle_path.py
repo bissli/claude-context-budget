@@ -32,7 +32,7 @@ def _new_root(tmp_path, monkeypatch, cycle='1', now=_NOW):
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
-    return root / 'working' / _SLUG
+    return root / '.handoff' / _SLUG
 
 
 def _run(argv):
@@ -149,7 +149,7 @@ def test_the_finish_header_lists_a_staged_path_as_dirty(tmp_path, monkeypatch):
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.delenv('HQ_GIT', raising=False)
-    folder = repo / 'working' / _SLUG
+    folder = repo / '.handoff' / _SLUG
 
     assert _run(['begin', _SLUG])[0] == 0
     assert _run(['finish', _SLUG, '--log', 'staged work'])[0] == 0

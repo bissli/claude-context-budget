@@ -34,7 +34,7 @@ try:
 except ImportError:
     from scripts import hq
 
-STATE_DIR = os.path.expanduser('~/.claude/cache/context-budget')
+STATE_DIR = os.path.expanduser('~/.claude/cache/claude-handoff')
 
 
 def report(payload: dict[str, Any]) -> int:

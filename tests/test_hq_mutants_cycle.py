@@ -35,7 +35,7 @@ def _new_root(tmp_path, monkeypatch, cycle='1', now=_NOW, slug=_SLUG):
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
-    return root / 'working' / slug
+    return root / '.handoff' / slug
 
 
 def _run(argv):

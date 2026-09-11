@@ -51,7 +51,7 @@ def _handoff_root(tmp_path, slug=_SLUG):
     tmp_path : pathlib.Path
         Pytest temporary directory; root placed at tmp_path/proj.
     slug : str, default _SLUG
-        Handoff folder name under working/.
+        Handoff folder name under .handoff/.
 
     Returns
     -------
@@ -59,7 +59,7 @@ def _handoff_root(tmp_path, slug=_SLUG):
         Project root and handoff folder.
     """
     root = pathlib.Path(tmp_path) / 'proj'
-    folder = root / 'working' / slug
+    folder = root / '.handoff' / slug
     folder.mkdir(parents=True, exist_ok=True)
     (root / 'src').mkdir(exist_ok=True)
     (root / 'src' / 'app.py').write_text('x = 1\n', encoding='utf-8')
@@ -390,11 +390,11 @@ def test_gate_returns_zero_for_edit_with_empty_path(monkeypatch, tmp_path):
 
 def test_gate_returns_zero_when_edit_targets_handoff_folder(
         monkeypatch, tmp_path):
-    """Verify gate() returns 0 when the target is inside working/.
+    """Verify gate() returns 0 when the target is inside .handoff/.
 
-    Mutation: x_gate__mutmut_75 - return 0 -> return 1 after the working/
+    Mutation: x_gate__mutmut_75 - return 0 -> return 1 after the .handoff/
     prefix check, changing handoff tooling writes from silent to exit-1.
-    Oracle: direct gate() return value for an Edit inside working/.
+    Oracle: direct gate() return value for an Edit inside .handoff/.
     """
     root, folder = _handoff_root(tmp_path)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
@@ -496,7 +496,7 @@ def test_gate_root_none_not_string_sentinel(monkeypatch, tmp_path):
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
     bare = tmp_path / 'bare2'
     bare.mkdir()
-    # No working/ at all - root stays as its initial value.
+    # No .handoff/ at all - root stays as its initial value.
     payload = {'cwd': str(bare), 'session_id': 'r18',
                'transcript_path': '', 'tool_name': 'Edit',
                'tool_input': {'file_path': 'x.py'}}
@@ -507,15 +507,15 @@ def test_gate_next_without_default_raises_on_empty_glob(monkeypatch, tmp_path):
     """Verify next(..., None) (not next(...,)) survives empty handoff dirs.
 
     Mutation: x_gate__mutmut_21 - removes the None sentinel from next(),
-    so StopIteration propagates when working/ has no ledger. Under
+    so StopIteration propagates when .handoff/ has no ledger. Under
     main() this is caught silently; gate() itself raises.
-    Oracle: gate() returns 0 for a directory with no working/ledger.
+    Oracle: gate() returns 0 for a directory with no .handoff/ledger.
     """
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
-    # working/ exists but no */ledger.tsv inside.
+    # .handoff/ exists but no */ledger.tsv inside.
     bare = tmp_path / 'nodir'
     bare.mkdir()
-    (bare / 'working').mkdir()
+    (bare / '.handoff').mkdir()
     payload = {'cwd': str(bare), 'session_id': 'r21',
                'transcript_path': '', 'tool_name': 'Bash',
                'tool_input': {'command': 'echo x > out.txt'}}
@@ -621,7 +621,7 @@ def test_gate_read_commands_key_is_lowercase(monkeypatch, tmp_path):
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
     tr = _transcript(tmp_path / 't.jsonl', [
         _bash(f'hq.py open {_SLUG}'),
-        _bash(f'cat working/{_SLUG}/SPEC.md'),
+        _bash(f'cat .handoff/{_SLUG}/SPEC.md'),
         ])
     payload = _payload(root, tr, 'ck0', 'Edit',
                        {'file_path': 'src/app.py'})
@@ -741,16 +741,16 @@ def test_gate_fuzzy_match_requires_dir_and_slug_prefix(
     """Verify and (not or) in fuzzy match requires both dir and prefix.
 
     Mutation: x_gate__mutmut_201 - changes and to or in the fuzzy-match
-    filter. With or, any directory in working/ (even with a wrong name)
+    filter. With or, any directory in .handoff/ (even with a wrong name)
     would be included, producing multiple matches and folder=None when
     there are multiple folders with different names.
-    Oracle: a working/ holding two folders with different names; gate
+    Oracle: a .handoff/ holding two folders with different names; gate
     still resolves the slug-prefix folder correctly with and, but would
     get multiple matches with or and find nothing.
     """
     root, folder = _handoff_root(tmp_path, slug='target-slug')
-    # Second folder in working/ that does NOT start with the slug.
-    other = root / 'working' / 'other-work'
+    # Second folder in .handoff/ that does NOT start with the slug.
+    other = root / '.handoff' / 'other-work'
     other.mkdir()
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
     tr = _transcript(tmp_path / 't.jsonl',
@@ -796,7 +796,7 @@ def test_gate_row_loop_continues_past_non_live_rows(monkeypatch, capsys,
     Oracle: gate fires on SPEC.md even when a superseded row precedes it.
     """
     root = tmp_path / 'proj2'
-    folder = root / 'working' / _SLUG
+    folder = root / '.handoff' / _SLUG
     folder.mkdir(parents=True)
     (root / 'src').mkdir()
     (root / 'src' / 'app.py').write_text('x=1', encoding='utf-8')
@@ -855,7 +855,7 @@ def test_gate_opened_loop_continues_past_read_match(monkeypatch, capsys,
     the first (continue processes all rows; break exits after the second).
     """
     root = tmp_path / 'proj3'
-    folder = root / 'working' / _SLUG
+    folder = root / '.handoff' / _SLUG
     folder.mkdir(parents=True)
     (root / 'src').mkdir()
     (root / 'src' / 'app.py').write_text('x=1', encoding='utf-8')
@@ -917,7 +917,7 @@ def test_gate_token_check_continues_past_match(monkeypatch, capsys, tmp_path):
     other (unmentioned) must still appear in the message.
     """
     root = tmp_path / 'proj4'
-    folder = root / 'working' / _SLUG
+    folder = root / '.handoff' / _SLUG
     folder.mkdir(parents=True)
     (root / 'src').mkdir()
     (root / 'src' / 'app.py').write_text('x=1', encoding='utf-8')
@@ -954,7 +954,7 @@ def test_gate_receipt_check_continues_past_match(monkeypatch, capsys,
     Oracle: two gated rows; one cleared by receipt, other must be reported.
     """
     root = tmp_path / 'proj5'
-    folder = root / 'working' / _SLUG
+    folder = root / '.handoff' / _SLUG
     folder.mkdir(parents=True)
     (root / 'src').mkdir()
     (root / 'src' / 'app.py').write_text('x=1', encoding='utf-8')
@@ -1151,16 +1151,16 @@ def test_report_root_none_not_string_sentinel(monkeypatch, tmp_path):
 
 def test_report_next_without_default_raises_on_empty_dir(
         monkeypatch, tmp_path):
-    """Verify next(..., None) survives a working/ with no manifest.
+    """Verify next(..., None) survives a .handoff/ with no manifest.
 
     Mutation: x_report__mutmut_22 - removes None sentinel from next(),
-    raising StopIteration when working/ has no manifest.tsv.
-    Oracle: report() returns 0 even when working/ is empty.
+    raising StopIteration when .handoff/ has no manifest.tsv.
+    Oracle: report() returns 0 even when .handoff/ is empty.
     """
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
     bare = tmp_path / 'emptydir'
     bare.mkdir()
-    (bare / 'working').mkdir()
+    (bare / '.handoff').mkdir()
     payload = _stop_payload(bare, 'rn22')
     assert handoff_stop.report(payload) == 0
 
@@ -1212,11 +1212,11 @@ def test_report_continue_on_lock_not_break(monkeypatch, capsys, tmp_path):
     is reported with continue and silent with break.
     """
     root = tmp_path / 'proj6'
-    (root / 'working').mkdir(parents=True)
+    (root / '.handoff').mkdir(parents=True)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
 
     # First folder: locked (active cycle) - should be skipped.
-    locked = root / 'working' / 'aaa-slug'
+    locked = root / '.handoff' / 'aaa-slug'
     locked.mkdir()
     (locked / 'HANDOFF.md').write_text('# H\n', encoding='utf-8')
     (locked / '.hq.lock').write_text('slug=aaa-slug\ncycle=1\n',
@@ -1224,7 +1224,7 @@ def test_report_continue_on_lock_not_break(monkeypatch, capsys, tmp_path):
     _finished(locked, '1', 'aaaaaaaaaaaaa')
 
     # Second folder: drifted (HANDOFF.md changed after last cycle).
-    drifted_f = root / 'working' / 'bbb-slug'
+    drifted_f = root / '.handoff' / 'bbb-slug'
     drifted_f.mkdir()
     (drifted_f / 'HANDOFF.md').write_text('# Original\n', encoding='utf-8')
     _finished(drifted_f, '1', hq._sha12_path(drifted_f / 'HANDOFF.md'))
@@ -1246,18 +1246,18 @@ def test_report_continue_on_empty_rows_not_break(monkeypatch, capsys,
     the drifted folder is reported with continue.
     """
     root = tmp_path / 'proj7'
-    (root / 'working').mkdir(parents=True)
+    (root / '.handoff').mkdir(parents=True)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
 
     # First folder: has manifest.tsv but it is empty.
-    empty_f = root / 'working' / 'aaa-empty'
+    empty_f = root / '.handoff' / 'aaa-empty'
     empty_f.mkdir()
     (empty_f / 'HANDOFF.md').write_text('# H\n', encoding='utf-8')
     (empty_f / 'cycles').mkdir()
     (empty_f / 'cycles' / 'manifest.tsv').write_text('', encoding='utf-8')
 
     # Second folder: drifted.
-    drifted_f = root / 'working' / 'bbb-drifted'
+    drifted_f = root / '.handoff' / 'bbb-drifted'
     drifted_f.mkdir()
     (drifted_f / 'HANDOFF.md').write_text('# Start\n', encoding='utf-8')
     _finished(drifted_f, '1', hq._sha12_path(drifted_f / 'HANDOFF.md'))
@@ -1279,17 +1279,17 @@ def test_report_continue_on_matching_sha_not_break(monkeypatch, capsys,
     the second is reported with continue.
     """
     root = tmp_path / 'proj8'
-    (root / 'working').mkdir(parents=True)
+    (root / '.handoff').mkdir(parents=True)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
 
     # First folder: sha matches -> no drift, loop should continue.
-    ok_f = root / 'working' / 'aaa-ok'
+    ok_f = root / '.handoff' / 'aaa-ok'
     ok_f.mkdir()
     (ok_f / 'HANDOFF.md').write_text('# Match\n', encoding='utf-8')
     _finished(ok_f, '1', hq._sha12_path(ok_f / 'HANDOFF.md'))
 
     # Second folder: drifted.
-    drift_f = root / 'working' / 'bbb-drift'
+    drift_f = root / '.handoff' / 'bbb-drift'
     drift_f.mkdir()
     (drift_f / 'HANDOFF.md').write_text('# Original\n', encoding='utf-8')
     _finished(drift_f, '1', hq._sha12_path(drift_f / 'HANDOFF.md'))
@@ -1432,7 +1432,7 @@ def test_stop_main_returns_zero_when_report_raises(monkeypatch):
 
 
 def test_gate_relative_handoff_path_silenced(monkeypatch, capsys, tmp_path):
-    """Verify a relative Edit path into working/ is silenced, not gated.
+    """Verify a relative Edit path into .handoff/ is silenced, not gated.
 
     Mutation: x_gate__mutmut_61 - inverts 'if not target.is_absolute()' to
     'if target.is_absolute()'. For a relative path that resolves into the
@@ -1440,17 +1440,17 @@ def test_gate_relative_handoff_path_silenced(monkeypatch, capsys, tmp_path):
     prefix check, and returns 0 silently. The mutant skips the join, leaving
     a relative target that does not match the absolute handoff prefix, so the
     gate fires and prints a message.
-    Oracle: stdout is empty for a relative path that resolves to working/.
+    Oracle: stdout is empty for a relative path that resolves to .handoff/.
     """
     root, folder = _handoff_root(tmp_path)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
     tr = _transcript(tmp_path / 't.jsonl', [_bash(f'hq.py open {_SLUG}')])
-    # Relative path: cwd=root, so this resolves to root/working/slug/NOTES.md.
-    relative_in_working = f'working/{folder.name}/NOTES.md'
+    # Relative path: cwd=root, so this resolves to root/.handoff/slug/NOTES.md.
+    relative_in_handoff = f'.handoff/{folder.name}/NOTES.md'
     payload = _payload(root, tr, 'rs0', 'Edit',
-                       {'file_path': relative_in_working})
+                       {'file_path': relative_in_handoff})
     out = _run(monkeypatch, capsys, handoff_gate, payload)
-    # Writing inside working/ must never trigger the gate.
+    # Writing inside .handoff/ must never trigger the gate.
     assert out == ''
 
 
@@ -1598,7 +1598,7 @@ def test_gate_exact_match_prevents_fuzzy_collision(monkeypatch, capsys,
                                                    tmp_path):
     """Verify exact-path match uses correct folder when a prefix collision exists.
 
-    Mutation: x_gate__mutmut_195 - changes 'working' to 'WORKING' in the
+    Mutation: x_gate__mutmut_195 - changes '.handoff' to '.HANDOFF' in the
     exact-match path, so the exact check always fails. The fuzzy fallback
     then finds two folders ('slug' and 'slug-extra') -> len(matches)==2 ->
     folder=None -> gate silent.
@@ -1606,15 +1606,15 @@ def test_gate_exact_match_prevents_fuzzy_collision(monkeypatch, capsys,
     """
     root = tmp_path / 'exactproj'
     root.mkdir()
-    (root / 'working').mkdir()
-    folder = root / 'working' / _SLUG
+    (root / '.handoff').mkdir()
+    folder = root / '.handoff' / _SLUG
     folder.mkdir()
     (folder / 'SPEC.md').write_text(_SPEC_TEXT, encoding='utf-8')
     (folder / 'HANDOFF.md').write_text('# H\n', encoding='utf-8')
     ledger = folder / 'ledger.tsv'
     hq._append_tsv(ledger, hq.LEDGER_FIELDS, _row('SPEC.md'), _LEDGER_HEADER)
     # Second folder with same prefix, different suffix.
-    extra = root / 'working' / f'{_SLUG}-extra'
+    extra = root / '.handoff' / f'{_SLUG}-extra'
     extra.mkdir()
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
     tr = _transcript(tmp_path / 't.jsonl', [_bash(f'hq.py open {_SLUG}')])
@@ -1638,7 +1638,7 @@ def test_gate_relative_read_path_resolved_before_opened_check(
     root, folder = _handoff_root(tmp_path)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
     # Relative path to SPEC.md from the project root (cwd=root in _payload).
-    rel_spec = f'working/{folder.name}/SPEC.md'
+    rel_spec = f'.handoff/{folder.name}/SPEC.md'
     tr = _transcript(tmp_path / 't.jsonl', [
         _bash(f'hq.py open {_SLUG}'),
         _read(rel_spec),
@@ -1665,16 +1665,16 @@ def test_report_continue_on_missing_manifest_not_break(monkeypatch, capsys,
     second folder is reported with continue and missed with break.
     """
     root = tmp_path / 'proj9'
-    (root / 'working').mkdir(parents=True)
+    (root / '.handoff').mkdir(parents=True)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
 
     # First folder: HANDOFF.md but no cycles/manifest.tsv -> triggers line 78.
-    no_manifest = root / 'working' / 'aaa-nomanifest'
+    no_manifest = root / '.handoff' / 'aaa-nomanifest'
     no_manifest.mkdir()
     (no_manifest / 'HANDOFF.md').write_text('# H\n', encoding='utf-8')
 
     # Second folder: drifted (HANDOFF.md changed after last cycle).
-    drifted_f = root / 'working' / 'bbb-drifted'
+    drifted_f = root / '.handoff' / 'bbb-drifted'
     drifted_f.mkdir()
     (drifted_f / 'HANDOFF.md').write_text('# Original\n', encoding='utf-8')
     _finished(drifted_f, '1', hq._sha12_path(drifted_f / 'HANDOFF.md'))

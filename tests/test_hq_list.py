@@ -61,7 +61,7 @@ def test_list_orders_newest_first(tmp_path, monkeypatch, capsys):
     Oracle: line order when the alphabetically-first folder is older.
     """
     root = _new_root(tmp_path, monkeypatch)
-    handoff_root = root / 'working'
+    handoff_root = root / '.handoff'
     handoff_root.mkdir()
 
     alpha = handoff_root / 'alpha-first'
@@ -91,7 +91,7 @@ def test_list_count_limits_output(tmp_path, monkeypatch, capsys):
     Oracle: line count for the finite cap, message and code for zero.
     """
     root = _new_root(tmp_path, monkeypatch)
-    handoff_root = root / 'working'
+    handoff_root = root / '.handoff'
     handoff_root.mkdir()
 
     for i in range(3):
@@ -122,7 +122,7 @@ def test_list_fields_conforming_file(tmp_path, monkeypatch, capsys):
     Oracle: hand-computed line for a known fixture.
     """
     root = _new_root(tmp_path, monkeypatch)
-    handoff_root = root / 'working'
+    handoff_root = root / '.handoff'
     handoff_root.mkdir()
 
     slug = 'feature-x'
@@ -156,7 +156,7 @@ def test_list_no_plan_checkboxes_prints_dash(tmp_path, monkeypatch, capsys):
     Oracle: the exact field is '-' for a numbered-only Plan and a missing Plan.
     """
     root = _new_root(tmp_path, monkeypatch)
-    handoff_root = root / 'working'
+    handoff_root = root / '.handoff'
     handoff_root.mkdir()
 
     # Folder with a Plan that has only numbered items (no checkboxes).
@@ -194,7 +194,7 @@ def test_list_non_conforming_file_prints_dashes(tmp_path, monkeypatch, capsys):
     Oracle: the slug still appears with '-' for both date and cycle.
     """
     root = _new_root(tmp_path, monkeypatch)
-    handoff_root = root / 'working'
+    handoff_root = root / '.handoff'
     handoff_root.mkdir()
 
     slug = 'legacy-work'
@@ -217,21 +217,21 @@ def test_list_no_handoff_prints_message_and_returns_0(tmp_path, monkeypatch, cap
     """List prints 'no handoff' and returns 0 when nothing qualifies.
 
     Mutation: return 1, or crashing on the missing directory.
-    Oracle: message and code for both missing dir and empty working/.
+    Oracle: message and code for both missing dir and empty .handoff/.
     """
     root = _new_root(tmp_path, monkeypatch)
 
-    # Case 1: working/ does not exist.
+    # Case 1: .handoff/ does not exist.
     rc1, out1, _ = _run(['list'], capsys)
     assert rc1 == 0
-    assert f'hq list: no handoff under {root / "working"}' in out1.strip()
+    assert f'hq list: no handoff under {root / ".handoff"}' in out1.strip()
 
-    # Case 2: working/ exists but contains no HANDOFF.md.
-    (root / 'working').mkdir()
-    (root / 'working' / 'slug-a').mkdir()
+    # Case 2: .handoff/ exists but contains no HANDOFF.md.
+    (root / '.handoff').mkdir()
+    (root / '.handoff' / 'slug-a').mkdir()
     rc2, out2, _ = _run(['list'], capsys)
     assert rc2 == 0
-    assert f'hq list: no handoff under {root / "working"}' in out2.strip()
+    assert f'hq list: no handoff under {root / ".handoff"}' in out2.strip()
 
 
 def test_begin_missing_live_shows_hq_when_hint(tmp_path, monkeypatch, capsys):
@@ -243,7 +243,7 @@ def test_begin_missing_live_shows_hq_when_hint(tmp_path, monkeypatch, capsys):
     root = _new_root(tmp_path, monkeypatch)
     rc0, _, _ = _run(['begin', _SLUG], capsys)
     assert rc0 == 0
-    folder = root / 'working' / _SLUG
+    folder = root / '.handoff' / _SLUG
     gone_file = folder / 'gone.md'
     gone_file.write_text('# Gone\n', encoding='utf-8')
     rc_stamp, _, _ = _run(['stamp', _SLUG, 'gone.md'], capsys)
@@ -269,7 +269,7 @@ def test_list_breaks_mtime_ties_by_slug(tmp_path, monkeypatch, capsys):
     Oracle: six folders with one mtime print in alphabetical order.
     """
     root = _new_root(tmp_path, monkeypatch)
-    handoff_root = root / 'working'
+    handoff_root = root / '.handoff'
     handoff_root.mkdir()
     slugs = ['echo', 'alpha', 'foxtrot', 'charlie', 'bravo', 'delta']
     for slug in slugs:
@@ -291,7 +291,7 @@ def test_list_skips_a_fifo_and_a_directory_named_handoff(
     Oracle: only the regular file's slug prints, rc 0, within 5 s.
     """
     root = _new_root(tmp_path, monkeypatch)
-    handoff_root = root / 'working'
+    handoff_root = root / '.handoff'
     handoff_root.mkdir()
     (handoff_root / 'ok-slug').mkdir()
     (handoff_root / 'ok-slug' / 'HANDOFF.md').write_text('# x\n', encoding='utf-8')
@@ -319,7 +319,7 @@ def test_list_reports_an_unreadable_handoff_and_goes_on(
     rc 0.
     """
     root = _new_root(tmp_path, monkeypatch)
-    handoff_root = root / 'working'
+    handoff_root = root / '.handoff'
     handoff_root.mkdir()
     for slug, stamp in (('locked', 2000000), ('open-one', 1000000)):
         (handoff_root / slug).mkdir()
@@ -352,7 +352,7 @@ def test_list_parses_task_plan_and_block_edges(tmp_path, monkeypatch, capsys):
     Oracle: the exact line 'edges  2026-09-03  c4  1/2  First line.'.
     """
     root = _new_root(tmp_path, monkeypatch)
-    handoff_root = root / 'working'
+    handoff_root = root / '.handoff'
     handoff_root.mkdir()
     (handoff_root / 'edges').mkdir()
     (handoff_root / 'edges' / 'HANDOFF.md').write_text(

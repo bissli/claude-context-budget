@@ -22,7 +22,7 @@ _NOW = '2026-09-09T12:00:00'
 def _root(tmp_path, monkeypatch, slug=_SLUG):
     """Create an HQ_ROOT and set the HQ_* environment for one slug.
 
-    Returns the folder path root/working/<slug>/, not yet created.
+    Returns the folder path root/.handoff/<slug>/, not yet created.
     """
     root = pathlib.Path(tmp_path) / 'root'
     root.mkdir(exist_ok=True)
@@ -33,7 +33,7 @@ def _root(tmp_path, monkeypatch, slug=_SLUG):
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
-    return root / 'working' / slug
+    return root / '.handoff' / slug
 
 
 def _rows(folder):

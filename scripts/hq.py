@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Handoff ledger script: thirteen verbs for managing per-project handoff files.
 
-Each handoff lives in working/<slug>/: HANDOFF.md written by the agent,
+Each handoff lives in .handoff/<slug>/: HANDOFF.md written by the agent,
 ledger.tsv stamping every artifact, and standing.md for decisions,
 constraints, and dead ends. Three rendered blocks keep the payload bounded
 across cycles, because each block shows live counts and unsuperseded items,
@@ -57,7 +57,7 @@ MANIFEST_FIELDS = [
 _LEDGER_HEADER = '\t'.join(LEDGER_FIELDS)
 _MANIFEST_HEADER = '\t'.join(MANIFEST_FIELDS)
 _SKIP_NAMES = {'HANDOFF.md', 'ledger.tsv', 'standing.md', 'cycles', '.hq.lock'}
-HANDOFF_DIRNAME = 'working'
+HANDOFF_DIRNAME = '.handoff'
 _HEADER_PAT = re.compile(r'Written:\s*.+?\s*\|\s*Cycle:\s*(\d+)')
 # Notes:
 # - A grading label under Key files may be written as its own heading;
@@ -83,7 +83,7 @@ _STOPWORDS = {
     'could', 'must', 'may', 'can', 'its', 'our', 'your', 'they', 'them',
     'step', 'next', 'first', 'last', 'now', 'here',
     }
-_DEFAULT_STATE = pathlib.Path.home() / '.claude' / 'cache' / 'context-budget'
+_DEFAULT_STATE = pathlib.Path.home() / '.claude' / 'cache' / 'claude-handoff'
 
 
 # ----------------------------------------------------------------------
@@ -1093,7 +1093,7 @@ def _resolve_root(argv: argparse.Namespace) -> pathlib.Path:
     Notes
     -----
     - A root that exists and is not a directory exits 2; every caller
-      would otherwise raise NotADirectoryError joining ``working`` onto
+      would otherwise raise NotADirectoryError joining ``.handoff`` onto
       it.
     """
     root = getattr(argv, 'root', None) or os.environ.get('HQ_ROOT')
@@ -1267,9 +1267,9 @@ def _find_folder(
     root : pathlib.Path
         Project root.
     slug : str
-        Exact folder name or a unique prefix under ``root/working/``.
+        Exact folder name or a unique prefix under ``root/.handoff/``.
     missing_ok : bool, default False
-        When True, return ``working/<slug>`` instead of exiting when no
+        When True, return ``.handoff/<slug>`` instead of exiting when no
         folder matches; still exits on ambiguity. ``begin`` creates it.
 
     Returns
@@ -1280,8 +1280,8 @@ def _find_folder(
     Notes
     -----
     - The slug is one path component: ``[A-Za-z0-9][A-Za-z0-9._-]*``. It
-      is joined onto ``working/`` unquoted, so ``..`` or an embedded
-      separator would place a handoff folder outside ``working/``.
+      is joined onto ``.handoff/`` unquoted, so ``..`` or an embedded
+      separator would place a handoff folder outside ``.handoff/``.
     - Nothing here writes: a read-only verb on a mistyped root leaves
       the disk as it found it, and ``begin`` creates the folder itself.
     """

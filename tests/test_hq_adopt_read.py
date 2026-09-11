@@ -54,7 +54,7 @@ def _root(tmp_path, monkeypatch, slug=_SLUG, cycle=None):
         monkeypatch.delenv('HQ_CYCLE', raising=False)
     else:
         monkeypatch.setenv('HQ_CYCLE', cycle)
-    folder = root / 'working' / slug
+    folder = root / '.handoff' / slug
     folder.mkdir(parents=True, exist_ok=True)
     return folder
 
@@ -341,10 +341,10 @@ def test_adopt_seeds_an_anchor_the_read_block_can_resolve(
 def test_a_traversing_or_empty_slug_is_refused(tmp_path, monkeypatch, capsys):
     """`begin ..`, `begin ../../victim`, and `begin ''` write nothing.
 
-    Mutation: the slug joined onto working/ unchecked, so `begin ..` turns
+    Mutation: the slug joined onto .handoff/ unchecked, so `begin ..` turns
     the project root into a handoff folder.
     Oracle: exit 2 with the documented line, and no HANDOFF.md anywhere
-    outside working/.
+    outside .handoff/.
     """
     folder = _root(tmp_path, monkeypatch)
     root = folder.parent.parent
@@ -358,11 +358,11 @@ def test_a_traversing_or_empty_slug_is_refused(tmp_path, monkeypatch, capsys):
 
 
 def test_a_read_only_verb_creates_no_handoff_directory(tmp_path, monkeypatch):
-    """A miss on a root with no working/ leaves the disk untouched.
+    """A miss on a root with no .handoff/ leaves the disk untouched.
 
-    Mutation: working.mkdir before the resolve, so any typo on any verb
+    Mutation: .handoff.mkdir before the resolve, so any typo on any verb
     creates directories under a wrong root.
-    Oracle: root/working does not exist after the failed lookup.
+    Oracle: root/.handoff does not exist after the failed lookup.
     """
     root = pathlib.Path(tmp_path) / 'bare'
     root.mkdir()
@@ -371,7 +371,7 @@ def test_a_read_only_verb_creates_no_handoff_directory(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         hq.main(['open', 'ghost'])
     assert exc.value.code == 2
-    assert not (root / 'working').exists()
+    assert not (root / '.handoff').exists()
 
 
 # --- item 7: the walk skips what it cannot stamp ----------------------
@@ -701,7 +701,7 @@ def test_an_exact_folder_name_beats_a_longer_prefix_match(
 
     Mutation: the exact-name test removed, so `demo` is ambiguous between
     demo and demo-extra and exits 2.
-    Oracle: the resolved folder is working/demo.
+    Oracle: the resolved folder is .handoff/demo.
     """
     folder = _root(tmp_path, monkeypatch)
     (folder.parent / 'demo-extra').mkdir()
@@ -844,7 +844,7 @@ def test_the_root_flag_beats_the_environment(tmp_path, monkeypatch, capsys):
     _handoff(folder)
     assert hq.main(['adopt', _SLUG]) == 0
     other = pathlib.Path(tmp_path) / 'other'
-    (other / 'working').mkdir(parents=True)
+    (other / '.handoff').mkdir(parents=True)
     monkeypatch.setenv('HQ_ROOT', str(other))
     with pytest.raises(SystemExit) as exc:
         hq.main(['open', _SLUG])
@@ -892,12 +892,12 @@ def test_a_key_files_label_with_a_trailing_clause_is_structure(
     folder = _root(tmp_path, monkeypatch)
     (folder / 'notes-a.md').write_text('# Notes\n\nfacts\n')
     _handoff(folder, key_files=(
-        'Read now, under `working/demo/` unless noted:\n\n'
+        'Read now, under `.handoff/demo/` unless noted:\n\n'
         '- `notes-a.md` the facts\n'))
     assert hq.main(['adopt', _SLUG]) == 0
     rows = {r['path']: r for r in _ledger(folder)}
     assert rows['notes-a.md']['read_before'] == 'always'
-    assert ('- unfiled: Read now, under `working/demo/` unless noted:'
+    assert ('- unfiled: Read now, under `.handoff/demo/` unless noted:'
             in (folder / 'HANDOFF.md').read_text())
 
 

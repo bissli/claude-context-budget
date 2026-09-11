@@ -134,7 +134,7 @@ def _new_root(
     Returns
     -------
     pathlib.Path
-        The expected folder path root/working/<slug>/ (not yet created).
+        The expected folder path root/.handoff/<slug>/ (not yet created).
     """
     root = pathlib.Path(tmp_path) / 'root'
     root.mkdir(exist_ok=True)
@@ -145,7 +145,7 @@ def _new_root(
     monkeypatch.setenv('HQ_HOST', _HOST)
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
-    return root / 'working' / slug
+    return root / '.handoff' / slug
 
 
 def _thread(
@@ -173,7 +173,7 @@ def _thread(
     Returns
     -------
     pathlib.Path
-        The handoff folder path (root/working/thread-slug/).
+        The handoff folder path (root/.handoff/thread-slug/).
 
     Notes
     -----
@@ -184,7 +184,7 @@ def _thread(
     slug = 'thread-slug'
     root = pathlib.Path(str(tmp_path)) / 'root'
     root.mkdir(exist_ok=True)
-    folder = root / 'working' / slug
+    folder = root / '.handoff' / slug
     folder.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setenv('HQ_ROOT', str(root))
@@ -686,7 +686,7 @@ def test_log_line_carries_the_dirty_count(tmp_path, monkeypatch):
     root = folder.parent.parent
     subprocess.run(['git', 'init', '-q'], cwd=root, check=True)
     # Exclude the handoff dir from git status so only tracked.txt is dirty.
-    (root / '.gitignore').write_text('working/\n', encoding='utf-8')
+    (root / '.gitignore').write_text('.handoff/\n', encoding='utf-8')
     (root / 'tracked.txt').write_text('one\n')
     subprocess.run(['git', 'add', 'tracked.txt', '.gitignore'], cwd=root, check=True)
     subprocess.run([
@@ -1840,7 +1840,7 @@ def test_adopt_of_a_non_conforming_handoff_changes_nothing(tmp_path,
     root = tmp_path / 'root'
     root.mkdir()
     src = os.path.join(FIXTURES, 'legacy-import-notes')
-    dst = str(root / 'working' / 'legacy-import-notes')
+    dst = str(root / '.handoff' / 'legacy-import-notes')
     shutil.copytree(src, dst)
 
     monkeypatch.setenv('HQ_ROOT', str(root))
@@ -1851,7 +1851,7 @@ def test_adopt_of_a_non_conforming_handoff_changes_nothing(tmp_path,
     monkeypatch.setenv('HQ_GIT', '0')
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
 
-    folder = root / 'working' / 'legacy-import-notes'
+    folder = root / '.handoff' / 'legacy-import-notes'
     ret = hq.main(['adopt', 'legacy-import-notes'])
     assert ret == 1
     assert not (folder / 'ledger.tsv').exists()
@@ -1872,11 +1872,11 @@ def test_adopt_conservation_excludes_the_archive(tmp_path, monkeypatch):
     root = tmp_path / 'root'
     root.mkdir()
     src = os.path.join(FIXTURES, 'orbit-cache-rewrite')
-    dst = str(root / 'working' / 'orbit-cache-rewrite')
+    dst = str(root / '.handoff' / 'orbit-cache-rewrite')
     shutil.copytree(src, dst)
 
     slug = 'orbit-cache-rewrite'
-    folder = root / 'working' / slug
+    folder = root / '.handoff' / slug
     original_bytes = (folder / 'HANDOFF.md').read_bytes()
     original_text = (folder / 'HANDOFF.md').read_text()
 

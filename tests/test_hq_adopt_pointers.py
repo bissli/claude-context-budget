@@ -36,7 +36,7 @@ def _root(
     monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path))
     monkeypatch.setenv('HQ_GIT', '0')
     monkeypatch.delenv('HQ_CYCLE', raising=False)
-    folder = root / 'working' / slug
+    folder = root / '.handoff' / slug
     folder.mkdir(parents=True, exist_ok=True)
     return folder
 
@@ -602,7 +602,6 @@ def test_adopt_row_describes_the_archive_and_notes_its_own_provenance(
         ' in cycles/c04.md')
 
 
-
 def test_adopt_row_written_is_the_date_alone_or_the_adopt_date(
         tmp_path, monkeypatch):
     """`written` on the adopt row is the header's YYYY-MM-DD, else the adopt date.
@@ -630,7 +629,6 @@ def test_adopt_row_written_is_the_date_alone_or_the_adopt_date(
 
     assert _manifest(stamped)[-1]['written'] == '2026-08-31'
     assert _manifest(undated)[-1]['written'] == '2026-09-01'
-
 
 
 def test_adopt_note_names_the_adopting_git_state_and_the_row_keeps_the_archive(

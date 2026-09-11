@@ -52,7 +52,7 @@ def _handoff_root(
     tmp_path : pathlib.Path
         Pytest temporary directory.
     slug : str, default _SLUG
-        Handoff folder name under ``working/``.
+        Handoff folder name under ``.handoff/``.
 
     Returns
     -------
@@ -60,7 +60,7 @@ def _handoff_root(
         The project root and the handoff folder.
     """
     root = tmp_path / 'proj'
-    folder = root / 'working' / slug
+    folder = root / '.handoff' / slug
     folder.mkdir(parents=True, exist_ok=True)
     (root / 'src').mkdir(exist_ok=True)
     (root / 'src' / 'app.py').write_text('x = 1\n', encoding='utf-8')
@@ -200,7 +200,7 @@ def test_gate_fires_when_folder_precedes_redirect(monkeypatch, capsys, tmp_path)
     """Verify a read-from-folder then redirect-elsewhere trips the gate.
 
     Mutation: exempting any command that mentions the folder path, so
-    'cat working/<slug>/SPEC.md > /tmp/out' is silenced although spec.md
+    'cat .handoff/<slug>/SPEC.md > /tmp/out' is silenced although spec.md
     is gated and the redirect target is outside the folder.
     Oracle: stdout must name SPEC.md; the folder path precedes '>' so the
     write target is not in the folder.
@@ -211,7 +211,7 @@ def test_gate_fires_when_folder_precedes_redirect(monkeypatch, capsys, tmp_path)
                      [_bash(f'python3 scripts/hq.py open {_SLUG}')])
     payload = _gate_payload(
         root, tr, 'V1', 'Bash',
-        {'command': f'cat working/{_SLUG}/SPEC.md > /tmp/out.txt'})
+        {'command': f'cat .handoff/{_SLUG}/SPEC.md > /tmp/out.txt'})
     out = _run(monkeypatch, capsys, handoff_gate, payload)
     assert 'SPEC.md' in out
 
@@ -220,7 +220,7 @@ def test_gate_redirect_into_folder_stays_exempt(monkeypatch, capsys, tmp_path):
     """Verify a redirect whose target is inside the folder stays silent.
 
     Mutation: removing the write-target check so every command mentioning
-    the folder trips the gate, including 'echo x > working/<slug>/notes.md'
+    the folder trips the gate, including 'echo x > .handoff/<slug>/notes.md'
     which writes into the managed folder.
     Oracle: stdout must be empty; the redirect target is inside the folder.
     """
@@ -230,7 +230,7 @@ def test_gate_redirect_into_folder_stays_exempt(monkeypatch, capsys, tmp_path):
                      [_bash(f'python3 scripts/hq.py open {_SLUG}')])
     payload = _gate_payload(
         root, tr, 'V2', 'Bash',
-        {'command': f'echo x > working/{_SLUG}/notes.md'})
+        {'command': f'echo x > .handoff/{_SLUG}/notes.md'})
     out = _run(monkeypatch, capsys, handoff_gate, payload)
     assert out == ''
 
@@ -249,7 +249,7 @@ def test_gate_sed_inplace_into_folder_stays_exempt(monkeypatch, capsys,
                      [_bash(f'python3 scripts/hq.py open {_SLUG}')])
     payload = _gate_payload(
         root, tr, 'V3', 'Bash',
-        {'command': f'sed -i s/a/b/ working/{_SLUG}/notes.md'})
+        {'command': f'sed -i s/a/b/ .handoff/{_SLUG}/notes.md'})
     out = _run(monkeypatch, capsys, handoff_gate, payload)
     assert out == ''
 
@@ -258,7 +258,7 @@ def test_gate_tee_into_folder_stays_exempt(monkeypatch, capsys, tmp_path):
     """Verify tee targeting the folder stays silent.
 
     Mutation: removing the write-target check so 'echo x | tee
-    working/<slug>/notes.md' trips the gate, blocking tee writes into
+    .handoff/<slug>/notes.md' trips the gate, blocking tee writes into
     the managed folder.
     Oracle: stdout must be empty; tee's argument is inside the folder.
     """
@@ -268,7 +268,7 @@ def test_gate_tee_into_folder_stays_exempt(monkeypatch, capsys, tmp_path):
                      [_bash(f'python3 scripts/hq.py open {_SLUG}')])
     payload = _gate_payload(
         root, tr, 'V4', 'Bash',
-        {'command': f'echo x | tee working/{_SLUG}/notes.md'})
+        {'command': f'echo x | tee .handoff/{_SLUG}/notes.md'})
     out = _run(monkeypatch, capsys, handoff_gate, payload)
     assert out == ''
 
@@ -309,7 +309,7 @@ def test_gate_quoted_target_inside_folder_stays_exempt(
                      [_bash(f'python3 scripts/hq.py open {_SLUG}')])
     payload = _gate_payload(
         root, tr, 'V7', 'Bash',
-        {'command': f'echo x > "working/{_SLUG}/notes.md"'})
+        {'command': f'echo x > ".handoff/{_SLUG}/notes.md"'})
     out = _run(monkeypatch, capsys, handoff_gate, payload)
     assert out == ''
 
@@ -329,6 +329,6 @@ def test_gate_quoted_operator_before_a_folder_read_still_fires(
                      [_bash(f'python3 scripts/hq.py open {_SLUG}')])
     payload = _gate_payload(
         root, tr, 'V8', 'Bash',
-        {'command': f"grep '>' working/{_SLUG}/SPEC.md > /tmp/out.txt"})
+        {'command': f"grep '>' .handoff/{_SLUG}/SPEC.md > /tmp/out.txt"})
     out = _run(monkeypatch, capsys, handoff_gate, payload)
     assert 'SPEC.md' in out

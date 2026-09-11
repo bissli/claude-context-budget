@@ -16,7 +16,7 @@ def test_bin_hq_forwards_its_arguments_to_the_script(tmp_path):
     a space splits into two arguments.
     Oracle: a differential run of python3 scripts/hq.py on the same argv;
     the root holds no handoff, so the script prints its own `hq list: no
-    handoff under <root>/working` line, which the wrapper must match on
+    handoff under <root>/.handoff` line, which the wrapper must match on
     stdout and exit code.
     """
     root = tmp_path / 'a dir'
@@ -29,6 +29,6 @@ def test_bin_hq_forwards_its_arguments_to_the_script(tmp_path):
         [str(ROOT / 'bin' / 'hq'), *argv], capture_output=True, text=True)
     assert os.access(ROOT / 'bin' / 'hq', os.X_OK)
     assert direct.returncode == 0
-    assert direct.stdout == f'hq list: no handoff under {root}/working\n'
+    assert direct.stdout == f'hq list: no handoff under {root}/.handoff\n'
     assert (wrapped.returncode, wrapped.stdout) == (
         direct.returncode, direct.stdout)
