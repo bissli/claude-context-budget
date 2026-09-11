@@ -941,6 +941,36 @@ def test_standing_cap_keeps_the_superseded_line():
     assert 'more' in result[-2]
 
 
+def test_the_standing_cut_takes_from_the_longest_kind_first():
+    """The 80-line cut spreads across kinds, longest first, keeping every heading.
+
+    Mutation: the list truncated from the end, so the cut lands on the
+    dead ends alone - x13 to x26 gone in the first fixture and the whole
+    Dead ends heading gone in the second; or the budget arithmetic off
+    by the heading count, so the block runs past 80 lines.
+    Oracle: hand-computed max-min allocation - room 80 - 1 - 3 = 76 over
+    needs 26/38/26 gives 25/26/25 with 14 dropped; 90 constraints and 5
+    dead ends keep all five dead ends and their heading.
+    """
+    def _items(prefix, n, body):
+        return [
+            {'id': f'{prefix}{i:02d}', 'prefix': prefix, 'cycle': '1',
+             'headline': f'{prefix} item {i}', 'body': body}
+            for i in range(1, n + 1)]
+
+    items = _items('c', 26, 'why it holds') + _items('d', 38, '') + _items('x', 26, '')
+    lines = hq.render_standing(items, set(), 'widget-alpha').splitlines()
+    assert len(lines) == 80
+    assert [lines.count(h) for h in ('### Constraints', '### Decisions', '### Dead ends')] == [1, 1, 1]
+    assert [sum(ln.startswith(f'[{p}') for ln in lines) for p in 'cdx'] == [25, 26, 25]
+    assert lines[-1] == '... 14 more  - hq standing widget-alpha'
+    lines = hq.render_standing(
+        _items('c', 90, 'b') + _items('x', 5, ''), set(), 'widget-alpha').splitlines()
+    assert len(lines) == 80
+    assert '### Dead ends' in lines
+    assert sum(ln.startswith('[x') for ln in lines) == 5
+
+
 def test_header_past_five_dirty_paths_shows_the_total():
     """Verify the header tail names the total past five dirty paths.
 

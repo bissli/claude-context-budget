@@ -252,8 +252,9 @@ How to read the generated blocks:
   `(c1)` is the cycle that recorded the item. Constraints print in
   full, the rest as headlines; `superseded n  - hq standing <slug>`
   counts the superseded items and `... n more  - hq standing <slug>`
-  names the cut past 80 lines. `hq standing <slug>` prints every
-  item in full.
+  names the cut past 80 lines. The cut takes from the longest kind
+  first, so every kind keeps its heading and a share of the block.
+  `hq standing <slug>` prints every item in full.
 - `Log`: `+1` counts dirty paths at that finish. An adopted folder's
   first line reads `adopted`, or `adopted; prior Log: N lines in
   cycles/cNN.md` when the file had a Log; the archived file holds those

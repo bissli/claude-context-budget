@@ -750,11 +750,18 @@ def render_standing(
     Returns
     -------
     str
-        Block body; at most 80 lines before the overflow line.
+        Block body; at most 80 lines, the overflow line and the
+        superseded count included.
+
+    Notes
+    -----
+    - Past the cap the cut takes from the longest kind first, max-min
+      fair across the kinds present, so every kind keeps its heading and
+      a share of the lines and the overflow line counts what was cut.
     """
     live = [i for i in items if i['id'] not in superseded_ids]
     sup_count = len(items) - len(live)
-    out: list[str] = []
+    groups: list[tuple[str, list[str]]] = []
     for prefix, heading, include_body in (
         ('c', '### Constraints', True),
         ('d', '### Decisions', False),
@@ -763,18 +770,34 @@ def render_standing(
         group = [i for i in live if i['prefix'] == prefix]
         if not group:
             continue
-        out.append(heading)
+        rendered: list[str] = []
         for item in group:
             pfx = f'(c{item["cycle"]}) ' if item.get('cycle') else ''
             line = f'[{item["id"]}] {pfx}**{item["headline"]}**'
             if include_body:
                 line = _join_headline_body(line, item.get('body', ''))
-            out.append(line.rstrip())
+            rendered.append(line.rstrip())
+        groups.append((heading, rendered))
     tail = [f'superseded {sup_count}  - hq standing {slug}'] if sup_count else []
-    if len(out) + len(tail) > 80:
-        keep = 80 - len(tail) - 1
-        n_more = len(out) - keep
-        out = out[:keep] + [f'... {n_more} more  - hq standing {slug}']
+    if sum(1 + len(rendered) for _, rendered in groups) + len(tail) <= 80:
+        out = [ln for heading, rendered in groups for ln in (heading, *rendered)]
+        return '\n'.join(out + tail)
+    # The headings and the overflow line always print; what is left is
+    # shared out shortest kind first, so a kind that fits whole keeps
+    # every line and the longest kind absorbs the rest of the cut.
+    left = max(80 - len(tail) - 1 - len(groups), 0)
+    keep: dict[str, int] = {}
+    by_size = sorted(groups, key=lambda g: len(g[1]))
+    for i, (heading, rendered) in enumerate(by_size):
+        keep[heading] = min(len(rendered), left // (len(groups) - i))
+        left -= keep[heading]
+    out: list[str] = []
+    n_more = 0
+    for heading, rendered in groups:
+        out.append(heading)
+        out.extend(rendered[:keep[heading]])
+        n_more += len(rendered) - keep[heading]
+    out.append(f'... {n_more} more  - hq standing {slug}')
     return '\n'.join(out + tail)
 
 
