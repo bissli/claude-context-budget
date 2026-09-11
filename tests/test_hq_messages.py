@@ -534,6 +534,35 @@ def test_supersede_prints_the_item_it_drops_from_the_block(tmp_path, monkeypatch
     assert out.split(': ', 1)[1].rstrip('\n') == stored[2:]
 
 
+def test_open_names_a_folder_path_under_another_directory(tmp_path, monkeypatch):
+    """open reports cursor and standing text naming the folder outside .handoff/.
+
+    Mutation: HANDOFF.md scanned and not standing.md, the .handoff
+    exclusion dropped so a current path reports too, or one line printed
+    per mention instead of one per directory.
+    Oracle: hand-seeded text - two 'working/<slug>/' mentions in the
+    cursor, one in standing.md, and one '.handoff/<slug>/' mention that
+    must not print.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    _run(['begin', _SLUG])
+    handoff = folder / 'HANDOFF.md'
+    handoff.write_text(handoff.read_text().replace(
+        '## Environment',
+        '## Environment\n'
+        f'- Root: working/{_SLUG}/\n'
+        f'- Notes: working/{_SLUG}/notes-crew.md\n'
+        f'- Current: .handoff/{_SLUG}/\n', 1))
+    _run(['note', _SLUG, 'constraint', '--headline', 'Keep the crew notes',
+          f'Under working/{_SLUG}/notes-crew.md.'])
+    rc, out, _ = _run(['open', _SLUG])
+    assert rc == 0
+    assert [ln for ln in out.splitlines() if 'stale folder path' in ln] == [
+        f'stale folder path in HANDOFF.md: working/{_SLUG}/ x2',
+        f'stale folder path in standing.md: working/{_SLUG}/ x1',
+        ]
+
+
 def test_shorter_label_advisory_fires_only_in_the_cycle_that_shortened_it(
         tmp_path, monkeypatch):
     """A label shortened in one cycle is reported at that finish alone.

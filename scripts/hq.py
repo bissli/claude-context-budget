@@ -3831,7 +3831,7 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
 
 
 def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int:
-    """Run open: print read-only status, drift, W1/W2, and sha-moved rows.
+    """Run open: print status, drift, W1/W2, sha-moved rows, stale folder paths.
 
     Parameters
     ----------
@@ -3929,6 +3929,27 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
                         pass
             if old_spans and new_spans and old_spans != new_spans:
                 print(f'span moved: {row["path"]} {old_spans} -> {new_spans}')
+    # Notes:
+    # - A `<dir>/<slug>/` mention whose directory is not the one the
+    #   folder lives under names a place the folder is not: the agent
+    #   wrote the path before a rename or a move, and no sha or row
+    #   check reads that prose.
+    # - Only the cursor and standing.md are scanned: the generated
+    #   blocks are rewritten from standing.md at finish, and a notes
+    #   sibling may quote where work used to live.
+    stale_pat = re.compile(r'([\w.-]+)/' + re.escape(folder.name) + r'/')
+    for name, scanned in (
+        ('HANDOFF.md', parsed.get('cursor', '')),
+        ('standing.md', sb.decode('utf-8', 'replace')),
+    ):
+        counts: dict[str, int] = {}
+        for m in stale_pat.finditer(scanned):
+            if m.group(1) != HANDOFF_DIRNAME:
+                counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+        for dirname in sorted(counts):
+            print(
+                f'stale folder path in {name}:'
+                f' {dirname}/{folder.name}/ x{counts[dirname]}')
     return 0
 
 
