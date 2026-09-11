@@ -286,6 +286,29 @@ def test_where_seed_accepts_trailing_letter_on_section_number(
     assert rows['DESIGN.md']['where'] == 's11b;s12'
 
 
+def test_where_seed_keeps_a_dotted_section_number_whole(tmp_path, monkeypatch):
+    """'section 24.4' seeds 's24.4', the sub-heading, not 's24', its parent.
+
+    Mutation: the label scan's number group cut at the first dot, so the
+    seed is 's24' and the read block points at the parent heading, or at
+    nothing when no heading is numbered 24.
+    Oracle: ledger where field is 's24.4;s7' for a pointer whose free
+    text cites 'section 24.4' and 's7', against a file with both
+    headings.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'DESIGN.md').write_text(
+        '# Design\n\n## 7. Scope\n\nx\n\n## 24. Parent\n\n'
+        '### 24.4 The decision\n\ny\n')
+    _handoff(folder, key_files=(
+        '- `DESIGN.md` covers section 24.4 and s7\n'))
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['DESIGN.md']['where'] == 's24.4;s7'
+
+
 def test_where_seed_plain_number_unchanged(tmp_path, monkeypatch):
     """'section 5' still seeds 's5' when no trailing letter is present.
 

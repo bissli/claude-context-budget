@@ -2128,9 +2128,11 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             # 'edit' override only applies to notes-kind files
             # (design s12 step 3).
             rb_over = 'edit'
-        # A section number may carry one letter: `section 11b`.
+        # A section number may carry one letter, `section 11b`, or be
+        # dotted, `section 24.4`; the whole token is the anchor.
         sref_m = re.findall(
-            r'\bs(\d+[a-z]?)\b|section\s+(\d+[a-z]?)', free, re.IGNORECASE)
+            r'\bs(\d+(?:\.\d+)*[a-z]?)\b|section\s+(\d+(?:\.\d+)*[a-z]?)',
+            free, re.IGNORECASE)
         where_val = ';'.join(
             f's{a or b}' for a, b in sref_m if (a or b)
             ) or '-'
