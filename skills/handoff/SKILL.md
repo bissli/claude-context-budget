@@ -709,7 +709,9 @@ Converge the form, destroy no content, in this order:
    `; `, or a space after a label that ends a sentence, and anchors with
    `;`; a bullet whose first token is not a path
    lands whole under `## Unfiled`, its indented lines joined as
-   written); `##
+   written, and an unindented run of lines with no path first joins
+   into one bullet that a blank line ends, as the lines between the
+   header and the first heading do); `##
    Decisions`, `## Constraints`, and `## Dead ends` (moved whole into
    `standing.md`, one item per bullet or unindented line; a sentence
    above the first bullet of a bulleted section introduces the bullets,

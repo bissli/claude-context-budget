@@ -253,6 +253,53 @@ def test_a_continuation_line_keeps_a_leading_dash_used_as_punctuation(
     assert '- unfiled: - Earlier material is parked - never read it first' in text
 
 
+def test_an_unindented_paragraph_under_key_files_or_the_header_is_one_bullet(
+        tmp_path, monkeypatch, capsys):
+    """A run of unindented plain lines joins into one Unfiled bullet.
+
+    Mutation: each unindented non-blank line flushing the open loose item
+    and opening a new one, so a wrapped paragraph becomes one untyped
+    bullet per physical line under Key files and in the preamble alike;
+    or the blank-line close dropped, so two paragraphs merge; or a bullet
+    line joined onto the paragraph above it, so two loose bullets become
+    one.
+    Oracle: hand-counted bullets - one for the three-line Key files
+    paragraph, two for the two preamble paragraphs, one each for two
+    consecutive loose bullets; the pointer below the paragraph still
+    reads always, and conservation reports every line carried.
+    """
+    folder = _root(tmp_path, monkeypatch)
+    (folder / 'notes-cfg.md').write_text('# Cfg\n')
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {folder.name}\n\n'
+        'Written: 2026-09-01 | Cycle: 3\n\n'
+        'First paragraph opens here\nand wraps onto a second line.\n\n'
+        'Second paragraph stands alone.\n\n'
+        + _CURSOR
+        + '\n## Key files\n\n'
+        'This context note spans\nthree physical lines without\n'
+        'any indentation below.\n\n'
+        'Read now:\n\n'
+        '- `notes-cfg.md` the config notes\n'
+        '- Parked material one\n'
+        '- Parked material two\n', encoding='utf-8')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    text = (folder / 'HANDOFF.md').read_text()
+    assert [ln for ln in text.splitlines() if ln.startswith('- unfiled: ')] == [
+        '- unfiled: First paragraph opens here and wraps onto a second line.',
+        '- unfiled: Second paragraph stands alone.',
+        '- unfiled: This context note spans three physical lines without'
+        ' any indentation below.',
+        '- unfiled: - Parked material one',
+        '- unfiled: - Parked material two',
+    ]
+    rows = {r['path']: r for r in _ledger(folder)}
+    assert rows['notes-cfg.md']['read_before'] == 'always'
+    assert 'conservation: every original line carried' in capsys.readouterr().out
+
+
 # --- The conservation witness ---
 
 

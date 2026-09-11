@@ -2160,6 +2160,8 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
 
     header_text = parsed.get('header') or ''
     in_header = False
+    preamble_open = False
+    item_start = re.compile(r'^\s*(?:[-*+]|\d+[.)]|#+)\s+')
     for line in text.splitlines():
         if line.startswith('## ') and not (
                 cur_h2 == 'Key files' and _KF_LABEL_PAT.match(line)):
@@ -2179,8 +2181,17 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
                 in_header = False
             elif in_header:
                 header_tail.append(line.strip())
+            # A paragraph wrapped at the column is one item, as under Key
+            # files: a plain line continues the open run, a bullet or a
+            # heading opens a new one, a blank line ends it.
             if line.strip() and not line.startswith('# ') and not in_header:
-                preamble.append(line.strip())
+                if preamble_open and not item_start.match(line):
+                    preamble[-1] += ' ' + line.strip()
+                else:
+                    preamble.append(line.strip())
+                preamble_open = True
+            elif not line.strip():
+                preamble_open = False
     _flush_section()
 
     # --- Step 3: parse Key files ---
@@ -2340,7 +2351,9 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     #   Unfiled otherwise.
     # - An indented line continues the open pointer or, when none is
     #   open, the loose bullet above it, as written, so a wrapped bullet
-    #   stays one item either way.
+    #   stays one item either way. An unindented plain line runs the
+    #   open loose item on too, so a paragraph is one item, and a blank
+    #   line ends it; a pointer is never continued unindented.
     # - A ` - ` separator between the path and its text is structure.
     kf_group = ''
     kf_loose: list[str] = []
@@ -2360,6 +2373,14 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         clean = token.strip('`')
         return (folder / clean).exists() or (folder.parent.parent / clean).exists()
 
+    def _close_loose() -> None:
+        """File the open loose item under Unfiled.
+        """
+        nonlocal kf_loose_current
+        if kf_loose_current:
+            kf_loose.append(kf_loose_current)
+            kf_loose_current = ''
+
     for line in sections_raw.get('Key files', []):
         gm = _KF_LABEL_PAT.match(line)
         bm = re.match(r'^\s*[-*+]\s+(`[^`]+`|\S+)\s*(.*)', line)
@@ -2368,9 +2389,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             kf_path_token = ''
             kf_free_text = ''
             kf_raw_text = ''
-            if kf_loose_current:
-                kf_loose.append(kf_loose_current)
-                kf_loose_current = ''
+            _close_loose()
             kf_group = gm.group(1).lower()
             # The label grades the bullets below; a clause riding on it
             # is content the agent must place, so it is filed as well.
@@ -2378,9 +2397,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
                 kf_loose.append(line.strip())
         elif bm and _is_pointer(bm.group(1).rstrip(',')):
             _flush_kf_pointer(kf_path_token, kf_free_text, kf_group, kf_raw_text)
-            if kf_loose_current:
-                kf_loose.append(kf_loose_current)
-                kf_loose_current = ''
+            _close_loose()
             kf_path_token = bm.group(1)
             kf_free_text = bm.group(2)
             kf_raw_text = re.sub(r'^\s*[-*+]\s+', '', line).strip()
@@ -2398,12 +2415,17 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
             kf_path_token = ''
             kf_free_text = ''
             kf_raw_text = ''
-            if kf_loose_current:
-                kf_loose.append(kf_loose_current)
-            kf_loose_current = line.strip()
+            # A plain line runs the open loose item on, as a wrapped
+            # paragraph does; a bullet opens an item of its own.
+            if kf_loose_current and not bm:
+                kf_loose_current += ' ' + line.strip()
+            else:
+                _close_loose()
+                kf_loose_current = line.strip()
+        else:
+            _close_loose()
     _flush_kf_pointer(kf_path_token, kf_free_text, kf_group, kf_raw_text)
-    if kf_loose_current:
-        kf_loose.append(kf_loose_current)
+    _close_loose()
 
     # --- Step 2: walk and seed ledger ---
     kf_matched: set[str] = set()
