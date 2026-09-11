@@ -213,7 +213,7 @@ def test_every_work_list_class_caps_at_five_names_and_a_count(
         assert lines[lines.index(named[-1]) + 1] == '  ... and 1 more', prefix
     deferred = [ln for ln in lines if ln.startswith('  deferred x')]
     assert len(deferred) == 1
-    assert deferred[0].endswith(' ... and 1 more')
+    assert deferred[0].endswith(' - stamp each when decided')
     assert deferred[0].startswith('  deferred x6: ')
 
 
@@ -567,17 +567,33 @@ def test_an_unstampable_name_is_named_apart_from_a_conflicted_copy(
         ])
     rc, out, _ = _run(['begin', _SLUG])
     assert rc == 0
-    assert '  unstampable name: tab\\tname.md' in out.splitlines()
-    assert ('  conflicted copy: notes (conflicted copy 2026-01-01).md'
-            in out.splitlines())
-    assert '  unstampable name: socket.sock' in out.splitlines()
+    assert (
+        '  unstampable name: tab\\tname.md'
+        ' - rename or remove it, or leave it out of the ledger'
+        in out.splitlines())
+    assert (
+        '  conflicted copy: notes (conflicted copy 2026-01-01).md'
+        ' - a sync duplicate; resolve it by hand'
+        in out.splitlines())
+    assert (
+        '  unstampable name: socket.sock'
+        ' - rename or remove it, or leave it out of the ledger'
+        in out.splitlines())
 
     rc, out, _ = _run(['finish', _SLUG, '--log', 'one'])
     assert rc == 0
-    assert 'advisory: unstampable name: tab\\tname.md' in out.splitlines()
-    assert ('advisory: conflicted copy: notes (conflicted copy 2026-01-01).md'
-            in out.splitlines())
-    assert 'advisory: unstampable name: socket.sock' in out.splitlines()
+    assert (
+        'advisory: unstampable name: tab\\tname.md'
+        ' - rename or remove it, or leave it out of the ledger'
+        in out.splitlines())
+    assert (
+        'advisory: conflicted copy: notes (conflicted copy 2026-01-01).md'
+        ' - a sync duplicate; resolve it by hand'
+        in out.splitlines())
+    assert (
+        'advisory: unstampable name: socket.sock'
+        ' - rename or remove it, or leave it out of the ledger'
+        in out.splitlines())
 
 
 def test_a_handoff_that_is_a_directory_stops_begin_and_finish(

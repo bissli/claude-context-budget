@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Handoff ledger script: thirteen verbs for managing per-project handoff files.
+"""Handoff ledger script: fourteen verbs for managing per-project handoff files.
 
 Each handoff lives in .handoff/<slug>/: HANDOFF.md written by the agent,
 ledger.tsv stamping every artifact, and standing.md for decisions,
@@ -78,6 +78,136 @@ _GATE_RB = {'always', 'edit'}
 _FULL_RB = {'always', 'edit', 'mention'}
 _ARTIFACTS_CAP = 40
 _TWO_HOURS = 7200
+HELP_TOPICS: dict[str, str] = {
+    'anchors': """\
+hq help anchors - the --where grammar
+
+--where names one or more headings of the stamped file. Several
+anchors join with ';' (a ';' inside a heading's text is written
+'\\;'). Each anchor is the heading's text without its number, or
+s<n> for the heading numbered <n>.
+
+  heading                        accepted anchors
+  ## s4: Field-to-path mapping   s4 | s4: Field-to-path mapping |
+                                 Field-to-path mapping
+  ## 4. Cache warmup             s4 | Cache warmup
+  # 11b. Proof                   s11b | 11b. Proof | Proof
+  #### 2a - Basis                s2a | 2a - Basis | Basis
+  ## F65. Long title             F65 | f65 | sF65 | Long title
+  ### 24.4 The decision          s24.4 (s24 names '## 24. Parent')
+
+- '4.', '4:', '4 -', 's4.', and 's4:' all count as the number 4; a
+  bare 'S4 ...' is a word, not a number.
+- A number may carry one letter when a '.', ':', or ' - ' follows
+  it: s11b names '# 11b. Proof', s11 does not; a bare '3D ...' or
+  '2a-b ...' is a word.
+- A dotted sub-heading takes its whole number: s24.4 names
+  '### 24.4 The decision', s24 names '## 24. Parent'.
+- The title alone lands on the first heading of that text, so a
+  repeated title is named by its number.
+- A letter-led id of one or two letters ('## F65. Title', '## Q3:
+  Title') is named by that id - F65, f65, or sF65 - and F7 never
+  lands on '## 7. Seven'; a longer word such as 'Log4j:' is title
+  text.
+- In the rendered read block, SPEC.md:11-13 is where the anchor
+  resolves today; (N lines) means the row has no anchor and the whole
+  file is the read; SPEC.md:? means the anchor matches no heading -
+  read the whole file, then re-stamp with a --where that resolves
+  and re-run hq open. A ? that survives means the anchor is still
+  wrong.""",
+    'kinds': """\
+hq help kinds - how stamp infers kind and read_before
+
+Thirteen fields per ledger row: cycle ts path base kind status
+read_before successor where sha12 lines reason label.
+
+Kind inference, first match wins:
+
+  name or shape                                        kind       read_before
+  contains 'conflicted copy'; a tab or newline in      skip       -
+    the name; not a regular file or directory
+  *.pre-*, *.prev.*, *.orig.*, *.bak                   snapshot   never
+  HANDOFF*.md at the folder's top level                snapshot   never
+  name contains cycle<digits>                          snapshot   never
+  a directory                                          probe-dir  never
+  SPEC*, DESIGN*, PROPOSAL*, *-DECLARATION*            spec       always
+  notes-*, REVIEW*                                     notes      never
+  todo*, TODO*                                         todo       never
+  first heading starts Spec/Design, any level          spec       always
+  *.py *.sql *.js *.ts *.ps1 at the folder's top level draft      always
+  anything else, a nested or outside file included     other      never
+
+- A repo file stamped by its ~ or absolute path infers other/never:
+  pass --kind draft to gate it.
+- When a stem (SPEC) has several members, adopt and begin gate only
+  the newest spec-kind file; every older stem-mate is stamped
+  superseded/never pointing at the newest.
+- --kind takes spec, draft, notes, todo, snapshot, probe-dir, or
+  other; --read-before always, edit, mention, or never; --status
+  live, superseded, archived, or missing.
+- --kind, --read-before, --status, --where, and --label default to
+  the previous row's value; --reason carries only while kind, status,
+  and read_before all hold.
+- --successor P sets status=superseded read_before=never unless the
+  stamp says otherwise. --archive sets status=archived
+  read_before=never and requires --reason. --defer writes kind=other
+  read_before=never reason=deferred so the file reappears in the next
+  work list; it is refused for a spec or draft.
+- Artifacts block: rows with read_before in {always, edit, mention}
+  print in full, up to 40 lines; read_before=never rows and the
+  overflow collapse to counts by kind; rows no longer live collapse
+  to superseded/archived/missing counts.
+- Standing block: constraints print in full, decisions and dead ends
+  as headlines, up to 80 lines; the cut takes from the longest kind
+  first. Ids are d decision, c constraint, x dead end; (cN) is the
+  cycle that recorded the item.""",
+    'rules': """\
+hq help rules - what the script refuses and why
+
+R1  A row whose inferred kind is spec or draft, or whose stored or
+    --kind kind is, may not lower read_before from always, leave
+    live, or change kind, unless its successor - passed or carried
+    forward - names a file on disk other than itself, or --archive
+    --reason is given (--status archived --reason is the same). An
+    explicit --successor whose own current row is not live is
+    refused, so two specs cannot name each other; a successor with no
+    row yet is accepted and the next begin lists it as unstamped. A
+    path that has ever been spec or draft stays gated: its only way
+    back to live is with read_before always. The refusal lines, each
+    printed after 'hq stamp: ':
+      refused: R1: <kind> read_before must stay always without --successor or --archive
+      refused: R1: <kind> status must stay live without --successor or --archive
+      refused: R1: <kind> kind must stay spec or draft without --successor or --archive
+      refused: R1: successor <path> is <status>, not live
+      refused: --defer not allowed for inferred <kind>
+R2  A refused stamp still appends a row: the previous fields with
+    reason set to 'refused: <why>'; with no previous row, the kind
+    table's seed and the file's sha and line count. The attempt is
+    in the record and clears nothing.
+R3  A live row with read_before in {always, edit} whose file sha
+    differs from sha12 blocks finish until the agent re-stamps it. A
+    re-stamp alone clears R3.
+W1, W2  finish and open check that ledger.tsv and standing.md are
+    byte-prefix-identical to their last finished state; an edited
+    recorded line is a hard fail in finish. When a known tool caused
+    the break (a formatter, a merge), pass --acknowledge "<reason>"
+    to finish; the reason lands in the manifest.""",
+    'stale-path': """\
+hq help stale-path - a folder path under a former directory
+
+'stale folder path in <file>: <dir>/<slug>/ x<n>' means the cursor or
+an unsuperseded standing item names the folder under a directory an
+earlier plugin version used (working/ or scratch/), so the text
+points at where the folder was.
+
+- Run grep -rl '<dir>/<slug>/' over the repo to find every carrier.
+- At the next write, inside a cycle, correct the path in each cursor
+  line that carries it, and re-note plus supersede each standing
+  item that does; the count clears.
+- Edit the path alone, never a quoted sentence, and never HANDOFF.md
+  outside a cycle: a rewrite outside one trips block sha mismatch at
+  open, and begin archives the file as c<NN>.hand.md.""",
+    }
 _STOPWORDS = {
     'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'then',
     'than', 'when', 'what', 'which', 'where', 'while', 'about', 'after',
@@ -134,7 +264,7 @@ def anchors(folder: pathlib.Path, argv: argparse.Namespace) -> dict:
             if not re.fullmatch(r'\d+', row['cycle'].strip()):
                 print(
                     f'hq: cycles/manifest.tsv row {idx} has a'
-                    ' non-integer cycle')
+                    ' non-integer cycle - a hand-edited manifest; restore the integer')
                 sys.exit(1)
         cycle = (int(manifest[-1]['cycle']) + 1) if manifest else 1
     now = (
@@ -979,7 +1109,11 @@ def drain_unfiled(
             bullets[-1] += ' ' + stripped
             continue
         if not stripped.startswith('- '):
-            return [], cursor_text, f'untyped Unfiled bullet: {stripped!r}'
+            return (
+                [], cursor_text,
+                (f'untyped Unfiled bullet: {stripped!r}'
+                 ' - prefix it decision:, constraint:, or dead-end:,'
+                 ' move it into a cursor section, or rehome it to a sibling'))
         bullets.append(stripped)
     for stripped in bullets:
         content = stripped[2:]
@@ -990,7 +1124,11 @@ def drain_unfiled(
                 content = content[len(prefix) + 2:]
                 break
         if kind is None:
-            return [], cursor_text, f'untyped Unfiled bullet: {stripped!r}'
+            return (
+                [], cursor_text,
+                (f'untyped Unfiled bullet: {stripped!r}'
+                 ' - prefix it decision:, constraint:, or dead-end:,'
+                 ' move it into a cursor section, or rehome it to a sibling'))
         bold = re.search(r'\*\*(.+?)\*\*', content)
         if bold:
             headline = bold.group(1)
@@ -998,7 +1136,10 @@ def drain_unfiled(
         else:
             headline, body = split_headline(content)
         if not re.search(r'\w', headline):
-            return [], cursor_text, f'Unfiled bullet has no headline: {stripped!r}'
+            return (
+                [], cursor_text,
+                (f'Unfiled bullet has no headline: {stripped!r}'
+                 ' - give the bold span, or the first sentence, a word'))
         items.append((kind, headline, body.replace('\n', ' ')))
     return items, cursor_out.rstrip() + '\n', None
 
@@ -1471,7 +1612,9 @@ def _find_folder(
       the disk as it found it, and ``begin`` creates the folder itself.
     """
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', slug) or '..' in slug:
-        print(f'hq: invalid slug {slug!r}')
+        print(
+            f'hq: invalid slug {slug!r}'
+            " - letters, digits, '.', '_', '-' only, never '/' or '..'")
         sys.exit(2)
     handoffs = root / HANDOFF_DIRNAME
     exact = handoffs / slug
@@ -1490,7 +1633,9 @@ def _find_folder(
         sys.exit(2)
     if missing_ok:
         return exact
-    print(f'hq: no folder matching {slug!r} under {handoffs}')
+    print(
+        f'hq: no folder matching {slug!r} under {handoffs}'
+        '; run hq list to see what exists')
     sys.exit(2)
 
 
@@ -2141,7 +2286,7 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     """
     handoff_path = folder / 'HANDOFF.md'
     if handoff_path.is_dir():
-        print('hq: HANDOFF.md is a directory')
+        print('hq: HANDOFF.md is a directory - move the directory aside and re-run')
         return 1
     if not handoff_path.exists():
         print(f'hq adopt: no HANDOFF.md in {folder}')
@@ -2149,7 +2294,13 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     text = handoff_path.read_text(encoding='utf-8-sig', errors='replace')
     parsed = split_handoff(text)
     if parsed['cycle'] is None:
-        print('hq adopt: non-conforming header; write a conforming HANDOFF.md first')
+        ref = (
+            pathlib.Path(__file__).resolve().parent.parent
+            / 'skills' / 'handoff' / 'reference' / 'adoption.md')
+        print(
+            'hq adopt: non-conforming header; write a conforming HANDOFF.md first'
+            f' - the conversion is in {ref.parent.parent}/'
+            'reference/adoption.md')
         for line in text.splitlines():
             if line.startswith('#'):
                 print(f'  {line}')
@@ -2530,10 +2681,14 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     for name, kind in walk:
         if kind == 'skip':
             if 'conflicted copy' in name:
-                print(f'  skipped conflicted copy: {name}')
+                print(
+                    f'  skipped conflicted copy: {name}'
+                    ' - a sync duplicate; resolve it by hand')
             else:
                 shown = name.replace('\t', '\\t').replace('\n', '\\n')
-                print(f'  unstampable name: {shown.replace(chr(13), chr(92) + "r")}')
+                print(
+                    f'  unstampable name: {shown.replace(chr(13), chr(92) + "r")}'
+                    ' - rename the file before stamping it')
             continue
         path_obj = folder / name
         is_dir = path_obj.is_dir()
@@ -2631,7 +2786,9 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         if row['status'] == 'live' and row['read_before'] in _GATE_RB:
             gated_names.append(stored_again)
         if not on_disk:
-            print(f'  Key files pointer not on disk: {stored_again}')
+            print(
+                f'  Key files pointer not on disk: {stored_again}'
+                ' - stamp the path that exists and archive this row')
 
     # --- Step 4: seed standing ---
     section_kind_map = {
@@ -3037,7 +3194,8 @@ def _take_lock(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
             hand_path.write_bytes(handoff.read_bytes())
             print(
                 f'hq begin: HANDOFF.md changed since last finish;'
-                f' saved to {hand_path.name}')
+                f' saved to {hand_path.name}'
+                ' - fold anything wanted back into the cursor')
 
     _print_worklist(folder, anch)
     return 0
@@ -3072,18 +3230,23 @@ def _print_worklist(folder: pathlib.Path, anch: dict) -> None:
     for k, names in sorted(by_kind.items()):
         shown = ', '.join(names[:5])
         tail = f' ... and {len(names) - 5} more' if len(names) > 5 else ''
-        print(f'  unstamped {k} x{len(names)}: {shown}{tail}')
+        print(f'  unstamped {k} x{len(names)}: {shown}{tail} - stamp each')
     for n, k in walk:
         if k != 'skip':
             continue
         if 'conflicted copy' in n:
-            print(f'  conflicted copy: {n}')
+            print(f'  conflicted copy: {n} - a sync duplicate; resolve it by hand')
         else:
             shown = n.replace('\t', '\\t').replace('\n', '\\n').replace('\r', '\\r')
-            print(f'  unstampable name: {shown}')
+            print(
+                f'  unstampable name: {shown}'
+                ' - rename or remove it, or leave it out of the ledger')
     moved = check_r3(list(_reconcile_missing(folder, live).values()), sha_map)
+    slug = folder.name
     for row in moved[:5]:
-        print(f'  sha moved: {row["path"]}')
+        print(
+            f'  sha moved: {row["path"]}'
+            f' - re-read it (hq read {slug} {row["path"]}), then re-stamp')
     if len(moved) > 5:
         print(f'  ... and {len(moved) - 5} more')
     missing_live = []
@@ -3112,14 +3275,16 @@ def _print_worklist(folder: pathlib.Path, anch: dict) -> None:
         print(f'  ... and {len(missing_rows) - 5} more')
     dangling = dangling_successors(folder, live)
     for path, successor in dangling[:5]:
-        print(f'  successor missing: {path} -> {successor}')
+        print(
+            f'  successor missing: {path} -> {successor}'
+            ' - name a new successor or archive the row')
     if len(dangling) > 5:
         print(f'  ... and {len(dangling) - 5} more')
     deferred = [path for path, row in live.items() if row['reason'] == 'deferred']
     if deferred:
         shown = ', '.join(deferred[:5])
         tail = f' ... and {len(deferred) - 5} more' if len(deferred) > 5 else ''
-        print(f'  deferred x{len(deferred)}: {shown}{tail}')
+        print(f'  deferred x{len(deferred)}: {shown}{tail} - stamp each when decided')
     print(f'cycle {anch["cycle"]} begun by {anch["session"]} on {anch["host"]}')
 
 
@@ -3141,7 +3306,7 @@ def _verb_begin(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
         0 once the lock is held; 1 when a young foreign lock blocks it.
     """
     if (folder / 'HANDOFF.md').is_dir():
-        print('hq: HANDOFF.md is a directory')
+        print('hq: HANDOFF.md is a directory - move the directory aside and re-run')
         return 1
     no_handoff = not (folder / 'HANDOFF.md').exists()
     no_ledger = not (folder / 'ledger.tsv').exists()
@@ -3209,7 +3374,9 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
     prev = live.get(stored_path, {})
     is_dir = path_obj.is_dir()
     if not is_dir and path_obj.exists() and not path_obj.is_file():
-        print(f'hq stamp: {path} is not a regular file or directory')
+        print(
+            f'hq stamp: {path} is not a regular file or directory'
+            ' - rename it or leave it out of the ledger')
         return 2
     first_heading = ''
     if not is_dir and path_obj.exists():
@@ -3345,7 +3512,10 @@ def _do_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> int
             'label': prev.get('label', '-'),
             }
         _append_tsv(ledger_path, LEDGER_FIELDS, refused_row, _LEDGER_HEADER)
-        print(f'hq stamp: {refusal_reason}')
+        print(
+            f'hq stamp: {refusal_reason}'
+            ' - supply a live --successor or --archive --reason,'
+            ' or leave the row gated')
         return 1
     if defer:
         new_row = {
@@ -3394,7 +3564,9 @@ def _verb_stamp(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
                 except (SystemExit, ValueError):
                     sub = None
             if sub is None or not getattr(sub, 'path', ''):
-                print(f'hq stamp: batch line {line_no} not parsed: {line}')
+                print(
+                    f'hq stamp: batch line {line_no} not parsed: {line}'
+                    ' - fix that line and re-run it alone; the other lines ran')
                 rc = max(rc, 2)
                 continue
             rc = max(rc, _do_stamp(folder, anch, sub))
@@ -3546,7 +3718,9 @@ def _verb_note(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
                 or any(tok.startswith('-') and tok != '-' for tok in leftover)
                 )
             if unparsed:
-                print(f'hq note: batch line {line_no} not parsed: {line}')
+                print(
+                    f'hq note: batch line {line_no} not parsed: {line}'
+                    ' - fix that line and re-run it alone; the other lines ran')
                 rc = max(rc, 2)
                 continue
             body = ' '.join([getattr(sub, 'body', None) or ''] + leftover)
@@ -3593,10 +3767,14 @@ def _verb_supersede(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) 
     items, _ = _parse_standing(text)
     all_ids = {item['id'] for item in items}
     if old_id not in all_ids:
-        print(f'hq supersede: {old_id!r} not found in standing.md')
+        print(
+            f'hq supersede: {old_id!r} not found in standing.md'
+            f'; run hq standing {folder.name} to list the ids')
         return 1
     if new_id not in all_ids:
-        print(f'hq supersede: {new_id!r} not found in standing.md')
+        print(
+            f'hq supersede: {new_id!r} not found in standing.md'
+            f'; run hq standing {folder.name} to list the ids')
         return 1
     line = f'- (c{anch["cycle"]}) {old_id} -> {new_id}'
     _append_lines(standing_path, [line])
@@ -3638,12 +3816,14 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
       the folder byte-identical and a re-run appends nothing twice.
     """
     if (folder / 'HANDOFF.md').is_dir():
-        print('hq: HANDOFF.md is a directory')
+        print('hq: HANDOFF.md is a directory - move the directory aside and re-run')
         return 1
     lock = _read_lock(folder)
     session = anch['session']
     if lock.get('session') != session:
-        print(f'hq finish: lock held by {lock.get("session", "none")}; this is {session}')
+        print(
+            f'hq finish: lock held by {lock.get("session", "none")}; this is {session}'
+            f' - run hq begin {folder.name} first')
         return 1
     ledger_path = folder / 'ledger.tsv'
     standing_path = folder / 'standing.md'
@@ -3731,7 +3911,9 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
                 if ln.startswith('#'):
                     spec_headings.append((name, i + 1, ln))
         for hit in collisions(now_text, dead_end_headlines, spec_headings, rarity):
-            print(f'advisory: {hit}')
+            print(
+                f'advisory: {hit}'
+                ' - check that the Now step does not retry a rejected idea')
     # --- Advisory: artifacts over the cap ---
     # The block folds the overflow into the kind counts without a word;
     # this is the one place the agent hears that a label left the file.
@@ -3740,7 +3922,9 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
     if over > 0:
         print(
             f'advisory: artifacts over the {_ARTIFACTS_CAP}-line cap by {over},'
-            ' folded into the counts')
+            ' folded into the counts'
+            ' - re-grade or supersede rows, or read them all with'
+            f' hq artifacts {folder.name}')
     # --- Advisory: unstamped ---
     unstamped_entries = [(n, k) for n, k in walk if n not in live and k != 'skip']
     if unstamped_entries:
@@ -3750,23 +3934,31 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
         for k, names in sorted(by_kind.items()):
             shown = ', '.join(names[:5])
             tail = f' ... and {len(names) - 5} more' if len(names) > 5 else ''
-            print(f'advisory: unstamped {k} x{len(names)}: {shown}{tail}')
+            print(f'advisory: unstamped {k} x{len(names)}: {shown}{tail} - stamp each')
     # A skip entry the ledger cannot carry: a sync duplicate by name
     # or a name holding a tab or newline, shown escaped.
     for n, k in walk:
         if k != 'skip':
             continue
         if 'conflicted copy' in n:
-            print(f'advisory: conflicted copy: {n}')
+            print(
+                f'advisory: conflicted copy: {n}'
+                ' - a sync duplicate; resolve it by hand')
         else:
             shown = n.replace('\t', '\\t').replace('\n', '\\n').replace('\r', '\\r')
-            print(f'advisory: unstampable name: {shown}')
+            print(
+                f'advisory: unstampable name: {shown}'
+                ' - rename or remove it, or leave it out of the ledger')
     # --- Advisory: missing abs ---
     for p_key, row in live.items():
         if row['base'] == 'abs' and row['status'] == 'missing':
-            print(f'advisory: abs path not on disk: {p_key}')
+            print(
+                f'advisory: abs path not on disk: {p_key}'
+                ' - re-stamp the right path, or --successor / --archive --reason')
     for p_key, successor in dangling_successors(folder, live):
-        print(f'advisory: successor missing: {p_key} -> {successor}')
+        print(
+            f'advisory: successor missing: {p_key} -> {successor}'
+            ' - name a new successor or archive the row')
     # --- Advisory: one-line spans ---
     # Markdown reads each `##` line as a heading, so a heading wrapped
     # onto a second marker line ends its own span after one line.
@@ -3792,7 +3984,10 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
             level = len(heading_line) - len(heading_line.lstrip('#'))
             if (next_line.startswith('#')
                     and len(next_line) - len(next_line.lstrip('#')) == level):
-                print(f'advisory: one-line span at {p_key}:{start}; a wrapped heading?')
+                print(
+                    f'advisory: one-line span at {p_key}:{start}; a wrapped heading?'
+                    ' - anchor the last wrapped line, or join the heading'
+                    ' where the file may be edited')
     # --- Advisory: label regression ---
     path_all_rows: dict[str, list[Row]] = {}
     for r in rows:
@@ -3815,7 +4010,10 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
         if curr_label == '-' or prev_label == '-':
             continue
         if len(curr_label) < len(prev_label):
-            print(f'advisory: label shorter than predecessor: {p_key}')
+            print(
+                f'advisory: label shorter than predecessor: {p_key}'
+                ' - check the new label kept every backticked token'
+                ' and s<n> reference the old one carried')
             continue
         bt_prev = set(re.findall(r'`[^`]+`', prev_label))
         bt_curr = set(re.findall(r'`[^`]+`', curr_label))
@@ -3823,7 +4021,9 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
         sref_curr = set(re.findall(r'\bs\d+\b', curr_label))
         dropped = (bt_prev - bt_curr) | (sref_prev - sref_curr)
         if dropped:
-            print(f'advisory: label dropped {dropped!r}: {p_key}')
+            print(
+                f'advisory: label dropped {dropped!r}: {p_key}'
+                ' - put it back or accept the loss')
     # The drained items are formatted in memory: nothing touches disk
     # until the whole handoff text exists, so a failure writes nothing
     # and a re-run appends nothing twice.
@@ -3863,7 +4063,11 @@ def _verb_finish(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> 
             if dropped_lines:
                 print(
                     f'advisory: {len(dropped_lines)} cursor lines from'
-                    f' c{prev_cycle:02d} not carried')
+                    f' c{prev_cycle:02d} not carried'
+                    ' - confirm each was settled or moved, else carry it forward'
+                    ' or rehome it; hq diff'
+                    f' {folder.name} {prev_cycle} {anch["cycle"]}'
+                    ' shows the whole change')
                 for dropped in dropped_lines:
                     print(f'  not carried: {dropped.strip()}')
     log_text = ' '.join((getattr(argv, 'log', '') or '').split())
@@ -3953,10 +4157,11 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     if lock:
         print(
             f'unfinished cycle {lock.get("cycle")} held by'
-            f' {lock.get("session")} on {lock.get("host")}')
+            f' {lock.get("session")} on {lock.get("host")}'
+            ' - the file may be behind its stamps; report it')
     handoff_path = folder / 'HANDOFF.md'
     if handoff_path.is_dir():
-        print('hq: HANDOFF.md is a directory')
+        print('hq: HANDOFF.md is a directory - move the directory aside and re-run')
         return 1
     if not handoff_path.exists():
         return 0
@@ -3966,9 +4171,14 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         file_cycle = parsed.get('cycle') or 0
         last_finished = int(manifest[-1]['cycle'])
         if file_cycle > last_finished:
-            print(f'LEDGER BEHIND: file cycle {file_cycle} > last finished {last_finished}')
+            print(
+                f'LEDGER BEHIND: file cycle {file_cycle}'
+                f' > last finished {last_finished}'
+                ' - the header was hand-edited; trust the ledger, report it')
     for row in check_r3(list(_reconcile_missing(folder, live).values()), sha_map):
-        print(f'sha moved since stamp: {row["path"]}')
+        print(
+            f'sha moved since stamp: {row["path"]}'
+            ' - read the file, not the span alone')
     # Git drift: compare header branch/sha against current git state.
     header_line = parsed.get('header', '')
     header_m = re.search(r'\|\s*(\S+)\s*@\s*([0-9a-f]+)', header_line)
@@ -3978,7 +4188,9 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         if cur_branch != '-' and (cur_branch != h_branch or cur_sha != h_sha):
             print(
                 f'git drift: header {h_branch}@{h_sha}'
-                f' -> now {cur_branch}@{cur_sha}')
+                f' -> now {cur_branch}@{cur_sha}'
+                f' - run git log --oneline {h_sha}..HEAD,'
+                ' and -- <todo path> for each todo file the Plan points at')
     block_open_pat = re.compile(r'^<!-- hq:(\w+) ([0-9a-f]+) -->', re.MULTILINE)
     for m in block_open_pat.finditer(hf_text):
         bname, stored_sha = m.group(1), m.group(2)
@@ -3987,7 +4199,8 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         if computed != stored_sha:
             print(
                 f'block sha mismatch: hq:{bname}'
-                f' stored {stored_sha} computed {computed}')
+                f' stored {stored_sha} computed {computed}'
+                ' - a hand edit; trust hq artifacts and hq standing, not the block')
     # Re-resolved spans: report anchors that moved or became unresolved.
     for row in live.values():
         if row.get('status') != 'live' or row.get('read_before') != 'always':
@@ -4004,7 +4217,10 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         anchor_list = _split_where(row['where'])
         new_spans, unresolved = resolve_where(file_text, anchor_list)
         for anchor_str in unresolved:
-            print(f'unresolved anchor in {row["path"]}: {anchor_str!r}')
+            print(
+                f'unresolved anchor in {row["path"]}: {anchor_str!r}'
+                ' - read the whole file; at write time re-stamp with a --where'
+                ' that resolves (hq help anchors), then re-run open')
         # Report spans that moved since the stored read block.
         read_block_body = parsed.get('blocks', {}).get('read', '')
         for line in read_block_body.splitlines():
@@ -4027,7 +4243,9 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
                     except ValueError:
                         pass
             if old_spans and new_spans and old_spans != new_spans:
-                print(f'span moved: {row["path"]} {old_spans} -> {new_spans}')
+                print(
+                    f'span moved: {row["path"]} {old_spans} -> {new_spans}'
+                    ' - the printed spans are current')
     # Notes:
     # - A `<dir>/<slug>/` mention under a directory an earlier plugin
     #   version used names where the folder was: the agent wrote the
@@ -4062,7 +4280,9 @@ def _verb_open(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         for dirname in sorted(counts):
             print(
                 f'stale folder path in {name}:'
-                f' {dirname}/{folder.name}/ x{counts[dirname]}')
+                f' {dirname}/{folder.name}/ x{counts[dirname]}'
+                ' - correct it at the next write, inside a cycle, never in'
+                ' HANDOFF.md outside one; hq help stale-path has the steps')
     return 0
 
 
@@ -4101,10 +4321,12 @@ def _verb_read(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     rows = _read_tsv(folder / 'ledger.tsv', LEDGER_FIELDS)
     row = latest_rows(rows).get(stored_path)
     if not row:
-        print(f'hq read: {path} not in ledger')
+        print(f'hq read: {path} not in ledger - read it whole by hand')
         return 1
     if not file_path.exists():
-        print(f'hq read: {path} not on disk')
+        print(
+            f'hq read: {path} not on disk'
+            ' - re-point, supersede, or archive its row at the next write')
         return 1
     file_text = file_path.read_text(encoding='utf-8', errors='replace')
     file_lines = file_text.splitlines()
@@ -4114,7 +4336,9 @@ def _verb_read(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         for span in spans:
             print('\n'.join(file_lines[span[0] - 1:span[1]]))
         for anchor_str in unresolved:
-            print(f'? unresolved: {anchor_str}')
+            print(
+                f'? unresolved: {anchor_str}'
+                ' - read the file whole when no span printed above')
     else:
         print('\n'.join(file_lines))
     state_path = pathlib.Path(os.environ.get('HQ_STATE_DIR', str(_DEFAULT_STATE)))
@@ -4125,7 +4349,9 @@ def _verb_read(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
         with receipt_path.open('a', encoding='utf-8') as fh:
             fh.write(f'{anch["now"]} {folder.name} {stored_path}\n')
     except OSError as exc:
-        print(f'hq read: receipt not written: {exc}')
+        print(
+            f'hq read: receipt not written: {exc}'
+            ' - the gate will not credit this read')
         return 1
     return 0
 
@@ -4188,7 +4414,7 @@ def _verb_diff(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> in
     p2 = folder / 'cycles' / f'c{int(c2):02d}.md'
     for p in (p1, p2):
         if not p.exists():
-            print(f'hq diff: {p.name} not found')
+            print(f'hq diff: {p.name} not found - that cycle was never finished here')
             return 1
     lines1 = set(split_handoff(p1.read_text(encoding='utf-8'))['cursor'].splitlines())
     lines2 = set(split_handoff(p2.read_text(encoding='utf-8'))['cursor'].splitlines())
@@ -4387,9 +4613,26 @@ def _verb_list(root: pathlib.Path, argv: argparse.Namespace) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Return the top-level argument parser for all thirteen verbs.
+    """Return the top-level argument parser for all fourteen verbs.
     """
-    p = argparse.ArgumentParser(prog='hq', description='Handoff ledger manager')
+    _top_epilog = (
+        'Every verb but list and help takes the slug first. A slug resolves to\n'
+        'an exact folder name under .handoff/, else a unique prefix of one.\n'
+        'Five flags before the verb - --root DIR, --cycle N, --now ISO,\n'
+        '--session ID, --host H - override the HQ_ROOT, HQ_CYCLE, HQ_NOW,\n'
+        'HQ_SESSION, and HQ_HOST environment values the script otherwise\n'
+        'reads; a session never needs them. A ~ in --root or HQ_ROOT is\n'
+        'expanded.\n'
+        'Exit 0 is done; 1 is a refusal or a blocking finding, and nothing is\n'
+        'written except that a refused stamp appends its receipt row; 2 is a\n'
+        'usage error. All output is stdout, one fact per line.\n'
+        'Reference: hq help anchors | kinds | rules | stale-path.'
+    )
+    p = argparse.ArgumentParser(
+        prog='hq',
+        description='Handoff ledger manager',
+        epilog=_top_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--root', help='project root (HQ_ROOT)')
     p.add_argument('--cycle', help='override cycle number (HQ_CYCLE)')
     p.add_argument('--now', help='override timestamp (HQ_NOW)')
@@ -4403,7 +4646,26 @@ def _build_parser() -> argparse.ArgumentParser:
     beg.add_argument('slug')
     beg.add_argument('--force', action='store_true')
 
-    stmp = sub.add_parser('stamp')
+    _stamp_epilog = (
+        'The path is relative to the handoff folder: ./SPEC.md and\n'
+        'sub/../SPEC.md are the row SPEC.md. A path outside it - a repo file,\n'
+        'a ~ path, an absolute path - is stored whole and gated the same way;\n'
+        'there is no search of the working directory. An outside .py/.sql/\n'
+        '.js/.ts/.ps1 infers other/never: pass --kind draft to gate it.\n'
+        '--kind, --read-before, --status, --where, and --label default to the\n'
+        "previous row's value; omit them on a re-stamp to carry them forward.\n"
+        '--successor P sets status=superseded read_before=never; --archive\n'
+        'sets status=archived read_before=never and requires --reason;\n'
+        '--defer marks a non-gated file deferred so it reappears in the next\n'
+        'work list. --batch reads one stamp per stdin line, the same\n'
+        'arguments minus the slug, split like a shell line.\n'
+        'See hq help kinds (inference and fields), hq help anchors (--where\n'
+        'forms), hq help rules (R1, R2, R3, W1, W2).'
+    )
+    stmp = sub.add_parser(
+        'stamp',
+        epilog=_stamp_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     stmp.add_argument('slug')
     stmp.add_argument('path', nargs='?')
     stmp.add_argument(
@@ -4424,21 +4686,45 @@ def _build_parser() -> argparse.ArgumentParser:
     stmp.add_argument('--reason')
     stmp.add_argument('--batch', action='store_true')
 
+    _note_epilog = (
+        'Kinds are decision, constraint, dead-end. --headline is required and\n'
+        'one line; the body follows it as the last argument. --batch reads\n'
+        'one note per stdin line: <kind> --headline "<h>" "<body>".'
+    )
     # The kind slot carries no choices: the batch marker '-' lands
     # here on 3.13 and later, and _verb_note names an unknown kind.
-    nt = sub.add_parser('note')
+    nt = sub.add_parser(
+        'note',
+        epilog=_note_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     nt.add_argument('slug')
     nt.add_argument('note_kind', nargs='?')
     nt.add_argument('body', nargs='?')
     nt.add_argument('--headline', default='')
     nt.add_argument('--batch', action='store_true')
 
-    sp = sub.add_parser('supersede')
+    _supersede_epilog = (
+        'Two ids of one kind, old then new: d17 d23. The old item leaves the\n'
+        'rendered Standing block and stays in standing.md. hq standing <slug>\n'
+        'lists the ids.'
+    )
+    sp = sub.add_parser(
+        'supersede',
+        epilog=_supersede_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     sp.add_argument('slug')
     sp.add_argument('old_id')
     sp.add_argument('new_id')
 
-    fin = sub.add_parser('finish')
+    _finish_epilog = (
+        '--log is the one line the Log keeps for this cycle. --acknowledge\n'
+        '"<reason>" turns a W1 or W2 witness break into an acknowledged line\n'
+        'and records the break and the reason in the manifest.'
+    )
+    fin = sub.add_parser(
+        'finish',
+        epilog=_finish_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     fin.add_argument('slug')
     fin.add_argument('--log', required=True)
     fin.add_argument('--acknowledge')
@@ -4449,22 +4735,72 @@ def _build_parser() -> argparse.ArgumentParser:
     rd.add_argument('slug')
     rd.add_argument('path')
 
-    wh = sub.add_parser('when')
+    _when_epilog = (
+        'Every ledger row for the path, oldest first, seven tab-separated\n'
+        'columns: path cycle status read_before successor reason label. Over\n'
+        '30 rows, the newest 30 and one line naming the omitted count.'
+    )
+    wh = sub.add_parser(
+        'when',
+        epilog=_when_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     wh.add_argument('slug')
     wh.add_argument('path')
 
-    df = sub.add_parser('diff')
+    _diff_epilog = (
+        "Cursor lines of cycles/c<c1>.md absent from cycles/c<c2>.md as\n"
+        "'- line', the reverse as '+ line'; at most 60 lines plus one naming\n"
+        'the cut. No output means the two cursors are identical.'
+    )
+    df = sub.add_parser(
+        'diff',
+        epilog=_diff_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     df.add_argument('slug')
     df.add_argument('c1', type=int)
     df.add_argument('c2', type=int)
 
-    sub.add_parser('artifacts').add_argument('slug')
+    _artifacts_epilog = (
+        'Every live row as a full line - path kind read_before cNN label - with\n'
+        'no cap, then <name>  <kind>?  unstamped for a file with no row,\n'
+        '<name>  conflicted copy for a sync duplicate, and <name>  unstampable\n'
+        'for a name holding a tab or newline or an entry that is not a regular\n'
+        'file.'
+    )
+    sub.add_parser(
+        'artifacts',
+        epilog=_artifacts_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    ).add_argument('slug')
 
-    st = sub.add_parser('standing')
+    _standing_epilog = (
+        'Every unsuperseded item in full; --all adds the superseded ones.'
+    )
+    st = sub.add_parser(
+        'standing',
+        epilog=_standing_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     st.add_argument('slug')
     st.add_argument('--all', action='store_true')
 
-    sub.add_parser('list').add_argument('count', nargs='?', type=int)
+    _list_epilog = (
+        'One line per folder under .handoff/ holding a HANDOFF.md, newest\n'
+        "first by that file's mtime: <slug>  <Written date>  c<N>\n"
+        '<done>/<total>  <Task line>. <done>/<total> counts - [x] over all\n'
+        "- [ ] and - [x] items under ## Plan alone, '-' when the Plan has no\n"
+        "checkbox item; a file with no conforming header shows '-' for the\n"
+        "date and the cycle; an unreadable file shows '-  -  -  unreadable:\n"
+        "<reason>'. Ties in the same second list A to Z by slug. A bare list\n"
+        'shows every one; list 5 the five most recent.'
+    )
+    sub.add_parser(
+        'list',
+        epilog=_list_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    ).add_argument('count', nargs='?', type=int)
+
+    hlp = sub.add_parser('help')
+    hlp.add_argument('topic', nargs='?')
 
     return p
 
@@ -4514,8 +4850,25 @@ def main(argv: list[str]) -> int:
     if is_note_body:
         args.body = ' '.join([getattr(args, 'body', None) or ''] + leftover).strip()
     try:
-        root = _resolve_root(args)
         verb = args.verb
+        if verb == 'help':
+            topic = getattr(args, 'topic', None)
+            if topic is None:
+                for key, body in HELP_TOPICS.items():
+                    lines = body.splitlines()
+                    first_line = next(
+                        (l for l in lines[1:] if l.strip()), '')
+                    print(f'hq help {key}: {first_line}')
+                return 0
+            if topic not in HELP_TOPICS:
+                keys = ', '.join(HELP_TOPICS)
+                print(
+                    f'hq help: no topic {topic!r};'
+                    f' topics are {keys}')
+                return 2
+            print(HELP_TOPICS[topic])
+            return 0
+        root = _resolve_root(args)
         if verb == 'list':
             return _verb_list(root, args)
         slug = getattr(args, 'slug', '')

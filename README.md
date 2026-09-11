@@ -211,7 +211,12 @@ session chose.)
   opened, a PreToolUse hook names each gated file the session has not
   read, once per session. At the end of a turn, a Stop hook says so when
   `HANDOFF.md` was written by hand since its last recorded cycle.
-  Neither blocks; `HQ_GATE=0` in the environment turns the first off.
+  Neither blocks; `HQ_GATE=0` in the environment turns the first off,
+  and `HQ_GATE_DENY=1` makes it deny the write instead of reporting.
+- Every line `hq` prints that calls for a move names it, and
+  `hq help <topic>` (anchors, kinds, rules, stale-path) and
+  `hq <verb> --help` carry the reference detail the skill file points
+  at, so the skill stays short enough to survive a compaction whole.
 - `/handoff when`, `diff`, `artifacts`, and `standing` query the
   ledger: one path's history, the cursor lines that changed between
   two cycles, every live artifact, every standing item.

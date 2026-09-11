@@ -857,7 +857,8 @@ def test_drain_unfiled_runs_a_short_label_headline_on_and_still_refuses_none():
     _, _, refusal = hq.drain_unfiled(
         '## Task\nx\n\n## Unfiled\n- decision: . rest of the thing\n')
     assert refusal == (
-        "Unfiled bullet has no headline: '- decision: . rest of the thing'")
+        "Unfiled bullet has no headline: '- decision: . rest of the thing'"
+        ' - give the bold span, or the first sentence, a word')
 
 
 def test_collisions_ignore_a_capital_at_sentence_start():

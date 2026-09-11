@@ -18,7 +18,8 @@ from scripts import hq
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIXTURES = os.path.join(HERE, 'fixtures', 'handoff')
-SKILL = pathlib.Path(HERE).parent / 'skills' / 'handoff' / 'SKILL.md'
+EXAMPLE = (pathlib.Path(HERE).parent / 'skills' / 'handoff' / 'reference'
+           / 'example-handoff.md')
 _SLUG = 'msg-slug'
 _SESSION = 'session-abc'
 
@@ -97,7 +98,12 @@ def test_adopt_refusals_name_their_cause(tmp_path, monkeypatch):
     rc, out, _ = _run(['adopt', _SLUG])
     assert rc == 1
     lines = out.splitlines()
-    assert lines[0] == 'hq adopt: non-conforming header; write a conforming HANDOFF.md first'
+    _adoption_ref = str(
+        pathlib.Path(hq.__file__).resolve().parent.parent
+        / 'skills' / 'handoff' / 'reference' / 'adoption.md')
+    assert lines[0] == (
+        'hq adopt: non-conforming header; write a conforming HANDOFF.md first'
+        f' - the conversion is in {_adoption_ref}')
     assert '  # Legacy CSV importer' in lines
     assert '  ## Summary' in lines
     shutil.rmtree(folder)
@@ -201,7 +207,8 @@ def test_stamp_refusals_and_usage_errors_print_their_documented_lines(
     assert rc == 1
     assert out.strip() == (
         'hq stamp: refused: R1: spec read_before must stay always'
-        ' without --successor or --archive')
+        ' without --successor or --archive'
+        ' - supply a live --successor or --archive --reason, or leave the row gated')
     rc, out, _ = _run(['stamp', _SLUG, 'SPEC.md', '--archive'])
     assert (rc, out.strip()) == (2, 'hq stamp: --archive requires --reason')
     rc, out, _ = _run(['stamp', _SLUG, 'SPEC.md', '--reason', 'refused: no'])
@@ -244,7 +251,10 @@ def test_note_and_supersede_refusals_print_their_documented_lines(
     assert (rc, out.strip()) == (
         1, "hq supersede: ids must share a prefix ('d01' vs 'c01')")
     rc, out, _ = _run(['supersede', _SLUG, 'd01', 'd99'])
-    assert (rc, out.strip()) == (1, "hq supersede: 'd99' not found in standing.md")
+    assert (rc, out.strip()) == (
+        1,
+        ("hq supersede: 'd99' not found in standing.md"
+         f'; run hq standing {_SLUG} to list the ids'))
 
 
 def test_finish_blocking_lines_name_the_class_that_fired(tmp_path, monkeypatch):
@@ -262,7 +272,9 @@ def test_finish_blocking_lines_name_the_class_that_fired(tmp_path, monkeypatch):
     _lock(folder, 'other-session', '2026-09-09T11:00:00')
     rc, out, _ = _run(['finish', _SLUG, '--log', 'x'])
     assert (rc, out.strip()) == (
-        1, f'hq finish: lock held by other-session; this is {_SESSION}')
+        1,
+        (f'hq finish: lock held by other-session; this is {_SESSION}'
+         f' - run hq begin {_SLUG} first'))
     _lock(folder, _SESSION, '2026-09-09T11:00:00')
     assert _run(['finish', _SLUG, '--log', 'one'])[0] == 0
     _run(['begin', _SLUG])
@@ -285,7 +297,11 @@ def test_finish_blocking_lines_name_the_class_that_fired(tmp_path, monkeypatch):
     handoff.write_text(handoff.read_text().replace(
         '## Open questions', '## Open questions\n\n## Unfiled\n- foo bar', 1))
     rc, out, _ = _run(['finish', _SLUG, '--log', 'x'])
-    assert (rc, out.strip()) == (1, "hq finish: untyped Unfiled bullet: '- foo bar'")
+    assert (rc, out.strip()) == (
+        1,
+        ("hq finish: untyped Unfiled bullet: '- foo bar'"
+         ' - prefix it decision:, constraint:, or dead-end:,'
+         ' move it into a cursor section, or rehome it to a sibling'))
 
 
 def test_finish_success_and_advisory_lines_have_their_documented_shape(
@@ -308,8 +324,12 @@ def test_finish_success_and_advisory_lines_have_their_documented_shape(
     rc, out, _ = _run(['finish', _SLUG, '--log', 'one'])
     assert rc == 0
     lines = out.splitlines()
-    assert 'advisory: unstamped notes x1: notes-x.md' in lines
-    assert 'advisory: label shorter than predecessor: SPEC.md' in lines
+    assert 'advisory: unstamped notes x1: notes-x.md - stamp each' in lines
+    assert (
+        'advisory: label shorter than predecessor: SPEC.md'
+        ' - check the new label kept every backticked token'
+        ' and s<n> reference the old one carried'
+        in lines)
     assert re.fullmatch(
         r'\S+/HANDOFF\.md  \d+ cursor lines  \d+ tokens'
         r' \(cursor \d+, read \d+, artifacts \d+, standing \d+\)', lines[-2])
@@ -330,11 +350,15 @@ def test_open_reports_each_drift_class_by_its_documented_line(tmp_path, monkeypa
     assert _run(['stamp', _SLUG, 'SPEC.md'])[0] == 0
     rc, out, _ = _run(['open', _SLUG])
     assert rc == 0
-    assert out.strip() == f'unfinished cycle 1 held by {_SESSION} on test-host'
+    assert out.strip() == (
+        f'unfinished cycle 1 held by {_SESSION} on test-host'
+        ' - the file may be behind its stamps; report it')
     assert _run(['finish', _SLUG, '--log', 'one'])[0] == 0
     assert _run(['open', _SLUG])[1] == ''
     _spec(folder, '# Spec\n\nchanged\n')
-    assert _run(['open', _SLUG])[1].strip() == 'sha moved since stamp: SPEC.md'
+    assert _run(['open', _SLUG])[1].strip() == (
+        'sha moved since stamp: SPEC.md'
+        ' - read the file, not the span alone')
     _spec(folder)
     handoff = folder / 'HANDOFF.md'
     handoff.write_text(handoff.read_text().replace('Cycle: 1', 'Cycle: 9', 1))
@@ -368,7 +392,10 @@ def test_open_reports_git_drift_against_the_header_sha(tmp_path, monkeypatch):
     subprocess.run(git + ['commit', '-qam', 'two'], check=True)
     out = _run(['open', _SLUG])[1]
     assert re.fullmatch(
-        rf'git drift: header \S+@{old_sha} -> now \S+@[0-9a-f]{{7}}\n', out), out
+        rf'git drift: header \S+@{old_sha} -> now \S+@[0-9a-f]{{7}}'
+        rf' - run git log --oneline {old_sha}\.\.'
+        r'HEAD, and -- <todo path> for each todo file the Plan points at\n',
+        out), out
 
 
 def test_read_and_diff_refusals_print_their_documented_lines(tmp_path, monkeypatch):
@@ -382,23 +409,33 @@ def test_read_and_diff_refusals_print_their_documented_lines(tmp_path, monkeypat
     _run(['begin', _SLUG])
     _spec(folder)
     rc, out, _ = _run(['read', _SLUG, 'ghost.md'])
-    assert (rc, out.strip()) == (1, 'hq read: ghost.md not in ledger')
+    assert (rc, out.strip()) == (
+        1, 'hq read: ghost.md not in ledger - read it whole by hand')
     assert _run(['stamp', _SLUG, 'SPEC.md', '--where', 'Ghost'])[0] == 0
     rc, out, _ = _run(['read', _SLUG, 'SPEC.md'])
-    assert (rc, out.strip()) == (0, '? unresolved: Ghost')
+    assert (rc, out.strip()) == (
+        0,
+        ('? unresolved: Ghost'
+         ' - read the file whole when no span printed above'))
     (folder / 'SPEC.md').unlink()
     rc, out, _ = _run(['read', _SLUG, 'SPEC.md'])
-    assert (rc, out.strip()) == (1, 'hq read: SPEC.md not on disk')
+    assert (rc, out.strip()) == (
+        1,
+        ('hq read: SPEC.md not on disk'
+         ' - re-point, supersede, or archive its row at the next write'))
     rc, out, _ = _run(['diff', _SLUG, '4', '5'])
-    assert (rc, out.strip()) == (1, 'hq diff: c04.md not found')
+    assert (rc, out.strip()) == (
+        1,
+        'hq diff: c04.md not found - that cycle was never finished here')
 
 
-def test_the_example_file_in_the_skill_is_the_scripts_own_output(
+def test_the_reference_example_file_is_the_scripts_own_output(
         tmp_path, monkeypatch):
-    """The fenced example handoff equals a real three-cycle run.
+    """The fenced example in reference/example-handoff.md equals a real
+    three-cycle run.
 
     Mutation: a renderer change - a column separator, the Log line shape,
-    the header form, the standing id scheme - not mirrored in the skill.
+    the header form, the standing id scheme - not mirrored in the example.
     Oracle: hq.py run on a synthetic git repo with the example's inputs;
     only the repo path, the git sha, and the block shas are normalized.
     """
@@ -451,10 +488,10 @@ def test_the_example_file_in_the_skill_is_the_scripts_own_output(
     assert hq.main([
         'note', slug, 'dead-end', '--headline', 'httpx event hooks for auto-refresh',
         'A hook cannot retry the original request.']) == 0
-    skill_text = SKILL.read_text()
-    fence_start = skill_text.index('# Handoff: auth-token-refresh')
-    fence_end = skill_text.index('```', fence_start)
-    example = skill_text[fence_start:fence_end].rstrip('\n')
+    example_text = EXAMPLE.read_text()
+    fence_start = example_text.index('# Handoff: auth-token-refresh')
+    fence_end = example_text.index('```', fence_start)
+    example = example_text[fence_start:fence_end].rstrip('\n')
     cursor_start = example.index('## Task')
     cursor_end = example.index('<!-- hq:read')
     cursor = example[cursor_start:cursor_end].rstrip('\n') + (
@@ -505,8 +542,11 @@ def test_finish_advises_when_the_artifacts_block_is_over_its_cap(
                  '--label', 'a note'])[0] == 0
     rc, out, _ = _run(['finish', _SLUG, '--log', 'forty-one'])
     assert rc == 0
-    assert ('advisory: artifacts over the 40-line cap by 1, folded into the counts'
-            in out.splitlines())
+    assert (
+        'advisory: artifacts over the 40-line cap by 1, folded into the counts'
+        ' - re-grade or supersede rows, or read them all with'
+        f' hq artifacts {_SLUG}'
+        in out.splitlines())
     block = hq.split_handoff((folder / 'HANDOFF.md').read_text())['blocks']['artifacts']
     assert sum('  other  mention  ' in ln for ln in block.splitlines()) == 40
 
@@ -550,7 +590,11 @@ def test_finish_names_each_previous_cursor_line_nothing_now_carries(
     rc, out, _ = _run(['finish', _SLUG, '--log', 'two'])
     assert rc == 0
     lines = out.splitlines()
-    assert 'advisory: 2 cursor lines from c01 not carried' in lines
+    assert (
+        'advisory: 2 cursor lines from c01 not carried'
+        ' - confirm each was settled or moved, else carry it forward'
+        ' or rehome it; hq diff msg-slug 1 2 shows the whole change'
+        in lines)
     assert '  not carried: Wire refresh_token() into the 401 branch.' in lines
     assert '  not carried: - Verified: refresh round-trips against staging.' in lines
     assert sum(ln.startswith('  not carried:') for ln in lines) == 2
@@ -606,9 +650,12 @@ def test_open_names_a_folder_path_under_another_directory(tmp_path, monkeypatch)
           f'It lives in src/{_SLUG}/ and its tests in tests/{_SLUG}/.'])
     rc, out, _ = _run(['open', _SLUG])
     assert rc == 0
+    _stale_tail = (
+        ' - correct it at the next write, inside a cycle, never in'
+        ' HANDOFF.md outside one; hq help stale-path has the steps')
     assert [ln for ln in out.splitlines() if 'stale folder path' in ln] == [
-        f'stale folder path in HANDOFF.md: working/{_SLUG}/ x2',
-        f'stale folder path in standing.md: working/{_SLUG}/ x1',
+        f'stale folder path in HANDOFF.md: working/{_SLUG}/ x2{_stale_tail}',
+        f'stale folder path in standing.md: working/{_SLUG}/ x1{_stale_tail}',
         ]
 
 
@@ -630,21 +677,25 @@ def test_open_stops_counting_a_stale_path_once_its_item_is_superseded(
           f'Under working/{_SLUG}/notes-crew.md.'])
     _run(['note', _SLUG, 'constraint', '--headline', 'Keep the ledger',
           f'Under working/{_SLUG}/ledger.tsv.'])
+
     def stale(out):
         return [ln for ln in out.splitlines() if 'stale folder path' in ln]
 
+    _stale_tail = (
+        ' - correct it at the next write, inside a cycle, never in'
+        ' HANDOFF.md outside one; hq help stale-path has the steps')
     assert stale(_run(['open', _SLUG])[1]) == [
-        f'stale folder path in standing.md: working/{_SLUG}/ x2']
+        f'stale folder path in standing.md: working/{_SLUG}/ x2{_stale_tail}']
     _run(['note', _SLUG, 'constraint', '--headline', 'Keep the crew notes',
           f'Under .handoff/{_SLUG}/notes-crew.md, moved from working/{_SLUG}/.'])
     assert _run(['supersede', _SLUG, 'c01', 'c03'])[0] == 0
     assert stale(_run(['open', _SLUG])[1]) == [
-        f'stale folder path in standing.md: working/{_SLUG}/ x2']
+        f'stale folder path in standing.md: working/{_SLUG}/ x2{_stale_tail}']
     _run(['note', _SLUG, 'constraint', '--headline', 'Keep the ledger',
           f'Under .handoff/{_SLUG}/ledger.tsv.'])
     assert _run(['supersede', _SLUG, 'c02', 'c04'])[0] == 0
     assert stale(_run(['open', _SLUG])[1]) == [
-        f'stale folder path in standing.md: working/{_SLUG}/ x1']
+        f'stale folder path in standing.md: working/{_SLUG}/ x1{_stale_tail}']
     _run(['note', _SLUG, 'constraint', '--headline', 'Keep the crew notes',
           f'Under .handoff/{_SLUG}/notes-crew.md.'])
     assert _run(['supersede', _SLUG, 'c03', 'c05'])[0] == 0
@@ -673,7 +724,12 @@ def test_shorter_label_advisory_fires_only_in_the_cycle_that_shortened_it(
     assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'short'])[0] == 0
     rc, out, _ = _run(['finish', _SLUG, '--log', 'one'])
     assert rc == 0
-    assert 'advisory: label shorter than predecessor: SPEC.md' in out.splitlines()
+    _lbl_short_tail = (
+        ' - check the new label kept every backticked token'
+        ' and s<n> reference the old one carried')
+    assert (
+        f'advisory: label shorter than predecessor: SPEC.md{_lbl_short_tail}'
+        in out.splitlines())
     assert _run(['begin', _SLUG])[0] == 0
     rc, out, _ = _run(['finish', _SLUG, '--log', 'two'])
     assert rc == 0
@@ -684,4 +740,6 @@ def test_shorter_label_advisory_fires_only_in_the_cycle_that_shortened_it(
     assert _run(['stamp', _SLUG, 'SPEC.md', '--label', 'ab'])[0] == 0
     rc, out, _ = _run(['finish', _SLUG, '--log', 'three'])
     assert rc == 0
-    assert 'advisory: label shorter than predecessor: SPEC.md' in out.splitlines()
+    assert (
+        f'advisory: label shorter than predecessor: SPEC.md{_lbl_short_tail}'
+        in out.splitlines())

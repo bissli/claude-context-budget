@@ -1297,7 +1297,9 @@ def test_finish_flags_a_one_line_span_ended_by_a_same_level_heading(
     flagged = [ln for ln in capsys.readouterr().out.splitlines()
                if 'one-line span' in ln]
     assert flagged == [
-        'advisory: one-line span at notes-wrap.md:3; a wrapped heading?']
+        ('advisory: one-line span at notes-wrap.md:3; a wrapped heading?'
+         ' - anchor the last wrapped line, or join the heading'
+         ' where the file may be edited')]
 
 
 def test_key_files_continuation_with_one_space_joins_the_label(
@@ -1382,8 +1384,8 @@ def test_adopt_joins_a_wrapped_lead_in_sentence_into_one_unfiled_bullet(
         'Keep the retry ceiling at four attempts.']
     text = (folder / 'HANDOFF.md').read_text()
     assert [ln for ln in text.splitlines() if ln.startswith('- unfiled: ')] == [
-        '- unfiled: These rulings govern the loader and survive every rewrite'
-        ' of the fetch path, so read them before touching it.',
+        ('- unfiled: These rulings govern the loader and survive every rewrite'
+         ' of the fetch path, so read them before touching it.'),
         '- unfiled: Newer rulings sit below.',
     ]
 
@@ -2448,7 +2450,7 @@ def test_work_list_caps_names_and_judges_presence_on_live_rows_only(
     line = next(ln for ln in out.splitlines() if ln.startswith('  unstamped notes x7: '))
     names, tail = line[len('  unstamped notes x7: '):].split(' ... ')
     assert len(names.split(', ')) == 5
-    assert tail == 'and 2 more'
+    assert tail == 'and 2 more - stamp each'
     assert 'conflicted copy' not in names
     assert '  conflicted copy: notes-x (conflicted copy 2026).md' in out
     assert 'missing live' not in out
@@ -2589,3 +2591,42 @@ def test_a_kind_declared_draft_is_gated_like_a_spec(tmp_path, monkeypatch):
     row = dict(zip(hq.LEDGER_FIELDS, lines[-1].split('\t')))
     assert (row['kind'], row['status'], row['read_before']) == ('draft', 'live', 'always')
     assert hq.main(['stamp', _SLUG, 'plan.txt', '--read-before', 'never']) == 1
+
+
+def test_help_with_no_topic_lists_every_key(capsys):
+    """Hq help with no topic prints one line per HELP_TOPICS key, exit 0.
+
+    Mutation: a topic added to HELP_TOPICS but dropped from the listing
+    loop, so the agent cannot discover it by running help alone.
+    Oracle: the dict's keys, in insertion order, one per output line.
+    """
+    rc = hq.main(['help'])
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert rc == 0
+    assert len(lines) == len(hq.HELP_TOPICS)
+    for line, key in zip(lines, hq.HELP_TOPICS):
+        assert line.startswith(f'hq help {key}: ')
+
+
+def test_help_with_known_topic_prints_body_and_with_unknown_exits_2(capsys):
+    """Hq help anchors prints HELP_TOPICS['anchors'] verbatim, exit 0;
+    hq help nope exits 2 and names the four topics.
+
+    Mutation: the unknown-topic branch returning 0, or the topic body
+    printed through a formatter that re-wraps it.
+    Oracle: the constant itself for the known case; exit 2 and the
+    topic list for the unknown case.
+    """
+    rc = hq.main(['help', 'anchors'])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.rstrip('\n') == hq.HELP_TOPICS['anchors']
+
+    rc = hq.main(['help', 'nope'])
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert 'anchors' in out
+    assert 'kinds' in out
+    assert 'rules' in out
+    assert 'stale-path' in out
