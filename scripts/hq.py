@@ -2485,6 +2485,12 @@ def _verb_adopt(folder: pathlib.Path, anch: dict, argv: argparse.Namespace) -> i
     cursor_parts: list[str] = []
     for h in ['Task', 'Now', 'Plan', 'State', 'Environment', 'Open questions']:
         body = '\n'.join(sections_raw.get(h, [])).strip()
+        # The header tail is a repo state the thread wrote by hand;
+        # finish rewrites the header, so the cursor is its live home and
+        # the manifest note its archive.
+        if h == 'Environment' and header_tail:
+            tail_body = '\n'.join(f'- {ln}' for ln in header_tail)
+            body = f'{body}\n{tail_body}' if body else tail_body
         cursor_parts.append(f'## {h}\n{body}' if body else f'## {h}')
 
     unfiled_parts: list[str] = [

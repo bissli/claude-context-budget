@@ -1355,6 +1355,38 @@ def test_adopt_files_a_lead_in_sentence_above_the_first_bullet_under_unfiled(
     assert 'conservation: every original line carried' in capsys.readouterr().out
 
 
+def test_adopt_files_the_wrapped_header_tail_under_environment(
+        tmp_path, monkeypatch, capsys):
+    """The lines continuing a wrapped header land under ## Environment too.
+
+    Mutation: the tail appended to the manifest note only, so the repo
+    state a no-git thread recorded in its header leaves the live file at
+    adopt and no verb ever shows it again.
+    Oracle: the fixture's continuation line read back verbatim as a
+    bullet after the section's own line in the ## Environment body adopt
+    wrote, with the manifest note unchanged.
+    """
+    folder = _new_root(tmp_path, monkeypatch)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'HANDOFF.md').write_text(
+        f'# Handoff: {_SLUG}\n\n'
+        'Written: 2026-09-01 | Cycle: 3 | loader-svc @ aaa1111 +3\n'
+        'parser-lib @ bbb2222 dirty 4 | render-kit @ ccc3333\n\n'
+        '## Task\nx\n\n## Environment\nServers: box-one.\n\n'
+        '## Log\n- 2026-09-01: started\n')
+
+    assert hq.main(['adopt', _SLUG]) == 0
+
+    text = (folder / 'HANDOFF.md').read_text()
+    env = text.split('## Environment\n', 1)[1].split('\n\n## ', 1)[0]
+    assert env == (
+        'Servers: box-one.\n- parser-lib @ bbb2222 dirty 4 | render-kit @ ccc3333')
+    manifest = hq._read_tsv(folder / 'cycles' / 'manifest.tsv', hq.MANIFEST_FIELDS)
+    assert (' | header: parser-lib @ bbb2222 dirty 4 | render-kit @ ccc3333'
+            in manifest[-1]['note'])
+    assert 'conservation: every original line carried' in capsys.readouterr().out
+
+
 def test_adopt_headline_ends_at_a_sentence_not_a_dot(tmp_path, monkeypatch):
     """A plain item's headline is its first sentence, dots inside words kept.
 

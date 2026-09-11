@@ -272,8 +272,9 @@ How to read the generated blocks:
   as adopt left them, and `rewrite_sha` names the HANDOFF.md adopt
   wrote. A `Written:` header wrapped over several lines - the lines
   under it up to the next blank line or heading - follows the
-  provenance as one `header: <text>` item, since `finish` rewrites the
-  header from the git state.
+  provenance as one `header: <text>` item and is filed, one bullet per
+  line, at the end of `## Environment` in the cursor `adopt` writes,
+  since `finish` rewrites the header from the git state.
 
 Rules:
 
@@ -698,7 +699,9 @@ Converge the form, destroy no content, in this order:
    `standing.md`, one item per bullet or unindented line; a sentence
    above the first bullet of a bulleted section introduces the bullets,
    is no item, and lands under `## Unfiled`); and `## Log`
-   (carried in the manifest row). Map every other foreign section to
+   (carried in the manifest row). The lines that wrap a `Written:`
+   header land as bullets under `## Environment`, to keep or prune
+   there. Map every other foreign section to
    the cursor section carrying the same kind of fact - Task, Now, Plan,
    State, Environment, Open questions - and keep every fact. A
    directive the file quotes - a reading order, a backup or worktree
