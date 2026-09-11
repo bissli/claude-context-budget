@@ -24,6 +24,10 @@ Notes
 - Evidence of a read is the Read tool, a read verb in a Bash command, or
   an ``hq read`` receipt. A path named to ``ls``, ``wc``, or ``grep``
   was listed or searched, not read.
+- A write is exempt when one of its targets resolves inside the armed
+  folder from the payload's cwd. A ``cd`` inside the command and a
+  shell variable holding the path are not seen, so such a write still
+  reports.
 """
 
 import json
@@ -55,6 +59,9 @@ _NULL_REDIRECT = re.compile(r'(?:\d|&)?>\s*/dev/null')
 _INPLACE = re.compile(r'\bsed\s+-[a-zA-Z]*i|\bsed\s+--in-place')
 _WRITE_VERB = re.compile(r'\btee\s|\bgit\s+add\b|\bgit\s+commit\b')
 _READ_VERB = re.compile(r'\b(?:cat|head|tail|less)\s|\bsed\s+-n\b')
+# A redirect's target is the one word after `>`, `>>`, or the
+# noclobber form `>|`, cut at the shell punctuation that ends it.
+_REDIRECT_TARGET = re.compile(r'>>?\|?\s*([^\s;|&()<>]+)')
 # A slug is one path component of letters, digits, '.', '_', and
 # '-', so the class ends the capture at shell punctuation and a
 # closing quote: `open demo; echo` arms on `demo`, not `demo;`.
@@ -261,7 +268,7 @@ def gate(payload: dict[str, Any]) -> int:
         named = str(fields.get(WRITE_TOOL_TARGETS[tool]) or '')
         if not named:
             return 0
-        target = pathlib.Path(named).expanduser()
+        target = pathlib.Path(os.path.expanduser(named))
         if not target.is_absolute():
             target = pathlib.Path(cwd) / target
         handoffs = os.path.normpath(str(root / name)) + os.sep
@@ -323,22 +330,39 @@ def gate(payload: dict[str, Any]) -> int:
     # Notes:
     # - A write inside the folder is the handoff's own bookkeeping, so
     #   the folder is exempt as a write target and never as a read
-    #   source: the prefix must follow a redirect, an in-place edit, or
-    #   a write verb.
+    #   source. A target is the word after a redirect, or a non-flag
+    #   word of an in-place edit or a write verb up to the end of its
+    #   shell segment.
+    # - A target that spells the folder path is exempt as written, so
+    #   `$ROOT/.handoff/x/f` still counts. Every other target is joined
+    #   to cwd when relative and normalized: a bare `smoke.log` written
+    #   from inside the folder is exempt, as is the folder itself
+    #   (`git add .` run from it), and `../../src/f` written from
+    #   there is not.
+    # - os.path.expanduser leaves `~nouser/f` as written where
+    #   pathlib's raises, and a raise here would silence the gate.
     # - A quoted target keeps its text while a quoted operator loses
     #   its angle brackets, so `> ".handoff/x/f"` counts as a write into
     #   the folder and `grep '>' .handoff/x/f > out` does not.
-    if folder is not None and f'{name}/{folder.name}/' in command:
+    if folder is not None and tool == 'Bash':
         text = _QUOTED.sub(
             lambda m: re.sub(r'[<>]', ' ', m.group(0)[1:-1]),
             _strip_heredocs(command))
         text = _NULL_REDIRECT.sub(' ', _FD_REDIRECT.sub(' ', text))
+        targets = [m.group(1) for m in _REDIRECT_TARGET.finditer(text)]
+        for verb in [*_INPLACE.finditer(text), *_WRITE_VERB.finditer(text)]:
+            segment = _SEGMENT_SPLIT.split(text[verb.end():])[0]
+            targets += [t for t in segment.split() if not t.startswith('-')]
         prefix = f'{name}/{folder.name}/'
-        operator_ends = [m.end() for m in re.finditer(r'>>?', text)]
-        operator_ends += [m.end() for m in _INPLACE.finditer(text)]
-        operator_ends += [m.end() for m in _WRITE_VERB.finditer(text)]
-        if any(prefix in text[end:] for end in operator_ends):
-            folder = None
+        inside = os.path.normpath(str(folder)) + os.sep
+        for target in targets:
+            resolved = pathlib.Path(os.path.expanduser(target))
+            if not resolved.is_absolute():
+                resolved = pathlib.Path(cwd) / resolved
+            if (prefix in target
+                or (os.path.normpath(str(resolved)) + os.sep).startswith(inside)):
+                folder = None
+                break
 
     message = ''
     reported = False

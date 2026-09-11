@@ -273,6 +273,138 @@ def test_gate_tee_into_folder_stays_exempt(monkeypatch, capsys, tmp_path):
     assert out == ''
 
 
+def test_gate_relative_target_inside_folder_stays_exempt(
+        monkeypatch, capsys, tmp_path):
+    """A bare-name target written from inside the folder stays silent.
+
+    Mutation: testing the command text alone for the `.handoff/<slug>/`
+    prefix, so a target that reaches the folder only through cwd
+    reports; or resolving redirect targets alone, so the sed -i and tee
+    spellings report.
+    Oracle: stdout empty for three in-folder spellings run from a
+    subdirectory of the folder, then stdout naming SPEC.md for the repo
+    write that follows in the same session, so no exempt write spent
+    the one-shot.
+    """
+    root, folder = _handoff_root(tmp_path)
+    inside = folder / 'evidence' / 'run-1'
+    inside.mkdir(parents=True)
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
+    tr = _transcript(tmp_path / 't.jsonl',
+                     [_bash(f'python3 scripts/hq.py open {_SLUG}')])
+    spellings = [
+        ('python probe.py run > smoke-A-0.log 2>&1 &\n'
+         'python probe.py run > smoke-C-0.log 2>&1 &\nwait'),
+        'sed -i s/a/b/ notes.md',
+        'echo x | tee -a notes.md',
+        ]
+    for command in spellings:
+        payload = _gate_payload(inside, tr, 'V9', 'Bash', {'command': command})
+        assert _run(monkeypatch, capsys, handoff_gate, payload) == '', command
+    payload = _gate_payload(root, tr, 'V9', 'Bash',
+                            {'command': 'echo x > src/out.txt'})
+    assert 'SPEC.md' in _run(monkeypatch, capsys, handoff_gate, payload)
+
+
+def test_gate_target_climbing_out_of_folder_fires(monkeypatch, capsys,
+                                                  tmp_path):
+    """A write run from inside the folder to a path outside it reports.
+
+    Mutation: exempting every write whose cwd is inside the folder; or
+    joining the target to cwd without normalizing, so
+    `<folder>/evidence/../../../src/out.txt` still carries the folder
+    prefix.
+    Oracle: stdout names SPEC.md for a `..` climb run from a
+    subdirectory of the folder.
+    """
+    root, folder = _handoff_root(tmp_path)
+    inside = folder / 'evidence'
+    inside.mkdir()
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
+    tr = _transcript(tmp_path / 't.jsonl',
+                     [_bash(f'python3 scripts/hq.py open {_SLUG}')])
+    payload = _gate_payload(inside, tr, 'V10', 'Bash',
+                            {'command': 'echo x > ../../../src/out.txt'})
+    assert 'SPEC.md' in _run(monkeypatch, capsys, handoff_gate, payload)
+
+
+def test_gate_folder_mention_after_a_redirect_elsewhere_fires(
+        monkeypatch, capsys, tmp_path):
+    """A folder path later on the line exempts no write before it.
+
+    Mutation: scanning all text after the operator or the verb for the
+    folder prefix instead of the target words, so `> /tmp/out.txt; ls
+    .handoff/<slug>/` and `git add /tmp/out.txt; ls .handoff/<slug>/`
+    are exempt although their one write lands outside the folder.
+    Oracle: stdout names SPEC.md for both spellings, each in a fresh
+    session; the write's target is /tmp/out.txt.
+    """
+    root, folder = _handoff_root(tmp_path)
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
+    tr = _transcript(tmp_path / 't.jsonl',
+                     [_bash(f'python3 scripts/hq.py open {_SLUG}')])
+    spellings = ['echo x > /tmp/out.txt', 'git add /tmp/out.txt']
+    for n, write in enumerate(spellings):
+        payload = _gate_payload(
+            root, tr, f'V12{n}', 'Bash',
+            {'command': f'{write}; ls .handoff/{_SLUG}/'})
+        out = _run(monkeypatch, capsys, handoff_gate, payload)
+        assert 'SPEC.md' in out, write
+
+
+def test_gate_folder_boundary_is_the_armed_folder_alone(monkeypatch, capsys,
+                                                        tmp_path):
+    """The exemption covers the armed folder itself and no sibling.
+
+    Mutation: dropping the trailing separator from the folder path, so
+    `.handoff/<slug>-2/f` is exempt; or from the resolved target, so
+    `git add .` run from the folder reports; or dropping the literal
+    prefix fast path, so `$ROOT/.handoff/<slug>/f` reports.
+    Oracle: stdout empty for the folder itself as a target, spelled
+    `git add .` from the folder and `git add .handoff/<slug>` from the
+    root, and for a redirect to `$ROOT/.handoff/<slug>/f`; stdout
+    naming SPEC.md for a redirect into `.handoff/<slug>-2/`.
+    """
+    root, folder = _handoff_root(tmp_path)
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
+    tr = _transcript(tmp_path / 't.jsonl',
+                     [_bash(f'python3 scripts/hq.py open {_SLUG}')])
+    exempt = [
+        (folder, 'git add .'),
+        (root, f'git add .handoff/{_SLUG}'),
+        (root, f'echo x > $ROOT/.handoff/{_SLUG}/f'),
+        ]
+    for cwd, command in exempt:
+        payload = _gate_payload(cwd, tr, 'V14', 'Bash', {'command': command})
+        assert _run(monkeypatch, capsys, handoff_gate, payload) == '', command
+    payload = _gate_payload(root, tr, 'V14', 'Bash',
+                            {'command': f'echo x > .handoff/{_SLUG}-2/f'})
+    assert 'SPEC.md' in _run(monkeypatch, capsys, handoff_gate, payload)
+
+
+def test_gate_reads_a_noclobber_target_and_survives_a_tilde(
+        monkeypatch, capsys, tmp_path):
+    """A `>|` target is read, and a `~user` target never crashes the gate.
+
+    Mutation: the redirect regex without its optional `|`, so `echo x >|
+    smoke.log` run from the folder reports; or pathlib's expanduser in
+    place of os.path's, which raises on an unknown user and leaves the
+    gate silent for a repo write.
+    Oracle: stdout empty for `>| smoke.log` run from the folder; stdout
+    naming SPEC.md for `> ~nosuchuser42/out.log` run from the root.
+    """
+    root, folder = _handoff_root(tmp_path)
+    monkeypatch.setenv('HQ_STATE_DIR', str(tmp_path / 'state'))
+    tr = _transcript(tmp_path / 't.jsonl',
+                     [_bash(f'python3 scripts/hq.py open {_SLUG}')])
+    payload = _gate_payload(folder, tr, 'V15', 'Bash',
+                            {'command': 'echo x >| smoke.log'})
+    assert _run(monkeypatch, capsys, handoff_gate, payload) == ''
+    payload = _gate_payload(root, tr, 'V15', 'Bash',
+                            {'command': 'echo x > ~nosuchuser42/out.log'})
+    assert 'SPEC.md' in _run(monkeypatch, capsys, handoff_gate, payload)
+
+
 # --- The most recent open wins ---
 
 
