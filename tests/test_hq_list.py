@@ -78,10 +78,10 @@ def test_list_orders_newest_first(tmp_path, monkeypatch, capsys):
 
     rc, out, _ = _run(['list'], capsys)
     assert rc == 0
-    lines = [ln for ln in out.splitlines() if ln.strip()]
-    assert len(lines) == 2
-    assert lines[0].startswith('beta-second')
-    assert lines[1].startswith('alpha-first')
+    data_lines = out.splitlines()[2:]
+    assert len(data_lines) == 2
+    assert data_lines[0].startswith('beta-second')
+    assert data_lines[1].startswith('alpha-first')
 
 
 def test_list_count_limits_output(tmp_path, monkeypatch, capsys):
@@ -103,11 +103,11 @@ def test_list_count_limits_output(tmp_path, monkeypatch, capsys):
 
     rc1, out1, _ = _run(['list', '1'], capsys)
     assert rc1 == 0
-    assert len([ln for ln in out1.splitlines() if ln.strip()]) == 1
+    assert len(out1.splitlines()[2:]) == 1
 
     rc99, out99, _ = _run(['list', '99'], capsys)
     assert rc99 == 0
-    assert len([ln for ln in out99.splitlines() if ln.strip()]) == 3
+    assert len(out99.splitlines()[2:]) == 3
 
     rc0, out0, _ = _run(['list', '0'], capsys)
     assert rc0 == 2
@@ -144,9 +144,10 @@ def test_list_fields_conforming_file(tmp_path, monkeypatch, capsys):
 
     rc, out, _ = _run(['list'], capsys)
     assert rc == 0
-    line = out.strip()
-    # Fields: <slug>  <written>  <cycle>  <done>/<total>  <task>
-    assert line == f'{slug}  2026-09-01  c3  2/3  {task_line}'
+    # Skip header and separator; CYCLE and PROGRESS columns widen to fit
+    # their header labels (5 and 8 chars), so c3 pads to 5 and 2/3 to 8.
+    data_line = out.splitlines()[2]
+    assert data_line == f'{slug}  2026-09-01  c3     2/3       {task_line}'
 
 
 def test_list_no_plan_checkboxes_prints_dash(tmp_path, monkeypatch, capsys):
@@ -180,10 +181,9 @@ def test_list_no_plan_checkboxes_prints_dash(tmp_path, monkeypatch, capsys):
 
     rc, out, _ = _run(['list'], capsys)
     assert rc == 0
-    lines = [ln for ln in out.splitlines() if ln.strip()]
-    # noplan is newer, comes first; check both have '-' for progress.
-    for line in lines:
-        parts = line.split('  ')
+    # Skip header and separator; strip empty tokens from padding.
+    for line in out.splitlines()[2:]:
+        parts = [p.strip() for p in line.split('  ') if p.strip()]
         assert parts[3] == '-', f'expected - for progress in: {line!r}'
 
 
@@ -206,11 +206,12 @@ def test_list_non_conforming_file_prints_dashes(tmp_path, monkeypatch, capsys):
 
     rc, out, _ = _run(['list'], capsys)
     assert rc == 0
-    line = out.strip()
-    assert line.startswith(slug)
-    parts = line.split('  ')
-    assert parts[1] == '-', f'expected - for date: {line!r}'
-    assert parts[2] == '-', f'expected - for cycle: {line!r}'
+    # Data starts at line index 2 (after header and separator).
+    data_line = out.splitlines()[2]
+    assert data_line.startswith(slug)
+    parts = [p.strip() for p in data_line.split('  ') if p.strip()]
+    assert parts[1] == '-', f'expected - for date: {data_line!r}'
+    assert parts[2] == '-', f'expected - for cycle: {data_line!r}'
 
 
 def test_list_no_handoff_prints_message_and_returns_0(tmp_path, monkeypatch, capsys):
@@ -279,7 +280,8 @@ def test_list_breaks_mtime_ties_by_slug(tmp_path, monkeypatch, capsys):
         os.utime(h, (1500000, 1500000))
     rc, out, _ = _run(['list'], capsys)
     assert rc == 0
-    assert [ln.split('  ')[0] for ln in out.splitlines()] == sorted(slugs)
+    data_lines = out.splitlines()[2:]
+    assert [ln.split('  ')[0].strip() for ln in data_lines] == sorted(slugs)
 
 
 def test_list_skips_a_fifo_and_a_directory_named_handoff(
@@ -306,7 +308,8 @@ def test_list_skips_a_fifo_and_a_directory_named_handoff(
     assert not worker.is_alive(), 'list blocked on the FIFO'
     out, _ = capsys.readouterr()
     assert result == [0]
-    assert [ln.split('  ')[0] for ln in out.splitlines()] == ['ok-slug']
+    data_lines = out.splitlines()[2:]
+    assert [ln.split('  ')[0].strip() for ln in data_lines] == ['ok-slug']
 
 
 def test_list_reports_an_unreadable_handoff_and_goes_on(
@@ -337,8 +340,10 @@ def test_list_reports_an_unreadable_handoff_and_goes_on(
     rc, out, _ = _run(['list'], capsys)
     assert rc == 0
     assert out.splitlines() == [
-        'locked  -  -  -  unreadable: Permission denied',
-        'open-one  -  -  -  -',
+        'SLUG      WRITTEN  CYCLE  PROGRESS  TASK',
+        '----------------------------------------',
+        'locked    -        -      -         unreadable: Permission denied',
+        'open-one  -        -      -         -',
         ]
 
 
@@ -349,7 +354,8 @@ def test_list_parses_task_plan_and_block_edges(tmp_path, monkeypatch, capsys):
     Mutation: the task == '-' guard dropped (last line wins); the heading
     .strip() dropped ('## Plan   ' counts nothing); the '<!-- hq:' section
     clear dropped (the block's checkbox counts).
-    Oracle: the exact line 'edges  2026-09-03  c4  1/2  First line.'.
+    Oracle: the exact data line 'edges  2026-09-03  c4     1/2       First line.'
+    (CYCLE and PROGRESS pad to their header widths, 5 and 8).
     """
     root = _new_root(tmp_path, monkeypatch)
     handoff_root = root / '.handoff'
@@ -366,4 +372,4 @@ def test_list_parses_task_plan_and_block_edges(tmp_path, monkeypatch, capsys):
         encoding='utf-8')
     rc, out, _ = _run(['list'], capsys)
     assert rc == 0
-    assert out.strip() == 'edges  2026-09-03  c4  1/2  First line.'
+    assert out.splitlines()[2] == 'edges  2026-09-03  c4     1/2       First line.'

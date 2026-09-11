@@ -4258,12 +4258,13 @@ def _verb_list(root: pathlib.Path, argv: argparse.Namespace) -> int:
     if not files:
         print(f'hq list: no handoff under {handoffs}')
         return 0
+    rows: list[tuple[str, str, str, str, str]] = []
     for path in files[:count]:
         try:
             text = path.read_text(encoding='utf-8-sig', errors='replace')
         except OSError as exc:
             reason = exc.strerror or type(exc).__name__
-            print(f'{path.parent.name}  -  -  -  unreadable: {reason}')
+            rows.append((path.parent.name, '-', '-', '-', f'unreadable: {reason}'))
             continue
         parsed = split_handoff(text)
         written = cycle = '-'
@@ -4289,7 +4290,28 @@ def _verb_list(root: pathlib.Path, argv: argparse.Namespace) -> int:
                     total += 1
                     done += box.group(1) != ' '
         progress = f'{done}/{total}' if total else '-'
-        print(f'{path.parent.name}  {written}  {cycle}  {progress}  {task}')
+        rows.append((path.parent.name, written, cycle, progress, task))
+    headers = ('SLUG', 'WRITTEN', 'CYCLE', 'PROGRESS')
+    col_widths = [
+        max(max(len(row[i]) for row in rows), len(headers[i]))
+        for i in range(4)
+        ]
+    header_line = (
+        f'{headers[0].ljust(col_widths[0])}  '
+        f'{headers[1].ljust(col_widths[1])}  '
+        f'{headers[2].ljust(col_widths[2])}  '
+        f'{headers[3].ljust(col_widths[3])}  '
+        f'TASK'
+        )
+    print(header_line)
+    print('-' * len(header_line))
+    for slug, written, cycle, progress, task in rows:
+        print(
+            f'{slug.ljust(col_widths[0])}  '
+            f'{written.ljust(col_widths[1])}  '
+            f'{cycle.ljust(col_widths[2])}  '
+            f'{progress.ljust(col_widths[3])}  '
+            f'{task}')
     return 0
 
 
