@@ -28,8 +28,8 @@ Notes
 
 import argparse
 import contextlib
-import difflib
 import datetime
+import difflib
 import fnmatch
 import hashlib
 import io
@@ -1811,9 +1811,9 @@ def resolve_work_dir(folder: pathlib.Path) -> tuple[str, list[str]]:
     pin = folder / _WORK_PIN_NAME
     if pin.is_dir():
         return '', [
-            f'{HANDOFF_DIRNAME}/{folder.name}/{_WORK_PIN_NAME} is a directory'
-            ' - the pin is a one-line file; move the folder under specs/,'
-            ' drafts/, notes/, or outputs/']
+            (f'{HANDOFF_DIRNAME}/{folder.name}/{_WORK_PIN_NAME} is a directory'
+             ' - the pin is a one-line file; move the folder under specs/,'
+             ' drafts/, notes/, or outputs/')]
     if not pin.is_file():
         return '', []
     value = ''
@@ -2555,7 +2555,8 @@ def read_first_data(
                 sizes[path] = ''
         if path not in sizes:
             tokens[path] = len(text) // 4
-            sizes[path] = f'{raw.count(b"\n")} lines, '
+            line_cnt = raw.count(b'\n')
+            sizes[path] = f'{line_cnt} lines, '
         # Under a thousand the count itself reads better than 0.3k.
         tok = tokens[path]
         sizes[path] += f'{tok / 1000:.1f}k tok' if tok >= 1000 else f'{tok} tok'
